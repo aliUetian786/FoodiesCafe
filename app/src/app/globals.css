@@ -1,0 +1,267 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap');
+
+:root {
+  /* Brand Palette Strictly from image.png:
+     1. Black: #1A1A1A
+     2. Dark Cocoa: #3D2C2E
+     3. Terracotta: #E07A5F
+     4. Cream White: #F4F1DE
+     5. Latte: #F2CC8F
+  */
+  --brand-black: #1A1A1A;
+  --brand-dark-cocoa: #3D2C2E;
+  --brand-terracotta: #E07A5F;
+  --brand-cream-white: #F4F1DE;
+  --brand-latte: #F2CC8F;
+
+  /* Theme: Light */
+  --primary: #E07A5F; /* Terracotta */
+  --primary-hover: #D0694E;
+  --primary-light: rgba(224, 122, 95, 0.14);
+  --primary-glow: rgba(224, 122, 95, 0.25);
+
+  --secondary: #3D2C2E; /* Dark Cocoa */
+  --accent: #F2CC8F; /* Latte */
+  --accent-light: rgba(242, 204, 143, 0.25);
+
+  --bg-main: #F4F1DE; /* Cream White */
+  --bg-card: #FFFFFF;
+  --bg-card-subtle: #EAE6D2;
+  --bg-card-hover: #F8F5E6;
+  --bg-input: #FFFFFF;
+  --border-color: #DFDAC5;
+  --border-light: #E7E2CE;
+
+  --text-main: #1A1A1A; /* Black */
+  --text-secondary: #3D2C2E; /* Dark Cocoa */
+  --text-muted: #7A6966;
+  --text-inverse: #F4F1DE;
+
+  --shadow-sm: 0 1px 3px rgba(61, 44, 46, 0.05);
+  --shadow-md: 0 6px 16px -2px rgba(61, 44, 46, 0.08);
+  --shadow-lg: 0 12px 30px -4px rgba(61, 44, 46, 0.12);
+  --shadow-xl: 0 20px 40px -8px rgba(61, 44, 46, 0.16);
+
+  /* Status Badges */
+  --status-placed-bg: #E8F0FE;
+  --status-placed-text: #1967D2;
+  --status-accepted-bg: #EDE7F6;
+  --status-accepted-text: #5E35B1;
+  --status-preparing-bg: rgba(224, 122, 95, 0.16);
+  --status-preparing-text: #E07A5F;
+  --status-ready-bg: #E6F4EA;
+  --status-ready-text: #137333;
+  --status-completed-bg: #EAE6D2;
+  --status-completed-text: #3D2C2E;
+  --status-cancelled-bg: #FCE8E6;
+  --status-cancelled-text: #C5221F;
+
+  /* Table Statuses */
+  --table-available-bg: #E6F4EA;
+  --table-available-text: #137333;
+  --table-reserved-bg: #EDE7F6;
+  --table-reserved-text: #5E35B1;
+  --table-occupied-bg: #FCE8E6;
+  --table-occupied-text: #C5221F;
+  --table-cleaning-bg: rgba(242, 204, 143, 0.35);
+  --table-cleaning-text: #3D2C2E;
+  --table-unavailable-bg: #EAE6D2;
+  --table-unavailable-text: #7A6966;
+
+  /* Payment Badges */
+  --pay-unpaid-bg: rgba(242, 204, 143, 0.45);
+  --pay-unpaid-text: #3D2C2E;
+  --pay-paid-bg: #E6F4EA;
+  --pay-paid-text: #137333;
+  --pay-refunded-bg: #EAE6D2;
+  --pay-refunded-text: #3D2C2E;
+
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-full: 9999px;
+}
+
+
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+  transition: background-color 0.2s ease, border-color 0.2s ease, color 0.15s ease;
+}
+
+html, body {
+  background-color: var(--bg-main);
+  color: var(--text-main);
+  font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+  overflow-x: clip;
+  max-width: 100vw;
+  width: 100%;
+  position: relative;
+}
+
+/* ========================================================
+   Customer Header Responsive Progressive Removal
+   Rule:
+   1. First remove SEARCH (width <= 1024px)
+   2. Then remove PROFILE (width <= 768px)
+   3. Then remove LOCATION (width <= 540px)
+   4. Keep ONLY: Slide bar (☰), Cafe Name, Cart Option.
+   Screen MUST NOT scroll to left or right at any width.
+   ======================================================== */
+
+/* 1. Remove search FIRST */
+@media (max-width: 1024px) {
+  .header-search-container {
+    display: none !important;
+  }
+}
+
+/* 2. Remove profile SECOND */
+@media (max-width: 768px) {
+  .header-profile-button {
+    display: none !important;
+  }
+}
+
+/* 3. Remove location THIRD */
+@media (max-width: 540px) {
+  .header-location-selector {
+    display: none !important;
+  }
+}
+
+/* Ultra-stable header layout for small screens */
+@media (max-width: 540px) {
+  .customer-header-inner {
+    padding: 0 14px !important;
+    gap: 8px !important;
+  }
+  .header-brand-title span {
+    font-size: 19px !important;
+  }
+  .header-cart-button {
+    width: 84px !important;
+  }
+  .header-cart-button button {
+    width: 84px !important;
+    font-size: 13px !important;
+    padding: 0 8px !important;
+  }
+}
+
+@media (max-width: 360px) {
+  .customer-header-inner {
+    padding: 0 10px !important;
+    gap: 6px !important;
+  }
+  .header-brand-title span {
+    font-size: 17px !important;
+  }
+  .header-menu-button {
+    width: 38px !important;
+    height: 38px !important;
+  }
+  .header-cart-button {
+    width: 76px !important;
+  }
+  .header-cart-button button {
+    width: 76px !important;
+    font-size: 12px !important;
+    padding: 0 6px !important;
+  }
+}
+
+h1, h2, h3, h4, h5, h6, .font-display {
+  font-family: 'Outfit', sans-serif;
+  letter-spacing: -0.02em;
+}
+
+a {
+  color: inherit;
+  text-decoration: none;
+}
+
+button {
+  font-family: inherit;
+  cursor: pointer;
+  border: none;
+  outline: none;
+  background: none;
+}
+
+/* Animations */
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulseGlow {
+  0%, 100% { box-shadow: 0 0 15px var(--primary-glow); }
+  50% { box-shadow: 0 0 28px var(--primary-glow); }
+}
+
+.animate-fade-in {
+  animation: fadeIn 0.25s ease-out forwards;
+}
+
+/* Custom Scrollbar */
+::-webkit-scrollbar {
+  width: 7px;
+  height: 7px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-main);
+}
+::-webkit-scrollbar-thumb {
+  background: var(--border-color);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+/* Global Print Styles: Hide all site elements, header, drawer, and background, print only the receipt */
+@media print {
+  body * {
+    visibility: hidden !important;
+  }
+  #printable-order-receipt,
+  #printable-order-receipt * {
+    visibility: visible !important;
+  }
+  #printable-order-receipt {
+    position: absolute !important;
+    left: 0 !important;
+    top: 0 !important;
+    width: 100% !important;
+    max-width: 580px !important;
+    margin: 0 auto !important;
+    padding: 24px !important;
+    border: 1px solid var(--border-color) !important;
+    box-shadow: none !important;
+    background: #FFFFFF !important;
+  }
+  .no-print {
+    display: none !important;
+  }
+}
+
+/* Dish button text responsive helpers */
+.dish-btn-text-desktop {
+  display: inline !important;
+}
+.dish-btn-text-mobile {
+  display: none !important;
+}
+@media (max-width: 640px) {
+  .dish-btn-text-desktop {
+    display: none !important;
+  }
+  .dish-btn-text-mobile {
+    display: inline !important;
+  }
+}
