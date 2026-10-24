@@ -75,7 +75,7 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
   }, []);
 
   // User auth state
-  const isLoggedIn = Boolean(currentUser && currentUser.name && currentUser.name !== 'Guest Customer' && currentUser.phone);
+  const isLoggedIn = Boolean(currentUser && currentUser.name && currentUser.name !== 'Guest Customer');
 
   // Checkout Stage Flow: 'order_review' -> 'fulfillment' -> 'details' -> 'branch_map' (Route & nearest branch) -> 'payment'
   const [checkoutStep, setCheckoutStep] = useState<'order_review' | 'auth' | 'fulfillment' | 'details' | 'branch_map' | 'payment'>('fulfillment');
@@ -195,7 +195,16 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
   // Reset steps and sync values when modal opens
   useEffect(() => {
     if (isOpen) {
-      setCheckoutStep(initialStep || 'order_review');
+      const isAlreadyLoggedIn = Boolean(
+        currentUser &&
+        currentUser.name &&
+        currentUser.name !== 'Guest Customer'
+      );
+      if (initialStep === 'auth' && isAlreadyLoggedIn) {
+        setCheckoutStep('fulfillment');
+      } else {
+        setCheckoutStep(initialStep || 'order_review');
+      }
       if (currentUser) {
         setGuestName(currentUser.name || '');
         setGuestPhone(currentUser.phone || '');
@@ -203,7 +212,7 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
         if (currentUser.phone) setDeliveryPhone(currentUser.phone);
       }
     }
-  }, [isOpen, initialStep, currentUser]);
+  }, [isOpen]);
 
   // Check for existing active orders from this customer for the current fulfillment type
   const cleanPhone = currentUser?.phone?.replace(/\s+/g, '');

@@ -38,8 +38,7 @@ export default function CustomerMainPage() {
     const isLoggedIn = Boolean(
       currentUser &&
       currentUser.name &&
-      currentUser.name !== 'Guest Customer' &&
-      currentUser.phone
+      currentUser.name !== 'Guest Customer'
     );
     setCheckoutInitialStep(isLoggedIn ? 'fulfillment' : 'auth');
     setCartOpen(true);

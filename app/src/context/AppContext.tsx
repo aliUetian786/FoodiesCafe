@@ -885,7 +885,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (savedUser) {
       try {
         const parsedUser = JSON.parse(savedUser);
-        if (parsedUser && parsedUser.name && parsedUser.name !== 'Guest Customer' && parsedUser.phone) {
+        if (parsedUser && parsedUser.name && parsedUser.name !== 'Guest Customer') {
           setCurrentUser(parsedUser);
         }
       } catch (e) {}
