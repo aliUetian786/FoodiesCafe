@@ -94,6 +94,7 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
   const [authOtpStep, setAuthOtpStep] = useState<'email' | 'otp'>('email');
   const [authOtpCode, setAuthOtpCode] = useState('');
   const [authSentOtp, setAuthSentOtp] = useState('');
+  const [authEmailToken, setAuthEmailToken] = useState('');
   const [authIsDevMode, setAuthIsDevMode] = useState(false);
   const [checkoutResendCountdown, setCheckoutResendCountdown] = useState(0);
   const [authLoading, setAuthLoading] = useState(false);
@@ -265,6 +266,7 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
       if (!res.ok) throw new Error(data.error || 'Failed to send verification code.');
 
       setAuthSentOtp(data.devCode || '');
+      if (data.emailToken) setAuthEmailToken(data.emailToken);
       setAuthIsDevMode(!!data.isDevMode);
       setCheckoutResendCountdown(30);
       setAuthOtpStep('otp');
@@ -322,6 +324,7 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
           action: 'verify',
           email: cleanEmail,
           code: authOtpCode.trim(),
+          emailToken: authEmailToken,
         }),
       });
 
@@ -1028,42 +1031,6 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
                           onChange={(e) => handleGuestEmailChange(e.target.value)}
                           placeholder="e.g. yourname@gmail.com"
                           required
-                          style={{
-                            border: 'none',
-                            outline: 'none',
-                            backgroundColor: 'transparent',
-                            fontSize: '13.5px',
-                            fontWeight: 650,
-                            color: 'var(--text-main)',
-                            width: '100%',
-                          }}
-                        />
-                      </div>
-                    </div>
-
-                    <div>
-                      <label style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
-                        Contact Mobile Number <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 500 }}>(For order & delivery updates)</span>
-                      </label>
-                      <div
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          backgroundColor: 'var(--bg-input)',
-                          border: '1px solid var(--border-color)',
-                          borderRadius: 'var(--radius-md)',
-                          padding: '10px 14px',
-                        }}
-                      >
-                        <span style={{ fontSize: '12.5px', fontWeight: 750, color: 'var(--text-muted)' }}>
-                          🇵🇰 +92
-                        </span>
-                        <input
-                          type="tel"
-                          value={guestPhone}
-                          onChange={(e) => handleGuestPhoneChange(e.target.value)}
-                          placeholder="300 1234567"
                           style={{
                             border: 'none',
                             outline: 'none',

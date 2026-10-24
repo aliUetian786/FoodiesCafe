@@ -2,10 +2,35 @@ import { NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
 import fs from 'fs';
 import path from 'path';
+import crypto from 'crypto';
+import db from '@/lib/db';
 
-// Temporary in-memory OTP store with 5-minute expiry
+// Temporary in-memory OTP store with 5-minute expiry (fallback for local dev)
 // Key: normalized email, Value: { code: string; expiresAt: number }
 const otpStore = new Map<string, { code: string; expiresAt: number }>();
+
+const OTP_SECRET = process.env.AUTH_SECRET || process.env.MAIL_ACCOUNT_KEY || 'foodies-cafe-otp-secret-key-2026';
+
+function generateSignedToken(email: string, code: string, expiresAt: number): string {
+  const payload = `${email.toLowerCase().trim()}:${code.trim()}:${expiresAt}`;
+  const hmac = crypto.createHmac('sha256', OTP_SECRET).update(payload).digest('hex');
+  return `${expiresAt}.${hmac}`;
+}
+
+function verifySignedToken(email: string, code: string, token?: string): boolean {
+  if (!token || !token.includes('.')) return false;
+  const [expiresAtStr, hmac] = token.split('.');
+  const expiresAt = Number(expiresAtStr);
+  if (isNaN(expiresAt) || Date.now() > expiresAt) return false;
+
+  const payload = `${email.toLowerCase().trim()}:${code.trim()}:${expiresAt}`;
+  const expectedHmac = crypto.createHmac('sha256', OTP_SECRET).update(payload).digest('hex');
+  try {
+    return crypto.timingSafeEqual(Buffer.from(hmac, 'hex'), Buffer.from(expectedHmac, 'hex'));
+  } catch (e) {
+    return false;
+  }
+}
 
 interface SmtpConfig {
   user: string;
@@ -164,7 +189,7 @@ export async function GET() {
 export async function POST(req: Request) {
   try {
     const body = await req.json();
-    const { action, email, code, clientMailConfig } = body;
+    const { action, email, code, emailToken, clientMailConfig } = body;
 
     // ========================================================
     // ACTION: SAVE SERVER CONFIG (Admin / Owner Settings)
@@ -355,28 +380,58 @@ export async function POST(req: Request) {
       }
 
       const inputCode = code.trim();
-      const stored = otpStore.get(normalizedEmail);
+      let isValid = false;
 
-      // Testing bypasses
-      const isMasterCode = inputCode === '1234' || inputCode === '5829';
-      const isStoredValid =
-        stored && stored.code === inputCode && Date.now() <= stored.expiresAt;
+      // 1. Master code bypass for demo / testing
+      if (inputCode === '1234' || inputCode === '5829') {
+        isValid = true;
+      }
 
-      if (!isStoredValid && !isMasterCode) {
-        if (stored && Date.now() > stored.expiresAt) {
-          otpStore.delete(normalizedEmail);
-          return NextResponse.json(
-            { error: 'Verification code has expired. Please request a new code.' },
-            { status: 400 }
-          );
+      // 2. Stateless HMAC signed token validation (100% resilient across serverless lambdas)
+      if (!isValid && emailToken && typeof emailToken === 'string') {
+        if (verifySignedToken(normalizedEmail, inputCode, emailToken)) {
+          isValid = true;
         }
+      }
+
+      // 3. PostgreSQL database OTP lookup
+      if (!isValid) {
+        try {
+          const dbRes = await db.query(
+            'SELECT code, expires_at FROM email_otps WHERE email = $1',
+            [normalizedEmail]
+          );
+          if (dbRes && dbRes.rows && dbRes.rows.length > 0) {
+            const row = dbRes.rows[0];
+            const exp = Number(row.expires_at);
+            if (row.code === inputCode && Date.now() <= exp) {
+              isValid = true;
+              // Clean up used OTP
+              await db.query('DELETE FROM email_otps WHERE email = $1', [normalizedEmail]);
+            }
+          }
+        } catch (dbErr) {
+          // DB query failed or table not initialized yet, fall through
+        }
+      }
+
+      // 4. In-memory fallback
+      if (!isValid) {
+        const stored = otpStore.get(normalizedEmail);
+        if (stored && stored.code === inputCode && Date.now() <= stored.expiresAt) {
+          isValid = true;
+          otpStore.delete(normalizedEmail);
+        }
+      }
+
+      if (!isValid) {
         return NextResponse.json(
           { error: 'Invalid verification code. Please check your email and try again.' },
           { status: 400 }
         );
       }
 
-      // Verification succeeded — cleanup
+      // Cleanup in-memory if present
       otpStore.delete(normalizedEmail);
 
       return NextResponse.json({
@@ -393,8 +448,28 @@ export async function POST(req: Request) {
       // Generate secure 4-digit OTP code
       const generatedCode = String(Math.floor(1000 + Math.random() * 9000));
       const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes validity
+      const emailToken = generateSignedToken(normalizedEmail, generatedCode, expiresAt);
 
       otpStore.set(normalizedEmail, { code: generatedCode, expiresAt });
+
+      // Save to PostgreSQL if available
+      try {
+        await db.query(`
+          CREATE TABLE IF NOT EXISTS email_otps (
+            email VARCHAR(255) PRIMARY KEY,
+            code VARCHAR(10) NOT NULL,
+            expires_at BIGINT NOT NULL
+          );
+        `);
+        await db.query(`
+          INSERT INTO email_otps (email, code, expires_at)
+          VALUES ($1, $2, $3)
+          ON CONFLICT (email) DO UPDATE
+          SET code = EXCLUDED.code, expires_at = EXCLUDED.expires_at;
+        `, [normalizedEmail, generatedCode, expiresAt]);
+      } catch (dbErr) {
+        // Non-blocking: signed token guarantees serverless verification even without DB
+      }
 
       const config = getDynamicMailConfig(clientMailConfig);
 
@@ -475,6 +550,7 @@ export async function POST(req: Request) {
           return NextResponse.json({
             success: true,
             isRealEmailSent: true,
+            emailToken,
             sender: config.user,
             message: `Verification code sent to ${normalizedEmail} from ${config.user}. Please check your inbox.`,
           });
@@ -490,6 +566,7 @@ export async function POST(req: Request) {
             success: true,
             isRealEmailSent: false,
             isDevMode: true,
+            emailToken,
             devCode: generatedCode,
             mailError: friendlyError,
             message: friendlyError,
@@ -510,6 +587,7 @@ export async function POST(req: Request) {
         success: true,
         isRealEmailSent: false,
         isDevMode: true,
+        emailToken,
         devCode: generatedCode,
         noKeyFound: true,
         message: `No mail account configured in .env. Using demo preview code: ${generatedCode}.`,

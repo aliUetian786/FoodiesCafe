@@ -17,6 +17,7 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ isOpen, 
   const [phone, setPhone] = useState('');
   const [otpCode, setOtpCode] = useState('');
   const [sentOtp, setSentOtp] = useState('');
+  const [emailToken, setEmailToken] = useState('');
   const [resendCountdown, setResendCountdown] = useState(0);
   const [loading, setLoading] = useState(false);
   const [isDevMode, setIsDevMode] = useState(false);
@@ -90,6 +91,7 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ isOpen, 
       }
 
       setSentOtp(data.devCode || '');
+      if (data.emailToken) setEmailToken(data.emailToken);
       setIsDevMode(!!data.isDevMode);
       setResendCountdown(30);
       setAuthStep('otp');
@@ -147,6 +149,7 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ isOpen, 
           action: 'verify',
           email: cleanEmail,
           code: otpCode.trim(),
+          emailToken,
         }),
       });
 
