@@ -74,8 +74,20 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
     }
   }, []);
 
-  // User auth state
-  const isLoggedIn = Boolean(currentUser && currentUser.name && currentUser.name !== 'Guest Customer');
+  // User auth state with React state + localStorage fallback
+  const isUserLoggedIn = Boolean(
+    (currentUser && currentUser.name && currentUser.name !== 'Guest Customer') ||
+    (typeof window !== 'undefined' && (() => {
+      try {
+        const saved = localStorage.getItem('foodies_customer_user');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          return parsed && parsed.name && parsed.name !== 'Guest Customer';
+        }
+      } catch (e) {}
+      return false;
+    })())
+  );
 
   // Checkout Stage Flow: 'order_review' -> 'fulfillment' -> 'details' -> 'branch_map' (Route & nearest branch) -> 'payment'
   const [checkoutStep, setCheckoutStep] = useState<'order_review' | 'auth' | 'fulfillment' | 'details' | 'branch_map' | 'payment'>('fulfillment');
@@ -196,23 +208,42 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
   useEffect(() => {
     if (isOpen) {
       const isAlreadyLoggedIn = Boolean(
-        currentUser &&
-        currentUser.name &&
-        currentUser.name !== 'Guest Customer'
+        (currentUser && currentUser.name && currentUser.name !== 'Guest Customer') ||
+        (typeof window !== 'undefined' && (() => {
+          try {
+            const saved = localStorage.getItem('foodies_customer_user');
+            if (saved) {
+              const parsed = JSON.parse(saved);
+              return parsed && parsed.name && parsed.name !== 'Guest Customer';
+            }
+          } catch (e) {}
+          return false;
+        })())
       );
-      if (initialStep === 'auth' && isAlreadyLoggedIn) {
-        setCheckoutStep('fulfillment');
+      if (initialStep === 'auth') {
+        if (isAlreadyLoggedIn) {
+          setCheckoutStep('fulfillment');
+        } else {
+          setCheckoutStep('auth');
+        }
       } else {
         setCheckoutStep(initialStep || 'order_review');
       }
-      if (currentUser) {
+      if (currentUser && currentUser.name && currentUser.name !== 'Guest Customer') {
         setGuestName(currentUser.name || '');
         setGuestPhone(currentUser.phone || '');
         if (currentUser.address) setDeliveryAddress(currentUser.address);
         if (currentUser.phone) setDeliveryPhone(currentUser.phone);
       }
     }
-  }, [isOpen]);
+  }, [isOpen, initialStep]);
+
+  // Automatically advance to fulfillment if user becomes authenticated while on auth step
+  useEffect(() => {
+    if (checkoutStep === 'auth' && isUserLoggedIn) {
+      setCheckoutStep('fulfillment');
+    }
+  }, [checkoutStep, isUserLoggedIn]);
 
   // Check for existing active orders from this customer for the current fulfillment type
   const cleanPhone = currentUser?.phone?.replace(/\s+/g, '');
@@ -359,7 +390,10 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
         ? `+92 ${cleanDigits.slice(0, 3)} ${cleanDigits.slice(3)}`
         : existingProfile?.phone || '+92 300 1234567';
 
-      const customerName = guestName.trim() || existingProfile?.name || cleanEmail.split('@')[0];
+      let customerName = guestName.trim() || existingProfile?.name || cleanEmail.split('@')[0];
+      if (!customerName || customerName.toLowerCase() === 'guest customer') {
+        customerName = cleanEmail.split('@')[0] || 'Valued Customer';
+      }
 
       const loggedUser = {
         id: existingProfile?.id || `cust-${Date.now().toString().slice(-6)}`,
@@ -388,7 +422,9 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
         title: 'Signed In Successfully! ✉️',
         message: existingProfile ? `Welcome back, ${customerName}!` : `Welcome to FoodiesCafe, ${customerName}!`,
       });
-      goToStep('fulfillment', 'forward');
+      setAuthOtpStep('email');
+      setAuthOtpCode('');
+      setCheckoutStep('fulfillment');
     } catch (err: any) {
       addToast({
         type: 'error',
@@ -415,6 +451,19 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
 
     const finalCoords = liveCoords || customerCoordinates || undefined;
 
+    let activeCustomer = currentUser;
+    if ((!activeCustomer || !activeCustomer.name || activeCustomer.name === 'Guest Customer') && typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('foodies_customer_user');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.name && parsed.name !== 'Guest Customer') {
+            activeCustomer = parsed;
+          }
+        }
+      } catch (e) {}
+    }
+
     placeOrder(
       orderType,
       orderType === 'dine_in' ? selectedTable : undefined,
@@ -424,6 +473,9 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
       selectedPaymentMode,
       undefined,
       {
+        customerId: activeCustomer?.id,
+        customerName: activeCustomer?.name,
+        customerPhone: activeCustomer?.phone,
         customerCoordinates: finalCoords,
       }
     );
@@ -912,7 +964,7 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
                     type="button"
                     disabled={cart.length === 0}
                     onClick={() => {
-                      if (!isLoggedIn) {
+                      if (!isUserLoggedIn) {
                         goToStep('auth', 'forward');
                       } else {
                         goToStep('fulfillment', 'forward');

@@ -172,7 +172,10 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ isOpen, 
         existingProfile = users.find((u) => u.email && u.email.toLowerCase() === cleanEmail);
       }
 
-      const customerName = name.trim() || existingProfile?.name || cleanEmail.split('@')[0];
+      let customerName = name.trim() || existingProfile?.name || cleanEmail.split('@')[0];
+      if (!customerName || customerName.toLowerCase() === 'guest customer') {
+        customerName = cleanEmail.split('@')[0] || 'Valued Customer';
+      }
       const customerPhone = phone.trim() || existingProfile?.phone || '+92 300 1234567';
 
       const loggedUser = {

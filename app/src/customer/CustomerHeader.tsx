@@ -191,7 +191,19 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
     setProfileModalOpen(false);
   };
 
-  const isLoggedIn = currentUser && currentUser.name && currentUser.name !== 'Guest Customer';
+  const isLoggedIn = Boolean(
+    (currentUser && currentUser.name && currentUser.name !== 'Guest Customer') ||
+    (typeof window !== 'undefined' && (() => {
+      try {
+        const saved = localStorage.getItem('foodies_customer_user');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          return parsed && parsed.name && parsed.name !== 'Guest Customer';
+        }
+      } catch (e) {}
+      return false;
+    })())
+  );
 
   // Sidebar navigation handler
   const handleSidebarNav = (view: string) => {

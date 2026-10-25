@@ -35,11 +35,22 @@ export default function CustomerMainPage() {
 
   // When clicking Proceed to Checkout from menu card: show login if guest, otherwise delivery options
   const handleProceedToCheckout = () => {
-    const isLoggedIn = Boolean(
+    let isLoggedIn = Boolean(
       currentUser &&
       currentUser.name &&
       currentUser.name !== 'Guest Customer'
     );
+    if (!isLoggedIn && typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('foodies_customer_user');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.name && parsed.name !== 'Guest Customer') {
+            isLoggedIn = true;
+          }
+        }
+      } catch (e) {}
+    }
     setCheckoutInitialStep(isLoggedIn ? 'fulfillment' : 'auth');
     setCartOpen(true);
   };

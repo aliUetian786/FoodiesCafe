@@ -574,7 +574,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const [currentRole, setCurrentRole] = useState<Role>('customer');
-  const [currentUser, setCurrentUser] = useState<User>(GUEST_CUSTOMER);
+  const [currentUser, setCurrentUser] = useState<User>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('foodies_customer_user');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.name && parsed.name !== 'Guest Customer') {
+            return parsed;
+          }
+        }
+      } catch (e) {}
+    }
+    return GUEST_CUSTOMER;
+  });
+
+  // Automatically keep foodies_customer_user synchronized in localStorage
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      if (currentUser && currentUser.name && currentUser.name !== 'Guest Customer') {
+        localStorage.setItem('foodies_customer_user', JSON.stringify(currentUser));
+      } else if (currentUser && currentUser.name === 'Guest Customer') {
+        localStorage.removeItem('foodies_customer_user');
+      }
+    } catch (e) {}
+  }, [currentUser]);
   const [currentBranchId, setCurrentBranchId] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       const manual = localStorage.getItem('foodies_customer_manual_branch');
