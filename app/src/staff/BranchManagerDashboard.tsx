@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
 import { ModalConfirmation } from '@/components/common/ModalConfirmation';
 import { Role } from '@/types/cafe';
@@ -55,18 +55,12 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
     setCurrentRole,
   } = useApp();
 
-  const branchRiders = users.filter(
-    (u) => u.role === 'delivery_staff' && (!u.branchId || u.branchId === currentBranch.id)
-  );
-
-  const branchDeliveryOrders = orders.filter(
-    (o) => o.type === 'delivery' && (!o.branchId || o.branchId === currentBranch.id) && o.status !== 'completed' && o.status !== 'cancelled'
-  );
-
-  // Timing settings form state
+  // Timing & distance settings form state
   const [fullEditWindow, setFullEditWindow] = useState(currentBranch.fullEditWindowMin);
   const [prepTimeEstimate, setPrepTimeEstimate] = useState(currentBranch.prepTimeEstimateMin);
   const [stopAddonsTime, setStopAddonsTime] = useState(currentBranch.stopAddOnsMinBeforeReady);
+  const [maxOrderDistance, setMaxOrderDistance] = useState(currentBranch.maxOrderDistanceKm ?? 50);
+  const [tableQrMaxDistance, setTableQrMaxDistance] = useState(currentBranch.tableQrMaxDistanceMeters ?? 300);
   const [isBusyMode, setIsBusyMode] = useState(currentBranch.isBusy);
   
   // Payment settings state per order type
@@ -79,9 +73,18 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
   const [paymentConfig, setPaymentConfig] = useState(defaultPaymentSettings);
   const [paymentOrderTypeTab, setPaymentOrderTypeTab] = useState<'dine_in' | 'takeaway' | 'delivery'>('dine_in');
 
+  useEffect(() => {
+    if (currentBranch.paymentSettings) {
+      const parsed = typeof currentBranch.paymentSettings === 'string'
+        ? JSON.parse(currentBranch.paymentSettings)
+        : currentBranch.paymentSettings;
+      setPaymentConfig(parsed);
+    }
+  }, [currentBranch.paymentSettings]);
+
   const handleTogglePaymentMode = (mode: 'COD' | 'Wallet' | 'Card' | 'Bank' | 'Installment') => {
     setPaymentConfig((prev) => {
-      const currentTabConfig = prev[paymentOrderTypeTab];
+      const currentTabConfig = prev[paymentOrderTypeTab] || { COD: true, Wallet: true, Card: true, Bank: true, Installment: false };
       const updated = {
         ...prev,
         [paymentOrderTypeTab]: {
@@ -91,6 +94,22 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
       };
       updateBranchPaymentSettings(currentBranch.id, updated);
       return updated;
+    });
+  };
+
+  const handleApplyToAllOrderTypes = () => {
+    const currentTabSettings = paymentConfig[paymentOrderTypeTab];
+    const updated = {
+      dine_in: { ...currentTabSettings },
+      takeaway: { ...currentTabSettings },
+      delivery: { ...currentTabSettings },
+    };
+    setPaymentConfig(updated);
+    updateBranchPaymentSettings(currentBranch.id, updated);
+    addToast({
+      type: 'success',
+      title: 'Settings Synced to All Order Types',
+      message: `Active payment options from ${paymentOrderTypeTab.replace('_', '-')} applied to Dine-In, Takeaway, and Delivery.`,
     });
   };
 
@@ -134,6 +153,8 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
       fullEditWindowMin: fullEditWindow,
       prepTimeEstimateMin: prepTimeEstimate,
       stopAddOnsMinBeforeReady: stopAddonsTime,
+      maxOrderDistanceKm: maxOrderDistance,
+      tableQrMaxDistanceMeters: tableQrMaxDistance,
       isBusy: isBusyMode,
     });
     setTimingConfirmOpen(false);
@@ -154,90 +175,6 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
-      {/* FAST PERFORMANCE BAR: SHOW TODAY ONLY & ON-DEMAND FETCH */}
-      <div
-        style={{
-          backgroundColor: 'var(--bg-card)',
-          borderRadius: 'var(--radius-lg)',
-          border: '1px solid var(--border-color)',
-          padding: '12px 20px',
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '12px',
-          boxShadow: 'var(--shadow-sm)',
-        }}
-      >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <span
-            style={{
-              padding: '4px 10px',
-              borderRadius: 'var(--radius-full)',
-              backgroundColor: hasLoadedOlderOrders ? 'rgba(37, 99, 235, 0.1)' : 'rgba(22, 163, 74, 0.1)',
-              color: hasLoadedOlderOrders ? '#2563EB' : '#16A34A',
-              fontSize: '12px',
-              fontWeight: 800,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-            }}
-          >
-            <span>{hasLoadedOlderOrders ? '📂 Full Historical Data' : '⚡ Fast Mode: Today Only'}</span>
-          </span>
-          <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-            {hasLoadedOlderOrders
-              ? `Loaded ${branchOrders.length} database order records. Detail operations view active.`
-              : `Showing details of today (${totalOrdersToday} orders). Older records are kept in database archive to keep web ultra-fast.`}
-          </span>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          {!hasLoadedOlderOrders ? (
-            <button
-              onClick={() => fetchOlderOrders()}
-              disabled={isFetchingOlderOrders}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '6px 14px',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: 'var(--bg-card-subtle)',
-                border: '1px solid var(--border-color)',
-                color: 'var(--primary)',
-                fontWeight: 750,
-                fontSize: '12.5px',
-                cursor: isFetchingOlderOrders ? 'not-allowed' : 'pointer',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              <span>{isFetchingOlderOrders ? '⏳ Fetching Records...' : '📂 Fetch Older Data ⬇'}</span>
-            </button>
-          ) : (
-            <button
-              onClick={() => filterOrdersToToday()}
-              disabled={isFetchingOlderOrders}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '6px 14px',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: 'var(--bg-card-subtle)',
-                border: '1px solid var(--border-color)',
-                color: 'var(--text-secondary)',
-                fontWeight: 700,
-                fontSize: '12.5px',
-                cursor: 'pointer',
-              }}
-            >
-              <span>Show Today Only ⚡</span>
-            </button>
-          )}
-        </div>
-      </div>
-
       {/* TODAY'S OVERVIEW CARDS (PRD Requirement) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(210px, 1fr))', gap: '16px' }}>
         <div style={{ backgroundColor: 'var(--bg-card)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-color)', padding: '20px', boxShadow: 'var(--shadow-sm)' }}>
@@ -321,6 +258,38 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
               />
             </div>
 
+            <div>
+              <label style={{ fontSize: '12.5px', fontWeight: 750, display: 'block', marginBottom: '4px', color: 'var(--text-main)' }}>
+                Max Order Acceptance Distance (km)
+              </label>
+              <input
+                type="number"
+                value={maxOrderDistance}
+                onChange={(e) => setMaxOrderDistance(parseFloat(e.target.value) || 0)}
+                placeholder="e.g. 50"
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-input)', fontSize: '14px', color: 'var(--text-main)' }}
+              />
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px', display: 'block' }}>
+                Branch only accepts orders (delivery, takeaway, dine-in) if the customer is within this distance (e.g. 50 km).
+              </span>
+            </div>
+
+            <div>
+              <label style={{ fontSize: '12.5px', fontWeight: 750, display: 'block', marginBottom: '4px', color: 'var(--text-main)' }}>
+                Table QR Max Ordering Distance (Meters)
+              </label>
+              <input
+                type="number"
+                value={tableQrMaxDistance}
+                onChange={(e) => setTableQrMaxDistance(parseInt(e.target.value) || 0)}
+                placeholder="e.g. 300"
+                style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-input)', fontSize: '14px', color: 'var(--text-main)' }}
+              />
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px', display: 'block' }}>
+                Allowed distance in meters for on-table QR ordering (default 300m). Customers beyond this radius cannot place orders or check in.
+              </span>
+            </div>
+
             <button
               onClick={() => setTimingConfirmOpen(true)}
               style={{
@@ -334,7 +303,7 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
                 cursor: 'pointer',
               }}
             >
-              Save Timing Settings (Requires Confirmation)
+              Save Operational & Distance Rules (Requires Confirmation)
             </button>
           </div>
         </div>
@@ -425,45 +394,66 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <CreditCard size={20} color="var(--primary)" />
               <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-                Branch Payment Modes & Installment Rules
+                Branch Payment Modes
               </h3>
             </div>
-            <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', margin: '4px 0 0' }}>
-              Configure which payment options (COD, Wallet, Card, Bank, Installments) customers can use for Dine-In, Takeaway, and Delivery.
-            </p>
           </div>
 
-          {/* Order Type Tabs */}
-          <div
-            style={{
-              display: 'flex',
-              backgroundColor: 'var(--bg-card-subtle)',
-              borderRadius: 'var(--radius-full)',
-              padding: '4px',
-              gap: '4px',
-            }}
-          >
-            {(['dine_in', 'takeaway', 'delivery'] as const).map((tab) => (
-              <button
-                key={tab}
-                type="button"
-                onClick={() => setPaymentOrderTypeTab(tab)}
-                style={{
-                  padding: '7px 16px',
-                  borderRadius: 'var(--radius-full)',
-                  border: 'none',
-                  backgroundColor: paymentOrderTypeTab === tab ? 'var(--primary)' : 'transparent',
-                  color: paymentOrderTypeTab === tab ? '#FFFFFF' : 'var(--text-secondary)',
-                  fontWeight: 800,
-                  fontSize: '12px',
-                  cursor: 'pointer',
-                  transition: 'all 0.15s ease',
-                  textTransform: 'capitalize',
-                }}
-              >
-                {tab.replace('_', '-')}
-              </button>
-            ))}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+            <button
+              type="button"
+              onClick={handleApplyToAllOrderTypes}
+              title="Sync current tab payment options across Dine-In, Takeaway & Delivery"
+              style={{
+                padding: '7px 14px',
+                borderRadius: 'var(--radius-full)',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'var(--bg-card-subtle)',
+                color: 'var(--primary)',
+                fontWeight: 800,
+                fontSize: '11.5px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '5px',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <span>⚡ Apply to All Order Types</span>
+            </button>
+
+            {/* Order Type Tabs */}
+            <div
+              style={{
+                display: 'flex',
+                backgroundColor: 'var(--bg-card-subtle)',
+                borderRadius: 'var(--radius-full)',
+                padding: '4px',
+                gap: '4px',
+              }}
+            >
+              {(['dine_in', 'takeaway', 'delivery'] as const).map((tab) => (
+                <button
+                  key={tab}
+                  type="button"
+                  onClick={() => setPaymentOrderTypeTab(tab)}
+                  style={{
+                    padding: '7px 16px',
+                    borderRadius: 'var(--radius-full)',
+                    border: 'none',
+                    backgroundColor: paymentOrderTypeTab === tab ? 'var(--primary)' : 'transparent',
+                    color: paymentOrderTypeTab === tab ? '#FFFFFF' : 'var(--text-secondary)',
+                    fontWeight: 800,
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    transition: 'all 0.15s ease',
+                    textTransform: 'capitalize',
+                  }}
+                >
+                  {tab.replace('_', '-')}
+                </button>
+              ))}
+            </div>
           </div>
         </div>
 
@@ -661,238 +651,6 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
         </div>
       </div>
 
-      {/* RIDER FLEET & DELIVERY CONTROL HUB */}
-      <div style={{ backgroundColor: 'var(--bg-card)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-color)', padding: '24px', boxShadow: 'var(--shadow-sm)', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div style={{ width: '40px', height: '40px', borderRadius: '12px', backgroundColor: 'rgba(234, 88, 12, 0.12)', color: '#EA580C', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-              <Bike size={22} />
-            </div>
-            <div>
-              <h3 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: 'var(--text-main)' }}>
-                Rider Fleet & Delivery Operations Hub
-              </h3>
-              <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', margin: '2px 0 0' }}>
-                Control branch delivery staff duty status, assign orders, and monitor real-time shipping
-              </p>
-            </div>
-          </div>
-
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              type="button"
-              onClick={() => onNavigate?.('staff-rider')}
-              style={{
-                padding: '8px 14px',
-                borderRadius: '8px',
-                border: 'none',
-                backgroundColor: '#EA580C',
-                color: '#FFFFFF',
-                fontSize: '12px',
-                fontWeight: 800,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                boxShadow: '0 2px 8px rgba(234, 88, 12, 0.25)',
-              }}
-            >
-              <Bike size={13} />
-              <span>Open Rider Console</span>
-            </button>
-          </div>
-        </div>
-
-        {/* Riders List & Control Grid */}
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '14px' }}>
-          {branchRiders.map((rider) => {
-            const isAvail = rider.riderAvailability !== 'busy' && rider.riderAvailability !== 'offline';
-            const activeOrder = orders.find((o) => o.assignedRiderId === rider.id && o.status !== 'completed' && o.status !== 'cancelled');
-
-            return (
-              <div
-                key={rider.id}
-                style={{
-                  padding: '14px 16px',
-                  borderRadius: '14px',
-                  backgroundColor: 'var(--bg-card-subtle)',
-                  border: '1px solid var(--border-color)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '10px',
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-                  <div>
-                    <div style={{ fontWeight: 850, fontSize: '14px', color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '8px' }}>
-                      <span>{rider.name}</span>
-                      <span style={{ fontSize: '10px', padding: '1px 6px', borderRadius: '4px', backgroundColor: 'var(--primary-light)', color: 'var(--primary)', fontWeight: 800 }}>
-                        ID: {rider.id}
-                      </span>
-                    </div>
-                    <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                      📱 {rider.phone} • ✉️ {rider.email || 'rider1.gulberg@foodiescafe.pk'}
-                    </div>
-                    <div style={{ fontSize: '11px', color: '#15803D', fontWeight: 700, marginTop: '3px', display: 'flex', gap: '8px', backgroundColor: '#F0FDF4', padding: '2px 8px', borderRadius: '4px', border: '1px solid #DCFCE7' }}>
-                      <span>🔑 Password: <strong>password123</strong></span>
-                      <span>•</span>
-                      <span>PIN: <strong>1234</strong></span>
-                    </div>
-                  </div>
-
-                  <span
-                    style={{
-                      padding: '3px 8px',
-                      borderRadius: '12px',
-                      fontSize: '11px',
-                      fontWeight: 800,
-                      backgroundColor: isAvail ? '#DCFCE7' : rider.riderAvailability === 'busy' ? '#FEF3C7' : '#F1F5F9',
-                      color: isAvail ? '#15803D' : rider.riderAvailability === 'busy' ? '#B45309' : '#64748B',
-                      border: `1px solid ${isAvail ? '#BBF7D0' : rider.riderAvailability === 'busy' ? '#FDE68A' : '#CBD5E1'}`,
-                    }}
-                  >
-                    {isAvail ? 'Available' : rider.riderAvailability === 'busy' ? 'On Route' : 'Offline'}
-                  </span>
-                </div>
-
-                {/* Currently Assigned Delivery Order */}
-                {activeOrder ? (
-                  <div style={{ padding: '8px 10px', borderRadius: '8px', backgroundColor: '#EFF6FF', border: '1px solid #BFDBFE', fontSize: '11.5px', color: '#1E40AF' }}>
-                    <span style={{ fontWeight: 800 }}>Delivering #{activeOrder.orderNumber}:</span> {activeOrder.customerName}
-                    <div style={{ color: '#3B82F6', marginTop: '2px', fontSize: '11px' }}>
-                      📍 {activeOrder.deliveryAddress || 'Lahore'}
-                    </div>
-                  </div>
-                ) : (
-                  <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
-                    No order assigned currently. Ready for dispatch.
-                  </div>
-                )}
-
-                {/* Manager Duty Controls & Quick Switch to Rider Console */}
-                <div style={{ display: 'flex', gap: '8px', borderTop: '1px solid var(--border-color)', paddingTop: '8px' }}>
-                  <button
-                    type="button"
-                    onClick={() => updateRiderAvailability(rider.id, isAvail ? 'offline' : 'available')}
-                    style={{
-                      flex: 1,
-                      padding: '6px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--border-color)',
-                      backgroundColor: '#FFFFFF',
-                      fontSize: '11.5px',
-                      fontWeight: 750,
-                      cursor: 'pointer',
-                      color: isAvail ? '#B91C1C' : '#15803D',
-                    }}
-                  >
-                    {isAvail ? 'Set Shift Offline' : 'Set Available'}
-                  </button>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      setCurrentUser(rider);
-                      setCurrentRole('delivery_staff');
-                      onNavigate?.('staff-rider');
-                      addToast({
-                        type: 'info',
-                        title: 'Acting as Delivery Rider 🛵',
-                        message: `Switched into Rider Console as ${rider.name} (${rider.email}).`,
-                      });
-                    }}
-                    style={{
-                      flex: 1,
-                      padding: '6px 10px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--primary)',
-                      backgroundColor: 'var(--primary-light)',
-                      color: 'var(--primary)',
-                      fontSize: '11.5px',
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '5px',
-                    }}
-                  >
-                    <Bike size={13} />
-                    <span>Use Rider Account</span>
-                  </button>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Active Unassigned / Pending Delivery Orders Queue */}
-        {branchDeliveryOrders.length > 0 && (
-          <div style={{ marginTop: '8px' }}>
-            <div style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text-main)', marginBottom: '8px' }}>
-              Pending Branch Delivery Shipments ({branchDeliveryOrders.length}):
-            </div>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
-              {branchDeliveryOrders.map((ord) => (
-                <div
-                  key={ord.id}
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    padding: '8px 12px',
-                    borderRadius: '8px',
-                    backgroundColor: 'var(--bg-card-subtle)',
-                    border: '1px solid var(--border-color)',
-                    fontSize: '12px',
-                  }}
-                >
-                  <div>
-                    <span style={{ fontWeight: 850, color: '#EA580C', marginRight: '6px' }}>
-                      #{ord.orderNumber}
-                    </span>
-                    <span style={{ fontWeight: 700 }}>{ord.customerName}</span>
-                    <span style={{ color: 'var(--text-muted)', marginLeft: '6px' }}>
-                      • {ord.deliveryAddress || 'Address'} • Rs. {Number(ord.total).toLocaleString()}
-                    </span>
-                  </div>
-
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)' }}>
-                      {ord.assignedRiderName ? `🛵 ${ord.assignedRiderName}` : 'Unassigned'}
-                    </span>
-                    <select
-                      value={ord.assignedRiderId || ''}
-                      onChange={(e) => {
-                        if (e.target.value) {
-                          assignRiderToOrder(ord.id, e.target.value);
-                        }
-                      }}
-                      style={{
-                        padding: '4px 8px',
-                        borderRadius: '6px',
-                        border: '1px solid var(--border-color)',
-                        fontSize: '11px',
-                        fontWeight: 750,
-                        backgroundColor: '#FFFFFF',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <option value="" disabled>Assign Rider</option>
-                      {branchRiders.map((r) => (
-                        <option key={r.id} value={r.id}>
-                          {r.name} ({r.riderAvailability === 'busy' ? 'Busy' : 'Ready'})
-                        </option>
-                      ))}
-                    </select>
-                  </div>
-                </div>
-              ))}
-            </div>
-          </div>
-        )}
-      </div>
-
       {/* MENU AVAILABILITY TOGGLES & REFUND APPROVALS QUEUE */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '24px' }}>
         {/* Menu Availability Toggles */}
@@ -900,9 +658,6 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
           <h3 style={{ fontSize: '17px', fontWeight: 800, margin: 0 }}>
             Branch Menu Availability Toggles
           </h3>
-          <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-            Managers can toggle availability for this branch only (owner controls master prices).
-          </span>
 
           <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '360px', overflowY: 'auto' }}>
             {menuItems.map((item) => {
@@ -1021,9 +776,9 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
         isOpen={timingConfirmOpen}
         onClose={() => setTimingConfirmOpen(false)}
         onConfirm={handleSaveTimingSettings}
-        title="Update Branch Timing Settings?"
-        message="Changes to the full-edit window and add-ons deadline directly affect kitchen workflow and customer permissions."
-        details={`Full Edit Window: ${fullEditWindow}m · Prep Estimate: ${prepTimeEstimate}m · Add-ons Cutoff: ${stopAddonsTime}m`}
+        title="Update Branch Timing & Distance Settings?"
+        message="Changes to operational cutoffs and distance radii directly affect kitchen workflow and customer ordering permissions."
+        details={`Full Edit Window: ${fullEditWindow}m · Prep Estimate: ${prepTimeEstimate}m · Add-ons Cutoff: ${stopAddonsTime}m · Max Allowed Distance: ${maxOrderDistance}km · Table QR Radius: ${tableQrMaxDistance}m`}
         confirmText="Yes, save settings"
         cancelText="No, go back"
       />

@@ -296,8 +296,11 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ isOpen, 
           />
         </div>
 
-        {/* Top bar with Close Button */}
-        <div style={{ display: 'flex', justifyContent: 'flex-end', alignItems: 'center', position: 'relative', zIndex: 2 }}>
+        {/* Card Header */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 2, paddingBottom: '8px', borderBottom: '1px solid var(--border-color)' }}>
+          <h2 style={{ fontSize: '18px', fontWeight: 900, color: 'var(--text-main)', margin: 0 }}>
+            Sign In
+          </h2>
           <button
             onClick={onClose}
             aria-label="Close"
@@ -315,35 +318,6 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ isOpen, 
           >
             <X size={15} />
           </button>
-        </div>
-
-        {/* Card Header */}
-        <div style={{ textAlign: 'center', flexShrink: 0, position: 'relative', zIndex: 1 }}>
-          <div
-            style={{
-              width: '48px',
-              height: '48px',
-              margin: '0 auto 8px',
-              borderRadius: '12px',
-              backgroundColor: '#FFFFFF',
-              padding: '5px',
-              border: '1px solid var(--border-color)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              boxShadow: 'var(--shadow-sm)',
-            }}
-          >
-            <img src="/logo.png" alt="Foodies Cafe" style={{ width: '100%', height: '100%', objectFit: 'contain' }} />
-          </div>
-          <h2 style={{ fontSize: 'clamp(19px, 3.5vw, 22px)', fontWeight: 900, color: 'var(--text-main)', margin: 0 }}>
-            Sign In with Email
-          </h2>
-          <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginTop: '4px', lineHeight: 1.4 }}>
-            {authStep === 'email'
-              ? 'Enter your email to receive an instant 4-digit verification code'
-              : `Enter the 4-digit code sent to ${email}`}
-          </p>
         </div>
 
         {/* Step 1: Customer Name and Email */}

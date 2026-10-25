@@ -669,14 +669,9 @@ export const CustomersOrdersScreen: React.FC = () => {
                 alignItems: 'center',
               }}
             >
-              <div>
-                <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-                  Order Details #{selectedOrder.orderNumber}
-                </h3>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  {branches.find((b) => b.id === selectedOrder.branchId)?.name || selectedOrder.branchId}
-                </span>
-              </div>
+              <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
+                Order Details
+              </h3>
               <button
                 onClick={() => setSelectedOrder(null)}
                 style={{

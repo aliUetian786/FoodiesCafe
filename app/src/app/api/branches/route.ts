@@ -3,6 +3,13 @@ import { query } from '@/lib/db';
 
 export async function GET() {
   try {
+    // Auto-migrate columns if missing
+    try {
+      await query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS max_order_distance_km DOUBLE PRECISION NOT NULL DEFAULT 50`);
+      await query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS table_qr_max_distance_meters INT NOT NULL DEFAULT 300`);
+      await query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS payment_settings JSONB`);
+    } catch (e) {}
+
     const res = await query(
       `SELECT id, name, city, address, phone, opening_hours as "openingHours",
               is_open as "isOpen", is_busy as "isBusy",
@@ -11,11 +18,22 @@ export async function GET() {
               stop_add_ons_min_before_ready as "stopAddOnsMinBeforeReady",
               delivery_enabled as "deliveryEnabled",
               latitude, longitude,
+              COALESCE(max_order_distance_km, 50) as "maxOrderDistanceKm",
+              COALESCE(table_qr_max_distance_meters, 300) as "tableQrMaxDistanceMeters",
               payment_settings as "paymentSettings"
        FROM branches
        ORDER BY city ASC, name ASC`
     );
-    return NextResponse.json({ branches: res.rows });
+    const rows = res.rows.map((r: any) => ({
+      ...r,
+      paymentSettings:
+        typeof r.paymentSettings === 'string'
+          ? (() => {
+              try { return JSON.parse(r.paymentSettings); } catch { return r.paymentSettings; }
+            })()
+          : r.paymentSettings,
+    }));
+    return NextResponse.json({ branches: rows });
   } catch (error: any) {
     return NextResponse.json(
       { error: 'Failed to fetch branches from PostgreSQL', details: error.message },
@@ -80,6 +98,14 @@ export async function PATCH(request: Request) {
     if (settings.stopAddOnsMinBeforeReady !== undefined) {
       updates.push(`stop_add_ons_min_before_ready = $${idx++}`);
       values.push(settings.stopAddOnsMinBeforeReady);
+    }
+    if (settings.maxOrderDistanceKm !== undefined) {
+      updates.push(`max_order_distance_km = $${idx++}`);
+      values.push(settings.maxOrderDistanceKm);
+    }
+    if (settings.tableQrMaxDistanceMeters !== undefined) {
+      updates.push(`table_qr_max_distance_meters = $${idx++}`);
+      values.push(settings.tableQrMaxDistanceMeters);
     }
     if (settings.paymentSettings !== undefined) {
       updates.push(`payment_settings = $${idx++}`);

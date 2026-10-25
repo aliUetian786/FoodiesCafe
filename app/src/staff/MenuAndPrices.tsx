@@ -1961,7 +1961,7 @@ export const MenuPricesScreen: React.FC = () => {
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-                {isNewItem ? 'Create New Dish / Product' : `Edit: ${editingItem.name}`}
+                {isNewItem ? 'New Dish' : 'Edit Dish'}
               </h3>
               <button
                 onClick={() => setEditingItem(null)}
@@ -2213,12 +2213,9 @@ export const MenuPricesScreen: React.FC = () => {
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '20px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Sparkles size={18} color="var(--primary)" />
-                <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-                  {isNewBanner ? 'Create New Hero Banner Slide' : 'Edit Hero Banner Slide'}
-                </h3>
-              </div>
+              <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
+                {isNewBanner ? 'New Banner' : 'Edit Banner'}
+              </h3>
               <button
                 onClick={() => setEditingBanner(null)}
                 style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer' }}

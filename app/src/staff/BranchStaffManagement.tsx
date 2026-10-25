@@ -1014,12 +1014,9 @@ export const BranchStaffManagementScreen: React.FC = () => {
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <UserPlus size={20} color="var(--primary)" />
-                <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-                  Issue Subordinate Staff Account
-                </h3>
-              </div>
+              <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
+                New Staff
+              </h3>
               <button
                 onClick={() => setCreateStaffModalOpen(false)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
@@ -1288,12 +1285,9 @@ export const BranchStaffManagementScreen: React.FC = () => {
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Edit size={20} color="var(--primary)" />
-                <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-                  Edit Staff ID: {editStaffModal.id}
-                </h3>
-              </div>
+              <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
+                Edit Staff
+              </h3>
               <button
                 onClick={() => setEditStaffModal(null)}
                 style={{ background: 'none', border: 'none', cursor: 'pointer', color: 'var(--text-muted)' }}
@@ -1507,12 +1501,9 @@ export const BranchStaffManagementScreen: React.FC = () => {
             </div>
 
             <div>
-              <h3 style={{ fontSize: '18px', fontWeight: 800, margin: '0 0 6px', color: 'var(--text-main)' }}>
-                New Temporary Access PIN
+              <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
+                Reset PIN
               </h3>
-              <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>
-                A new secure access PIN has been issued for <strong>{resetPinModal.user.name}</strong> ({resetPinModal.user.id}).
-              </p>
             </div>
 
             <div

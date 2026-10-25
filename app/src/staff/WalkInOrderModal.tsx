@@ -261,48 +261,9 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
             flexShrink: 0,
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <div
-              style={{
-                width: '36px',
-                height: '36px',
-                borderRadius: '10px',
-                backgroundColor: 'var(--primary-light)',
-                color: 'var(--primary)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-              }}
-            >
-              <UtensilsCrossed size={18} />
-            </div>
-            <div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: 'var(--text-main)' }}>
-                  {walkInStep === 'menu'
-                    ? (isFloorStaff ? 'Table Order • Select Dishes' : 'Walk-in Order • Select Dishes')
-                    : (isFloorStaff ? 'Finalize Table Order & Dispatch' : 'Finalize Walk-in Order & Dispatch')}
-                </h3>
-                <span
-                  style={{
-                    fontSize: '11px',
-                    fontWeight: 800,
-                    padding: '2px 8px',
-                    borderRadius: 'var(--radius-full)',
-                    backgroundColor: 'var(--primary-light)',
-                    color: 'var(--primary)',
-                  }}
-                >
-                  {currentBranch.name}
-                </span>
-              </div>
-              <p style={{ margin: 0, fontSize: '11.5px', color: 'var(--text-muted)' }}>
-                {walkInStep === 'menu'
-                  ? (isFloorStaff ? 'Select dishes for customer table. Real-time kitchen dispatch.' : 'Select dishes directly for the walk-in customer. Real-time kitchen dispatch.')
-                  : (isFloorStaff ? 'Specify table seating, customer details, and payment mode.' : 'Specify table seating, customer details, and payment mode.')}
-              </p>
-            </div>
-          </div>
+          <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: 'var(--text-main)' }}>
+            {isFloorStaff ? 'Table Order' : 'Walk-in Order'}
+          </h3>
 
           <button
             onClick={onClose}
@@ -611,111 +572,44 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
               <span>Back to Menu</span>
             </button>
 
-            {/* 1. ORDER FULFILLMENT TYPE (ONLY SHOWN FOR CASHIER/MANAGER, HIDDEN FOR FLOOR STAFF) */}
-            {!isFloorStaff && (
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-muted)', display: 'block', marginBottom: '8px' }}>
-                  1. Order Fulfillment Type
+            {/* Dine-In Table Selection (Walk-in is strictly Dine-In by default) */}
+            <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-main)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  🍽️ Select Dine-In Table for Guest:
                 </label>
-                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
-                  {[
-                    { id: 'dine_in', label: 'Dine-In (Table)', icon: Utensils },
-                    { id: 'takeaway', label: 'Takeaway (Counter)', icon: ShoppingBag },
-                    { id: 'delivery', label: 'Direct Delivery', icon: Bike },
-                  ].map((type) => {
-                    const Icon = type.icon;
-                    const isSelected = walkInOrderType === type.id;
-                    return (
-                      <button
-                        key={type.id}
-                        onClick={() => setWalkInOrderType(type.id as any)}
-                        style={{
-                          padding: '12px',
-                          borderRadius: 'var(--radius-md)',
-                          backgroundColor: isSelected ? 'var(--primary)' : 'var(--bg-card-subtle)',
-                          border: isSelected ? '1px solid var(--primary)' : '1px solid var(--border-color)',
-                          color: isSelected ? '#FFFFFF' : 'var(--text-main)',
-                          fontWeight: 800,
-                          fontSize: '13px',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '6px',
-                          cursor: 'pointer',
-                          transition: 'all 0.15s ease',
-                        }}
-                      >
-                        <Icon size={16} />
-                        <span>{type.label}</span>
-                      </button>
-                    );
-                  })}
+                <span style={{ fontSize: '11px', color: 'var(--primary)', fontWeight: 750, backgroundColor: 'var(--primary-light)', padding: '2px 8px', borderRadius: '10px' }}>
+                  Dine-In Seating Only
+                </span>
+              </div>
+              {availableTables.length > 0 ? (
+                <select
+                  value={walkInTable}
+                  onChange={(e) => setWalkInTable(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: '6px',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-card)',
+                    fontSize: '13.5px',
+                    color: 'var(--text-main)',
+                    fontWeight: 700,
+                  }}
+                >
+                  {availableTables.map((t) => (
+                    <option key={t.id} value={t.number}>
+                      Table #{t.number} — Capacity: {t.capacity} Seats ({t.status.toUpperCase()})
+                    </option>
+                  ))}
+                </select>
+              ) : (
+                <div style={{ color: '#DC2626', fontSize: '12.5px', fontWeight: 700 }}>
+                  ⚠️ No free tables currently available. Please free a table first.
                 </div>
-              </div>
-            )}
+              )}
+            </div>
 
-            {/* Table Selection for Floor Staff & Dine-In */}
-            {(isFloorStaff || walkInOrderType === 'dine_in') && (
-              <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
-                <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)', display: 'block', marginBottom: '6px' }}>
-                  {isFloorStaff ? 'Select Table for Seating:' : 'Select Dine-In Table for Seating:'}
-                </label>
-                {availableTables.length > 0 ? (
-                  <select
-                    value={walkInTable}
-                    onChange={(e) => setWalkInTable(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '9px 12px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--border-color)',
-                      backgroundColor: 'var(--bg-card)',
-                      fontSize: '13px',
-                      color: 'var(--text-main)',
-                      fontWeight: 700,
-                    }}
-                  >
-                    {availableTables.map((t) => (
-                      <option key={t.id} value={t.number}>
-                        Table #{t.number} — Capacity: {t.capacity} Seats ({t.status.toUpperCase()})
-                      </option>
-                    ))}
-                  </select>
-                ) : (
-                  <div style={{ color: '#DC2626', fontSize: '12.5px', fontWeight: 700 }}>
-                    {isFloorStaff
-                      ? '⚠️ No free tables currently available. Please free a table first.'
-                      : '⚠️ No free tables. (Choose takeaway or free a table).'}
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* Delivery address (only if not floor staff and delivery is selected) */}
-            {!isFloorStaff && walkInOrderType === 'delivery' && (
-              <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
-                    Delivery Address:
-                  </label>
-                  <input
-                    type="text"
-                    value={walkInDeliveryAddress}
-                    onChange={(e) => setWalkInDeliveryAddress(e.target.value)}
-                    placeholder="Street / House #, Sector, Area..."
-                    style={{
-                      width: '100%',
-                      padding: '9px 12px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--border-color)',
-                      backgroundColor: 'var(--bg-card)',
-                      fontSize: '13px',
-                      color: 'var(--text-main)',
-                    }}
-                  />
-                </div>
-              </div>
-            )}
 
             {/* Customer Details */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>

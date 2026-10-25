@@ -23,6 +23,8 @@ CREATE TABLE IF NOT EXISTS branches (
     delivery_enabled BOOLEAN NOT NULL DEFAULT true,
     latitude DOUBLE PRECISION,
     longitude DOUBLE PRECISION,
+    max_order_distance_km DOUBLE PRECISION NOT NULL DEFAULT 50,
+    table_qr_max_distance_meters INT NOT NULL DEFAULT 300,
     payment_settings JSONB NOT NULL DEFAULT '{"dine_in":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"takeaway":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"delivery":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false}}'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -88,6 +90,9 @@ CREATE TABLE IF NOT EXISTS tables (
     seated_at TIMESTAMPTZ,
     reserved_for VARCHAR(255),
     pin VARCHAR(10),
+    qr_code TEXT,
+    qr_expires_at TIMESTAMPTZ,
+    allow_qr_reserved BOOLEAN DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(branch_id, number)
@@ -129,6 +134,10 @@ CREATE TABLE IF NOT EXISTS orders (
     delivered_at TIMESTAMPTZ,
     payment_collected BOOLEAN DEFAULT false,
     customer_coordinates JSONB,
+    assigned_waiter_id VARCHAR(64),
+    assigned_waiter_name VARCHAR(255),
+    is_table_qr BOOLEAN DEFAULT false,
+    waiter_notified BOOLEAN DEFAULT false,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );

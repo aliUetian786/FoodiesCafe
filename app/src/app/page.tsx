@@ -38,14 +38,15 @@ export default function CustomerMainPage() {
     let isLoggedIn = Boolean(
       currentUser &&
       currentUser.name &&
-      currentUser.name !== 'Guest Customer'
+      currentUser.name !== 'Guest Customer' &&
+      currentUser.role === 'customer'
     );
     if (!isLoggedIn && typeof window !== 'undefined') {
       try {
         const saved = localStorage.getItem('foodies_customer_user');
         if (saved) {
           const parsed = JSON.parse(saved);
-          if (parsed && parsed.name && parsed.name !== 'Guest Customer') {
+          if (parsed && parsed.name && parsed.name !== 'Guest Customer' && parsed.role === 'customer') {
             isLoggedIn = true;
           }
         }
@@ -54,6 +55,16 @@ export default function CustomerMainPage() {
     setCheckoutInitialStep(isLoggedIn ? 'fulfillment' : 'auth');
     setCartOpen(true);
   };
+
+  // Auto-route to table-qr if tableQr or table query param is present
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('tableQr') || params.get('table')) {
+        setCurrentView('table-qr');
+      }
+    }
+  }, []);
 
   // Scroll to top on navigation and remove stale view persistence
   useEffect(() => {

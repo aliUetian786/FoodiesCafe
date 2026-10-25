@@ -391,7 +391,7 @@ export const SupportScreen: React.FC<{ onNavigate: (v: string) => void }> = ({ o
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-                Submit Query or Report Problem
+                New Ticket
               </h3>
               <button
                 type="button"

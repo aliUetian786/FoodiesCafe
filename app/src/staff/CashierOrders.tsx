@@ -26,71 +26,43 @@ interface CashierOrdersScreenProps {
 }
 
 export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloorStaff = false }) => {
-  const { orders, currentBranch, currentUser, currentRole, recordCashPayment, addToast } = useApp();
+  const { orders, currentBranch, currentUser, currentRole, recordCashPayment, updateTableStatus, markTableFree, addToast } = useApp();
   const isFloor = Boolean(isFloorStaff || currentRole === 'floor_staff');
 
-  const [activeCategory, setActiveCategory] = useState<'dine_in' | 'takeaway' | 'delivery'>('dine_in');
   const [statusFilter, setStatusFilter] = useState<'all' | 'arrived' | 'preparing' | 'ready' | 'completed'>('all');
   const [searchQuery, setSearchQuery] = useState('');
   const [selectedOrderDetail, setSelectedOrderDetail] = useState<Order | null>(null);
   const [walkInModalOpen, setWalkInModalOpen] = useState(false);
 
-  // Filter orders: cashier or floor staff should only see their concerned orders (walk-in counter/table orders)
+  // Filter orders: Cashier only handles Dine-In orders placed via Walk-in or Table QR scan!
   const branchOrders = useMemo(() => {
     return orders.filter((o) => {
       if (o.branchId && o.branchId !== currentBranch.id) return false;
-      if (isFloor) {
-        if (o.type !== 'dine_in') return false;
-        const isFloorOrder =
-          o.cashierId === currentUser.id ||
-          o.customerId === currentUser.id ||
-          o.isWalkIn === true ||
-          !!o.tableNumber ||
-          (o.notes && o.notes.toLowerCase().includes('walk-in')) ||
-          (o.pickupTime && o.pickupTime.toLowerCase().includes('walk-in'));
-        return isFloorOrder;
-      }
-      return (
-        o.cashierId === currentUser.id ||
-        (o.cashierId && currentRole === 'cashier') ||
+      // Strictly Dine-In only!
+      if (o.type !== 'dine_in') return false;
+
+      // Must be from walk-in or table QR scan
+      const isWalkInOrTableQr =
         o.isWalkIn === true ||
-        o.customerId === currentUser.id ||
-        o.orderNumber === 'FC-8242' ||
-        o.orderNumber === 'FC-8225' ||
-        o.orderNumber === 'FC-3391' ||
+        o.isTableQr === true ||
+        !!o.tableQrSessionId ||
+        o.cashierId === currentUser.id ||
         (o.notes && o.notes.toLowerCase().includes('walk-in')) ||
-        (o.pickupTime && o.pickupTime.toLowerCase().includes('walk-in'))
-      );
+        (o.pickupTime && o.pickupTime.toLowerCase().includes('walk-in'));
+      return isWalkInOrTableQr;
     });
-  }, [orders, currentBranch.id, currentUser.id, currentRole]);
+  }, [orders, currentBranch.id, currentUser.id]);
 
-  // Active counts for 3 categories
-  const activeDineInCount = useMemo(() => {
+  // Active dine-in orders count
+  const activeOrdersCount = useMemo(() => {
     return branchOrders.filter(
-      (o) => o.type === 'dine_in' && o.status !== 'completed' && o.status !== 'cancelled'
+      (o) => o.status !== 'completed' && o.status !== 'cancelled'
     ).length;
   }, [branchOrders]);
-
-  const activeTakeawayCount = useMemo(() => {
-    return branchOrders.filter(
-      (o) => o.type === 'takeaway' && o.status !== 'completed' && o.status !== 'cancelled'
-    ).length;
-  }, [branchOrders]);
-
-  const activeDeliveryCount = useMemo(() => {
-    return branchOrders.filter(
-      (o) => o.type === 'delivery' && o.status !== 'completed' && o.status !== 'cancelled'
-    ).length;
-  }, [branchOrders]);
-
-  // Category-specific orders
-  const categoryOrders = useMemo(() => {
-    return branchOrders.filter((o) => o.type === activeCategory);
-  }, [branchOrders, activeCategory]);
 
   // Filtered orders list by status and search
   const filteredOrders = useMemo(() => {
-    return categoryOrders.filter((ord) => {
+    return branchOrders.filter((ord) => {
       // Status Filter
       if (statusFilter !== 'all') {
         if (statusFilter === 'arrived' && ord.status !== 'placed' && ord.status !== 'accepted') return false;
@@ -111,7 +83,7 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
 
       return true;
     });
-  }, [categoryOrders, statusFilter, searchQuery]);
+  }, [branchOrders, statusFilter, searchQuery]);
 
   const getOrderStatusBadge = (status: string, type: string) => {
     switch (status) {
@@ -244,125 +216,38 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
           boxSizing: 'border-box',
         }}
       >
-        {/* Left Side: 3 CATEGORY TABS (Dine-In, Takeaway, Delivery) [HIDDEN FOR FLOOR STAFF] + STATUS FILTERS */}
+        {/* Left Side: Walk-in & Table QR Dine-In Badge + STATUS FILTERS */}
         <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
-          {!isFloor && (
-            <>
-              <button
-                onClick={() => {
-                  setActiveCategory('dine_in');
-                  setStatusFilter('all');
-                }}
+          <div
+            style={{
+              padding: '7px 14px',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: 'var(--primary)',
+              color: '#FFFFFF',
+              fontSize: '13px',
+              fontWeight: 800,
+              display: 'flex',
+              alignItems: 'center',
+              gap: '7px',
+            }}
+          >
+            <Utensils size={15} />
+            <span>Walk-in & Table QR Dine-In</span>
+            {activeOrdersCount > 0 && (
+              <span
                 style={{
-                  padding: '8px 16px',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: activeCategory === 'dine_in' ? 'var(--primary)' : 'var(--bg-card-subtle)',
-                  color: activeCategory === 'dine_in' ? '#FFFFFF' : 'var(--text-main)',
-                  border: activeCategory === 'dine_in' ? '1px solid var(--primary)' : '1px solid var(--border-color)',
-                  fontSize: '13px',
+                  backgroundColor: '#FFFFFF',
+                  color: 'var(--primary)',
+                  fontSize: '11px',
                   fontWeight: 800,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  transition: 'all 0.15s ease',
+                  padding: '1px 7px',
+                  borderRadius: '10px',
                 }}
               >
-                <Utensils size={16} />
-                <span>Dine-In Orders</span>
-                {activeDineInCount > 0 && (
-                  <span
-                    style={{
-                      backgroundColor: activeCategory === 'dine_in' ? '#FFFFFF' : 'var(--primary)',
-                      color: activeCategory === 'dine_in' ? 'var(--primary)' : '#FFFFFF',
-                      fontSize: '11px',
-                      fontWeight: 800,
-                      padding: '1px 6px',
-                      borderRadius: '10px',
-                    }}
-                  >
-                    {activeDineInCount}
-                  </span>
-                )}
-              </button>
-
-              <button
-                onClick={() => {
-                  setActiveCategory('takeaway');
-                  setStatusFilter('all');
-                }}
-                style={{
-                  padding: '8px 16px',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: activeCategory === 'takeaway' ? 'var(--primary)' : 'var(--bg-card-subtle)',
-                  color: activeCategory === 'takeaway' ? '#FFFFFF' : 'var(--text-main)',
-                  border: activeCategory === 'takeaway' ? '1px solid var(--primary)' : '1px solid var(--border-color)',
-                  fontSize: '13px',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                <ShoppingBag size={16} />
-                <span>Takeaway Orders</span>
-                {activeTakeawayCount > 0 && (
-                  <span
-                    style={{
-                      backgroundColor: activeCategory === 'takeaway' ? '#FFFFFF' : 'var(--primary)',
-                      color: activeCategory === 'takeaway' ? 'var(--primary)' : '#FFFFFF',
-                      fontSize: '11px',
-                      fontWeight: 800,
-                      padding: '1px 6px',
-                      borderRadius: '10px',
-                    }}
-                  >
-                    {activeTakeawayCount}
-                  </span>
-                )}
-              </button>
-
-              <button
-                onClick={() => {
-                  setActiveCategory('delivery');
-                  setStatusFilter('all');
-                }}
-                style={{
-                  padding: '8px 16px',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: activeCategory === 'delivery' ? 'var(--primary)' : 'var(--bg-card-subtle)',
-                  color: activeCategory === 'delivery' ? '#FFFFFF' : 'var(--text-main)',
-                  border: activeCategory === 'delivery' ? '1px solid var(--primary)' : '1px solid var(--border-color)',
-                  fontSize: '13px',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '8px',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                <Bike size={16} />
-                <span>Delivery Orders</span>
-                {activeDeliveryCount > 0 && (
-                  <span
-                    style={{
-                      backgroundColor: activeCategory === 'delivery' ? '#FFFFFF' : 'var(--primary)',
-                      color: activeCategory === 'delivery' ? 'var(--primary)' : '#FFFFFF',
-                      fontSize: '11px',
-                      fontWeight: 800,
-                      padding: '1px 6px',
-                      borderRadius: '10px',
-                    }}
-                  >
-                    {activeDeliveryCount}
-                  </span>
-                )}
-              </button>
-            </>
-          )}
+                {activeOrdersCount}
+              </span>
+            )}
+          </div>
 
           {/* Sub-status filter buttons: all, arrived, preparing, ready, completed */}
           <div style={{ display: 'flex', gap: '5px', alignItems: 'center', flexWrap: 'wrap', marginLeft: isFloor ? '0px' : '6px' }}>
@@ -479,12 +364,12 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
           >
             <CheckCircle2 size={36} color="#16A34A" style={{ margin: '0 auto 10px', display: 'block' }} />
             <div style={{ fontWeight: 800, fontSize: '16px', color: 'var(--text-main)' }}>
-              {currentRole === 'floor_staff' ? 'No Orders Found' : `No ${activeCategory.replace('_', ' ').toUpperCase()} Orders Found`}
+              {currentRole === 'floor_staff' ? 'No Orders Found' : 'No Dine-In Orders Found'}
             </div>
             <p style={{ fontSize: '13px', margin: '6px 0 0' }}>
               {currentRole === 'floor_staff'
                 ? 'There are no active orders matching this status filter.'
-                : 'There are no orders matching this view. Switch category or status filter above.'}
+                : 'There are no Dine-In or QR orders matching this filter.'}
             </p>
           </div>
         ) : (
@@ -558,12 +443,22 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                       >
                         {statusInfo.label}
                       </span>
+                      <span
+                        style={{
+                          fontSize: '10px',
+                          fontWeight: 800,
+                          backgroundColor: ord.isTableQr ? 'rgba(234, 88, 12, 0.12)' : 'rgba(59, 130, 246, 0.12)',
+                          color: ord.isTableQr ? 'var(--primary)' : '#2563EB',
+                          padding: '2px 7px',
+                          borderRadius: '4px',
+                        }}
+                      >
+                        {ord.isTableQr ? '📱 Table QR' : '🚶 Walk-in'}
+                      </span>
                     </div>
 
-                    <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 600 }}>
-                      {ord.type === 'dine_in' && ord.tableNumber
-                        ? `Table ${ord.tableNumber}`
-                        : ord.pickupTime || (ord.createdAt ? ord.createdAt.split(',')[1] : 'Recent')}
+                    <span style={{ fontSize: '11.5px', color: 'var(--text-main)', fontWeight: 800, backgroundColor: 'var(--bg-card-subtle)', padding: '2px 8px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+                      {ord.tableNumber ? `Table #${ord.tableNumber}` : 'Dine-In'}
                     </span>
                   </div>
 
@@ -593,23 +488,11 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                     </span>
                   </div>
 
-                  {/* Order Type & Items count (No item detail text on card face!) */}
+                  {/* Items count & Kitchen Indicator */}
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '11px', color: 'var(--text-muted)' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '4px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '180px' }}>
-                      {isFloor ? (
-                        <span>{ord.tableNumber ? `Table #${ord.tableNumber}` : 'Table Seating'}</span>
-                      ) : ord.type === 'dine_in' ? (
-                        <span>{ord.tableNumber ? `Dine-In • Table ${ord.tableNumber}` : 'Dine-In Table'}</span>
-                      ) : ord.type === 'delivery' ? (
-                        <>
-                          <MapPin size={11} color="var(--primary)" style={{ flexShrink: 0 }} />
-                          <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {ord.deliveryAddress || 'Delivery Address'}
-                          </span>
-                        </>
-                      ) : (
-                        <span>Takeaway Counter</span>
-                      )}
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 700, color: '#16A34A' }}>
+                      <ChefHat size={14} color="#16A34A" />
+                      <span>Kitchen Line</span>
                     </div>
 
                     <span
@@ -625,26 +508,22 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                       }}
                     >
                       <Eye size={12} />
-                      <span>{ord.items.length} Items (Click to View)</span>
+                      <span>{ord.items.length} Items</span>
                     </span>
                   </div>
 
-                  {/* Bottom: Kitchen Indicator & Payment status badge */}
+                  {/* Bottom: Fast Actions (Collect Cash & Free Table, Mark Table Free) */}
                   <div
                     style={{
                       display: 'flex',
                       justifyContent: 'space-between',
                       alignItems: 'center',
-                      marginTop: '4px',
+                      marginTop: '6px',
                       paddingTop: '8px',
                       borderTop: '1px solid var(--border-color)',
+                      gap: '6px',
                     }}
                   >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11px', fontWeight: 700, color: '#16A34A' }}>
-                      <ChefHat size={14} color="#16A34A" />
-                      <span>Direct Kitchen Sent</span>
-                    </div>
-
                     <span
                       style={{
                         fontSize: '10px',
@@ -657,8 +536,64 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                         letterSpacing: '0.04em',
                       }}
                     >
-                      {ord.paymentStatus === 'paid' ? 'PAID' : 'UNPAID CASH'}
+                      {ord.paymentStatus === 'paid' ? 'PAID' : 'UNPAID'}
                     </span>
+
+                    <div style={{ display: 'flex', gap: '5px', alignItems: 'center' }}>
+                      {ord.paymentStatus === 'unpaid' && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            recordCashPayment(ord.id, ord.total);
+                            if (ord.tableNumber) markTableFree(ord.tableNumber);
+                            addToast({
+                              type: 'success',
+                              title: 'Payment Collected & Table Freed! 🎉',
+                              message: `Order #${ord.orderNumber} settled. Table #${ord.tableNumber || 'Seated'} is now free.`,
+                            });
+                          }}
+                          style={{
+                            padding: '4px 8px',
+                            borderRadius: '4px',
+                            backgroundColor: '#16A34A',
+                            color: '#FFFFFF',
+                            fontSize: '11px',
+                            fontWeight: 800,
+                            border: 'none',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                          }}
+                        >
+                          <Banknote size={12} />
+                          <span>Collect & Free Table</span>
+                        </button>
+                      )}
+
+                      {ord.tableNumber && ord.status !== 'completed' && ord.paymentStatus === 'paid' && (
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            markTableFree(ord.tableNumber!);
+                          }}
+                          style={{
+                            padding: '4px 8px',
+                            borderRadius: '4px',
+                            backgroundColor: 'var(--bg-card-subtle)',
+                            color: 'var(--text-main)',
+                            fontSize: '11px',
+                            fontWeight: 800,
+                            border: '1px solid var(--border-color)',
+                            cursor: 'pointer',
+                          }}
+                        >
+                          Mark Table Free 🪑
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               );
@@ -711,51 +646,9 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                 backgroundColor: 'var(--bg-card-subtle)',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div
-                  style={{
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '10px',
-                    backgroundColor: 'var(--primary-light)',
-                    color: 'var(--primary)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <ShoppingBag size={20} />
-                </div>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 850, color: 'var(--text-main)' }}>
-                      Order #{selectedOrderDetail.orderNumber}
-                    </h3>
-                    <span
-                      style={{
-                        fontSize: '11px',
-                        fontWeight: 800,
-                        textTransform: 'uppercase',
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                        backgroundColor: 'var(--primary-light)',
-                        color: 'var(--primary)',
-                      }}
-                    >
-                      {isFloor
-                        ? `Table #${selectedOrderDetail.tableNumber || '-'}`
-                        : selectedOrderDetail.type === 'dine_in'
-                        ? `Dine-In • Table ${selectedOrderDetail.tableNumber || '-'}`
-                        : selectedOrderDetail.type === 'takeaway'
-                        ? 'Takeaway'
-                        : 'Delivery'}
-                    </span>
-                  </div>
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                    Created: {selectedOrderDetail.createdAt || 'Recent'}
-                  </span>
-                </div>
-              </div>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 850, color: 'var(--text-main)' }}>
+                Order Details
+              </h3>
 
               <button
                 type="button"
@@ -935,12 +828,13 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                   <button
                     onClick={() => {
                       recordCashPayment(selectedOrderDetail.id, selectedOrderDetail.total);
+                      if (selectedOrderDetail.tableNumber) markTableFree(selectedOrderDetail.tableNumber);
                       addToast({
                         type: 'success',
-                        title: 'Cash Payment Recorded',
-                        message: `Order #${selectedOrderDetail.orderNumber} marked as PAID.`,
+                        title: 'Cash Payment Recorded & Table Freed! 🎉',
+                        message: `Order #${selectedOrderDetail.orderNumber} marked as PAID. Table #${selectedOrderDetail.tableNumber || 'Seated'} is now available.`,
                       });
-                      setSelectedOrderDetail((prev) => (prev ? { ...prev, paymentStatus: 'paid' } : null));
+                      setSelectedOrderDetail(null);
                     }}
                     style={{
                       padding: '9px 16px',
@@ -957,7 +851,28 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                     }}
                   >
                     <Banknote size={15} />
-                    <span>Record Cash Payment (Rs. {selectedOrderDetail.total.toLocaleString()})</span>
+                    <span>Collect Cash & Free Table (Rs. {selectedOrderDetail.total.toLocaleString()})</span>
+                  </button>
+                )}
+
+                {selectedOrderDetail.tableNumber && (
+                  <button
+                    onClick={() => {
+                      markTableFree(selectedOrderDetail.tableNumber!);
+                      setSelectedOrderDetail(null);
+                    }}
+                    style={{
+                      padding: '9px 14px',
+                      borderRadius: 'var(--radius-md)',
+                      backgroundColor: 'var(--bg-card)',
+                      border: '1px solid var(--border-color)',
+                      color: 'var(--text-main)',
+                      fontWeight: 800,
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Mark Table Free 🪑
                   </button>
                 )}
 

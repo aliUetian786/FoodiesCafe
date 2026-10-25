@@ -712,8 +712,7 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
           width: '340px',
           minWidth: '340px',
           maxWidth: '340px',
-          minHeight: '175px',
-          maxHeight: '205px',
+          minHeight: '185px',
           backgroundColor: '#FFFFFF',
           borderRadius: 'var(--radius-md)',
           border:
@@ -732,6 +731,7 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
           cursor: 'pointer',
           transition: 'all 0.15s ease',
           boxSizing: 'border-box',
+          overflow: 'hidden',
         }}
       >
         {/* Top: Order #, Status, Time/Table */}
@@ -798,6 +798,126 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
             📦 {ord.items.length} Items (View)
           </span>
         </div>
+
+        {/* Dedicated Delivery Order Rider Assignment Row: Contained strictly inside the card */}
+        {ord.type === 'delivery' && ord.status !== 'completed' && ord.status !== 'cancelled' && (
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '6px',
+              marginTop: '5px',
+              paddingTop: '6px',
+              borderTop: '1px dashed var(--border-color)',
+              minWidth: 0,
+              width: '100%',
+              boxSizing: 'border-box',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary)', flexShrink: 0 }}>
+              <Bike size={13} color={ord.assignedRiderId ? '#EA580C' : '#2563EB'} />
+              <span>Rider:</span>
+            </div>
+
+            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', maxWidth: '235px', minWidth: 0, width: '100%' }}>
+              <select
+                value={ord.assignedRiderId || ''}
+                onChange={(e) => {
+                  const rId = e.target.value;
+                  if (rId) {
+                    const chosen = users.find((u) => u.id === rId);
+                    if (chosen?.riderAvailability === 'busy' && rId !== ord.assignedRiderId) {
+                      addToast({
+                        type: 'warning',
+                        title: 'Rider is Busy',
+                        message: `${chosen.name} has already departed on delivery and cannot be assigned more orders until return.`,
+                      });
+                      return;
+                    }
+                    assignRiderToOrder(ord.id, rId);
+                  } else {
+                    unassignRiderFromOrder(ord.id);
+                  }
+                }}
+                disabled={ord.status === 'out_for_delivery' && Boolean(ord.assignedRiderId)}
+                title={
+                  ord.status === 'out_for_delivery' && ord.assignedRiderId
+                    ? `${ord.assignedRiderName || 'Rider'} has already departed on this delivery.`
+                    : 'Assign rider to order'
+                }
+                style={{
+                  width: '100%',
+                  fontSize: '11px',
+                  fontWeight: 800,
+                  padding: '4px 8px 4px 22px',
+                  borderRadius: '7px',
+                  backgroundColor: ord.assignedRiderId ? '#FFF7ED' : '#EFF6FF',
+                  color: ord.assignedRiderId ? '#C2410C' : '#1D4ED8',
+                  border: `1px solid ${ord.assignedRiderId ? '#FFEDD5' : '#BFDBFE'}`,
+                  cursor: ord.status === 'out_for_delivery' && ord.assignedRiderId ? 'not-allowed' : 'pointer',
+                  outline: 'none',
+                  textOverflow: 'ellipsis',
+                  overflow: 'hidden',
+                  whiteSpace: 'nowrap',
+                  boxSizing: 'border-box',
+                }}
+              >
+                <option value="">
+                  {ord.assignedRiderId ? '✕ Unassign Rider' : '+ Assign Rider'}
+                </option>
+                {(() => {
+                  const options = [...branchRiders];
+                  if (ord.assignedRiderId && !options.some((r) => r.id === ord.assignedRiderId)) {
+                    const ex = users.find((u) => u.id === ord.assignedRiderId);
+                    if (ex) options.push(ex);
+                    else if (ord.assignedRiderName) {
+                      options.push({ id: ord.assignedRiderId, name: ord.assignedRiderName } as any);
+                    }
+                  }
+                  return options.map((r) => {
+                    const isAvail = r.riderAvailability !== 'busy' && r.riderAvailability !== 'offline';
+                    const isCurrent = r.id === ord.assignedRiderId;
+                    const isBusy = r.riderAvailability === 'busy';
+                    const isOffline = r.riderAvailability === 'offline';
+
+                    // Count how many active orders this rider has assigned
+                    const riderActiveCount = orders.filter(
+                      (o) => o.assignedRiderId === r.id && o.status !== 'completed' && o.status !== 'cancelled'
+                    ).length;
+
+                    let label = r.name;
+                    if (isCurrent) {
+                      label += isBusy ? ' (Assigned • En Route)' : ` (Assigned • ${riderActiveCount} Total)`;
+                    } else if (isBusy) {
+                      label += ' (Busy - On Delivery)';
+                    } else if (isOffline) {
+                      label += ' (Offline)';
+                    } else {
+                      label += riderActiveCount > 0 ? ` (Ready • ${riderActiveCount} Orders)` : ' (Ready)';
+                    }
+
+                    return (
+                      <option
+                        key={r.id}
+                        value={r.id}
+                        disabled={!isCurrent && (isBusy || isOffline)}
+                      >
+                        {label}
+                      </option>
+                    );
+                  });
+                })()}
+              </select>
+              <Bike
+                size={11}
+                color={ord.assignedRiderId ? '#EA580C' : '#2563EB'}
+                style={{ position: 'absolute', left: '6px', pointerEvents: 'none' }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Bottom Actions Bar */}
         <div
@@ -960,70 +1080,6 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
                   >
                     Hand Over ✓
                   </button>
-                )}
-
-                {ord.type === 'delivery' && ord.status !== 'completed' && ord.status !== 'cancelled' && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }} onClick={(e) => e.stopPropagation()}>
-                    <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center' }}>
-                      <select
-                        value={ord.assignedRiderId || ''}
-                        onChange={(e) => {
-                          const rId = e.target.value;
-                          if (rId) {
-                            assignRiderToOrder(ord.id, rId);
-                          } else {
-                            unassignRiderFromOrder(ord.id);
-                          }
-                        }}
-                        style={{
-                          fontSize: '11px',
-                          fontWeight: 800,
-                          padding: '3px 8px 3px 24px',
-                          borderRadius: '8px',
-                          backgroundColor: ord.assignedRiderId ? '#FFF7ED' : '#EFF6FF',
-                          color: ord.assignedRiderId ? '#C2410C' : '#1D4ED8',
-                          border: `1px solid ${ord.assignedRiderId ? '#FFEDD5' : '#BFDBFE'}`,
-                          cursor: 'pointer',
-                          outline: 'none',
-                        }}
-                      >
-                        <option value="">
-                          {ord.assignedRiderId ? 'Unassign Rider' : '+ Assign Rider'}
-                        </option>
-                        {(() => {
-                          const options = [...branchRiders];
-                          if (ord.assignedRiderId && !options.some((r) => r.id === ord.assignedRiderId)) {
-                            const ex = users.find((u) => u.id === ord.assignedRiderId);
-                            if (ex) options.push(ex);
-                            else if (ord.assignedRiderName) {
-                              options.push({ id: ord.assignedRiderId, name: ord.assignedRiderName } as any);
-                            }
-                          }
-                          return options.map((r) => {
-                            const isAvail = r.riderAvailability !== 'busy' && r.riderAvailability !== 'offline';
-                            const isCurrent = r.id === ord.assignedRiderId;
-                            const statusLabel = isCurrent
-                              ? 'Assigned'
-                              : r.riderAvailability === 'busy'
-                              ? 'Busy'
-                              : r.riderAvailability === 'offline'
-                              ? 'Offline'
-                              : 'Ready';
-                            return (
-                              <option key={r.id} value={r.id}>
-                                {r.name} ({statusLabel})
-                              </option>
-                            );
-                          });
-                        })()}
-                      </select>
-                      <Bike
-                        size={12}
-                        color={ord.assignedRiderId ? '#EA580C' : '#2563EB'}
-                        style={{ position: 'absolute', left: '7px', pointerEvents: 'none' }}
-                      />
-                    </div>
-                  </div>
                 )}
 
                 {ord.type === 'delivery' && ord.status === 'ready' && (
@@ -2646,6 +2702,17 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
               <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
                 {branchRiders.map((r) => {
                   const isAvailable = r.riderAvailability !== 'busy' && r.riderAvailability !== 'offline';
+                  const activeCount = orders.filter(
+                    (o) => o.assignedRiderId === r.id && o.status !== 'completed' && o.status !== 'cancelled'
+                  ).length;
+                  const statusText = isAvailable
+                    ? activeCount > 0
+                      ? `Ready • ${activeCount} Orders`
+                      : 'Ready'
+                    : r.riderAvailability === 'busy'
+                    ? `Busy • On Delivery (${activeCount})`
+                    : 'Offline';
+
                   return (
                     <span
                       key={r.id}
@@ -2670,7 +2737,7 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
                           backgroundColor: isAvailable ? '#16A34A' : r.riderAvailability === 'busy' ? '#D97706' : '#94A3B8',
                         }}
                       />
-                      {r.name} ({isAvailable ? 'Ready' : r.riderAvailability === 'busy' ? 'On Delivery' : 'Offline'})
+                      {r.name} ({statusText})
                     </span>
                   );
                 })}
@@ -3156,7 +3223,7 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <Clock size={20} color="var(--primary)" />
                   <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 850, color: 'var(--text-main)' }}>
-                    Set Kitchen Dispatch Timer
+                    Kitchen Timer
                   </h3>
                 </div>
                 <button
@@ -3402,49 +3469,9 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
                 backgroundColor: '#F8FAFC',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div
-                  style={{
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '10px',
-                    backgroundColor: 'var(--primary-light)',
-                    color: 'var(--primary)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <ShoppingBag size={20} />
-                </div>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 850, color: 'var(--text-main)' }}>
-                      Order #{selectedOrderDetail.orderNumber}
-                    </h3>
-                    <span
-                      style={{
-                        fontSize: '11px',
-                        fontWeight: 800,
-                        textTransform: 'uppercase',
-                        padding: '2px 8px',
-                        borderRadius: '4px',
-                        backgroundColor: 'var(--primary-light)',
-                        color: 'var(--primary)',
-                      }}
-                    >
-                      {selectedOrderDetail.type === 'dine_in'
-                        ? `Dine-In • Table ${selectedOrderDetail.tableNumber || '-'}`
-                        : selectedOrderDetail.type === 'takeaway'
-                        ? 'Takeaway'
-                        : 'Delivery'}
-                    </span>
-                  </div>
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                    Placed: {selectedOrderDetail.createdAt ? formatMessageTime(selectedOrderDetail.createdAt) : 'Recent'}
-                  </span>
-                </div>
-              </div>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 850, color: 'var(--text-main)' }}>
+                Order Details
+              </h3>
 
               <button
                 type="button"
@@ -3771,30 +3798,9 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <div
-                  style={{
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '8px',
-                    backgroundColor: '#FEE2E2',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    color: '#DC2626',
-                  }}
-                >
-                  <AlertCircle size={20} />
-                </div>
-                <div>
-                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: '#111827' }}>
-                    Cancel Order #{cancelModalOrder.orderNumber}
-                  </h3>
-                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                    Customer: {cancelModalOrder.customerName} ({cancelModalOrder.type.toUpperCase()})
-                  </span>
-                </div>
-              </div>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 800, color: '#111827' }}>
+                Cancel Order
+              </h3>
               <button
                 type="button"
                 onClick={() => setCancelModalOrder(null)}
@@ -3955,37 +3961,9 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
                 backgroundColor: 'var(--bg-card-subtle)',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '18px' }}>📋</span>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <span style={{ fontWeight: 800, fontSize: '15px', color: 'var(--text-main)' }}>
-                      Order #{selectedOrderForMenu.orderNumber}
-                    </span>
-                    {(() => {
-                      const badge = getOrderStatusBadge(selectedOrderForMenu.status, selectedOrderForMenu.type);
-                      return (
-                        <span
-                          style={{
-                            fontSize: '10px',
-                            fontWeight: 800,
-                            textTransform: 'uppercase',
-                            padding: '2px 8px',
-                            borderRadius: '4px',
-                            backgroundColor: badge.bg,
-                            color: badge.color,
-                          }}
-                        >
-                          {badge.label}
-                        </span>
-                      );
-                    })()}
-                  </div>
-                  <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                    Ordered by {selectedOrderForMenu.customerName} · {selectedOrderForMenu.createdAt || 'Recent'}
-                  </div>
-                </div>
-              </div>
+              <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: 'var(--text-main)' }}>
+                Order Details
+              </h3>
               <button
                 type="button"
                 onClick={() => setSelectedOrderForMenu(null)}

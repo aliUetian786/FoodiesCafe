@@ -29,6 +29,10 @@ export async function GET(request: Request) {
       await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ`);
       await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_collected BOOLEAN DEFAULT false`);
       await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_coordinates JSONB`);
+      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS assigned_waiter_id VARCHAR(64)`);
+      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS assigned_waiter_name VARCHAR(255)`);
+      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_table_qr BOOLEAN DEFAULT false`);
+      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS waiter_notified BOOLEAN DEFAULT false`);
     } catch (e) {}
 
     let sql = `
@@ -54,7 +58,11 @@ export async function GET(request: Request) {
              rider_status as "riderStatus",
              delivered_at as "deliveredAt",
              payment_collected as "paymentCollected",
-             customer_coordinates as "customerCoordinates"
+             customer_coordinates as "customerCoordinates",
+             assigned_waiter_id as "assignedWaiterId",
+             assigned_waiter_name as "assignedWaiterName",
+             is_table_qr as "isTableQr",
+             waiter_notified as "waiterNotified"
       FROM orders
     `;
     const params: any[] = [];
@@ -188,6 +196,10 @@ export async function POST(request: Request) {
       deliveredAt = null,
       paymentCollected = false,
       customerCoordinates = null,
+      assignedWaiterId = null,
+      assignedWaiterName = null,
+      isTableQr = false,
+      waiterNotified = false,
     } = body;
 
     let res;
@@ -199,13 +211,15 @@ export async function POST(request: Request) {
           payment_method, items, original_subtotal, add_on_subtotal, tax, total,
           notes, delivery_address, version, sent_to_kitchen, sent_to_kitchen_at,
           forward_to_kitchen_at, auto_forward_custom_min, cashier_id, cashier_name, is_walk_in,
-          assigned_rider_id, assigned_rider_name, rider_status, delivered_at, payment_collected, customer_coordinates
+          assigned_rider_id, assigned_rider_name, rider_status, delivered_at, payment_collected, customer_coordinates,
+          assigned_waiter_id, assigned_waiter_name, is_table_qr, waiter_notified
         ) VALUES (
           $1, $2, $3, $4, $5, $6,
           $7, $8, $9, $10, $11, $12,
           $13, $14::jsonb, $15, $16, $17, $18,
           $19, $20, $21, $22, $23, $24, $25, $26, $27, $28,
-          $29, $30, $31, $32, $33, $34::jsonb
+          $29, $30, $31, $32, $33, $34::jsonb,
+          $35, $36, $37, $38
         ) RETURNING *
       `;
 
@@ -244,6 +258,10 @@ export async function POST(request: Request) {
         deliveredAt || null,
         Boolean(paymentCollected),
         customerCoordinates ? JSON.stringify(customerCoordinates) : null,
+        assignedWaiterId || null,
+        assignedWaiterName || null,
+        Boolean(isTableQr),
+        Boolean(waiterNotified),
       ];
 
       res = await query(sql, values);
@@ -332,6 +350,10 @@ export async function PATCH(request: Request) {
       deliveredAt,
       paymentCollected,
       customerCoordinates,
+      assignedWaiterId,
+      assignedWaiterName,
+      isTableQr,
+      waiterNotified,
     } = body;
 
     if (!orderId) {
@@ -440,6 +462,22 @@ export async function PATCH(request: Request) {
     if (customerCoordinates !== undefined) {
       updates.push(`customer_coordinates = $${idx++}::jsonb`);
       values.push(customerCoordinates ? JSON.stringify(customerCoordinates) : null);
+    }
+    if (assignedWaiterId !== undefined) {
+      updates.push(`assigned_waiter_id = $${idx++}`);
+      values.push(assignedWaiterId || null);
+    }
+    if (assignedWaiterName !== undefined) {
+      updates.push(`assigned_waiter_name = $${idx++}`);
+      values.push(assignedWaiterName || null);
+    }
+    if (isTableQr !== undefined) {
+      updates.push(`is_table_qr = $${idx++}`);
+      values.push(Boolean(isTableQr));
+    }
+    if (waiterNotified !== undefined) {
+      updates.push(`waiter_notified = $${idx++}`);
+      values.push(Boolean(waiterNotified));
     }
 
     if (updates.length === 0) {

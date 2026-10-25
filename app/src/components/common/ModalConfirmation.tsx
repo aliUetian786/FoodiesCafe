@@ -79,7 +79,6 @@ export const ModalConfirmation: React.FC<ModalConfirmationProps> = ({
               <h3 style={{ fontSize: '18px', fontWeight: 700, margin: 0, color: 'var(--text-main)' }}>
                 {title}
               </h3>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Action Confirmation</span>
             </div>
           </div>
           <button

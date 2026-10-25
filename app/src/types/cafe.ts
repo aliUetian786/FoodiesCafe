@@ -58,6 +58,8 @@ export interface Branch {
   deliveryEnabled: boolean;
   latitude?: number;
   longitude?: number;
+  maxOrderDistanceKm?: number;
+  tableQrMaxDistanceMeters?: number;
   paymentSettings?: BranchPaymentSettings;
 }
 
@@ -150,9 +152,14 @@ export interface Order {
   customerCoordinates?: { lat: number; lng: number };
   assignedRiderId?: string;
   assignedRiderName?: string;
-  riderStatus?: 'assigned' | 'picked_up' | 'delivered';
+  riderStatus?: 'assigned' | 'picked_up' | 'en_route' | 'delivered';
   deliveredAt?: string;
   paymentCollected?: boolean;
+  assignedWaiterId?: string;
+  assignedWaiterName?: string;
+  isTableQr?: boolean;
+  tableQrSessionId?: string;
+  waiterNotified?: boolean;
 }
 
 export interface Table {
@@ -167,6 +174,11 @@ export interface Table {
   seatedAt?: string;
   reservedFor?: string;
   pin?: string;
+  qrCode?: string;
+  qrGeneratedAt?: string;
+  qrExpiresAt?: string;
+  qrValidMinutes?: number;
+  allowQrOrderOnReserved?: boolean;
 }
 
 export interface TableSession {

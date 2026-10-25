@@ -116,30 +116,9 @@ export const CartCheckoutModal: React.FC<CartCheckoutModalProps> = ({
               zIndex: 10,
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <div
-                style={{
-                  width: '36px',
-                  height: '36px',
-                  borderRadius: '10px',
-                  backgroundColor: 'var(--primary-light)',
-                  color: 'var(--primary)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                }}
-              >
-                <ShoppingBag size={20} />
-              </div>
-              <div>
-                <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-                  Your Meal Cart
-                </h3>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  {currentBranch.name}
-                </span>
-              </div>
-            </div>
+            <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
+              Cart
+            </h3>
 
             <button
               onClick={onClose}

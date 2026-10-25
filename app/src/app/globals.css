@@ -265,3 +265,53 @@ button {
     display: inline !important;
   }
 }
+
+/* Staff Responsive Mobile Drawer & Slide */
+.staff-mobile-menu-btn {
+  display: none !important;
+}
+.staff-mobile-drawer-backdrop {
+  display: none !important;
+}
+.staff-mobile-drawer-panel {
+  display: none !important;
+}
+
+@media (max-width: 768px) {
+  .staff-desktop-sidebar {
+    display: none !important;
+  }
+  .staff-mobile-menu-btn {
+    display: flex !important;
+  }
+  .staff-mobile-drawer-backdrop {
+    display: block !important;
+  }
+  .staff-mobile-drawer-panel {
+    display: flex !important;
+  }
+  .staff-header-inner {
+    padding: 0 12px !important;
+    gap: 8px !important;
+  }
+  .staff-header-branch-name {
+    max-width: 130px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .staff-main-content {
+    padding: 12px 10px !important;
+    overflow-y: auto !important;
+  }
+}
+
+@media (max-width: 540px) {
+  .staff-edit-branch-text {
+    display: none !important;
+  }
+  .staff-header-name {
+    display: none !important;
+  }
+}
+

@@ -23,22 +23,57 @@ import { CustomersOrdersScreen } from '@/staff/CustomersAndOrders';
 import { RiderDashboardScreen } from '@/staff/RiderDashboard';
 
 export default function StaffPortalMainPage() {
-  const { currentRole, setCurrentRole } = useApp();
+  const { currentRole, setCurrentRole, currentUser, setCurrentUser } = useApp();
 
   // Restore staff view from localStorage on refresh so data & screen do not go away
   const [currentView, setCurrentView] = useState<string>(() => {
     if (typeof window !== 'undefined') {
-      const saved = localStorage.getItem('foodies_staff_view');
-      if (saved && saved !== 'staff-auth') return saved;
+      const savedUser = localStorage.getItem('foodies_staff_user');
+      const savedRole = localStorage.getItem('foodies_staff_role');
+      const savedView = localStorage.getItem('foodies_staff_view');
+
+      // Only restore view if there is a valid authenticated staff session
+      if (savedUser && savedRole && savedRole !== 'customer' && savedView && savedView !== 'staff-auth') {
+        return savedView;
+      }
     }
     return 'staff-auth';
   });
+
+  // Verify and re-hydrate staff session on mount
+  React.useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const savedStaffUser = localStorage.getItem('foodies_staff_user');
+    const savedStaffRole = localStorage.getItem('foodies_staff_role');
+
+    if (savedStaffUser && savedStaffRole && savedStaffRole !== 'customer') {
+      try {
+        const parsed = JSON.parse(savedStaffUser);
+        if (parsed && parsed.role && parsed.role !== 'customer') {
+          if (currentUser.id !== parsed.id || currentUser.role !== parsed.role) {
+            setCurrentUser(parsed);
+          }
+          if (currentRole !== parsed.role) {
+            setCurrentRole(parsed.role as any);
+          }
+          return;
+        }
+      } catch (e) {}
+    }
+
+    // If no valid staff session exists and view is not staff-auth, redirect to login
+    if (currentView !== 'staff-auth') {
+      handleNavigate('staff-auth');
+    }
+  }, []);
 
   const handleNavigate = (view: string) => {
     setCurrentView(view);
     if (typeof window !== 'undefined') {
       if (view === 'staff-auth') {
         localStorage.removeItem('foodies_staff_view');
+        localStorage.removeItem('foodies_staff_user');
+        localStorage.removeItem('foodies_staff_role');
       } else {
         localStorage.setItem('foodies_staff_view', view);
       }

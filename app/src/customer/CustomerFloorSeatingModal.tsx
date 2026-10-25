@@ -71,17 +71,9 @@ export const CustomerFloorSeatingModal: React.FC<CustomerFloorSeatingModalProps>
             flexShrink: 0,
           }}
         >
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-              <Armchair size={17} color="var(--primary)" />
-              <h3 style={{ fontSize: 'clamp(15px, 3.5vw, 17px)', fontWeight: 850, margin: 0, color: 'var(--text-main)', letterSpacing: '-0.01em' }}>
-                Select Free Table
-              </h3>
-            </div>
-            <p style={{ fontSize: 'clamp(11px, 2.5vw, 12px)', color: 'var(--text-secondary)', margin: '2px 0 0' }}>
-              {currentBranch?.name || 'Foodies Cafe'} · Choose an available table
-            </p>
-          </div>
+          <h3 style={{ fontSize: '17px', fontWeight: 850, margin: 0, color: 'var(--text-main)', letterSpacing: '-0.01em' }}>
+            Free Tables
+          </h3>
 
           <button
             onClick={onClose}

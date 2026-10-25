@@ -102,6 +102,8 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
     phone: '',
     latitude: 31.5126,
     longitude: 74.3436,
+    maxOrderDistanceKm: 50,
+    tableQrMaxDistanceMeters: 300,
   });
 
   // Role permissions check: platform_owner or branch_manager can edit branch location
@@ -137,6 +139,8 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
           longitude:
             target.longitude ??
             (target.city === 'Islamabad' ? 73.0552 : target.city === 'Karachi' ? 67.0305 : 74.3436),
+          maxOrderDistanceKm: target.maxOrderDistanceKm ?? 50,
+          tableQrMaxDistanceMeters: target.tableQrMaxDistanceMeters ?? 300,
         });
       }
     }
@@ -229,6 +233,21 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
 
   // Handlers
   const handleSelectBranch = (bId: string) => {
+    const target = branchesWithDistance.find((item) => item.id === bId);
+    const isNearest = nearestBranch?.id === bId;
+    const maxDist = target?.maxOrderDistanceKm ?? 50;
+    const dist = target?.distanceKm ?? 0;
+
+    // Reject selection if branch is not nearest and exceeds configured max order distance
+    if (!isNearest && dist > maxDist) {
+      addToast({
+        type: 'warning',
+        title: 'Branch Out of Range',
+        message: `${target?.name || 'This branch'} only accepts orders within ${maxDist} km (you are ${dist} km away).`,
+      });
+      return;
+    }
+
     setSelectedBranchId(bId);
     setCurrentBranchId(bId);
     if (typeof window !== 'undefined') {
@@ -255,6 +274,8 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
       phone: b.phone,
       latitude: b.latitude ?? (b.city === 'Islamabad' ? 33.7215 : b.city === 'Karachi' ? 24.8252 : 31.5126),
       longitude: b.longitude ?? (b.city === 'Islamabad' ? 73.0552 : b.city === 'Karachi' ? 67.0305 : 74.3436),
+      maxOrderDistanceKm: b.maxOrderDistanceKm ?? 50,
+      tableQrMaxDistanceMeters: b.tableQrMaxDistanceMeters ?? 300,
     });
   };
 
@@ -269,12 +290,14 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
       phone: editForm.phone.trim(),
       latitude: Number(editForm.latitude),
       longitude: Number(editForm.longitude),
+      maxOrderDistanceKm: Number(editForm.maxOrderDistanceKm) || 50,
+      tableQrMaxDistanceMeters: Number(editForm.tableQrMaxDistanceMeters) || 300,
     });
 
     addToast({
       type: 'success',
       title: 'Branch Location Updated 📍',
-      message: `${editForm.name} location details saved.`,
+      message: `${editForm.name} location & distance parameters saved.`,
     });
 
     setEditingBranch(null);
@@ -367,79 +390,38 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
         {/* ============ COMPACT MODAL TOP HEADER ============ */}
         <div
           style={{
-            padding: '10px 18px',
+            padding: '12px 18px',
             borderBottom: '1px solid var(--border-color)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'space-between',
             backgroundColor: 'var(--bg-card-subtle)',
             flexShrink: 0,
-            gap: '10px',
           }}
         >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0 }}>
-            <div
-              style={{
-                width: '34px',
-                height: '34px',
-                borderRadius: '10px',
-                backgroundColor: 'rgba(217, 101, 40, 0.12)',
-                color: 'var(--primary)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-              }}
-            >
-              <Navigation size={18} />
-            </div>
-            <div style={{ minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <h3 style={{ fontSize: '15px', fontWeight: 900, color: 'var(--text-main)', margin: 0, whiteSpace: 'nowrap' }}>
-                  Branch Locator & Route
-                </h3>
-                {nearestBranch && (
-                  <span
-                    style={{
-                      fontSize: '10px',
-                      fontWeight: 900,
-                      padding: '1px 6px',
-                      borderRadius: '8px',
-                      backgroundColor: '#DCFCE7',
-                      color: '#15803D',
-                    }}
-                  >
-                    Nearest: {nearestBranch.city}
-                  </span>
-                )}
-              </div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>
-                Select a store to view its location, distance, and direct navigation
-              </div>
-            </div>
-          </div>
+          <h3 style={{ fontSize: '16px', fontWeight: 900, color: 'var(--text-main)', margin: 0 }}>
+            Store Locator
+          </h3>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
-            {/* Close Button */}
-            <button
-              onClick={onClose}
-              aria-label="Close"
-              style={{
-                width: '30px',
-                height: '30px',
-                borderRadius: '50%',
-                backgroundColor: '#FFFFFF',
-                border: '1px solid var(--border-color)',
-                color: 'var(--text-muted)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: 'pointer',
-              }}
-            >
-              <X size={15} />
-            </button>
-          </div>
+          {/* Close Button */}
+          <button
+            onClick={onClose}
+            aria-label="Close"
+            style={{
+              width: '30px',
+              height: '30px',
+              borderRadius: '50%',
+              backgroundColor: '#FFFFFF',
+              border: '1px solid var(--border-color)',
+              color: 'var(--text-muted)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+            }}
+          >
+            <X size={15} />
+          </button>
         </div>
 
         {/* ============ MODAL BODY (1/4 Left Side & 3/4 Right Side) ============ */}
@@ -498,6 +480,8 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
                 const isSelected = b.id === selectedBranchId;
                 const isCurrentActive = b.id === currentBranchId;
                 const isNearest = nearestBranch?.id === b.id;
+                const maxDist = b.maxOrderDistanceKm ?? 50;
+                const isBeyond = !isNearest && b.distanceKm > maxDist;
 
                 return (
                   <div
@@ -510,7 +494,8 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
                         ? '1.5px solid var(--primary)'
                         : '1px solid var(--border-color)',
                       backgroundColor: isSelected ? 'rgba(217, 101, 40, 0.05)' : '#FFFFFF',
-                      cursor: 'pointer',
+                      cursor: isBeyond ? 'not-allowed' : 'pointer',
+                      opacity: isBeyond ? 0.65 : 1,
                       display: 'flex',
                       flexDirection: 'column',
                       gap: '4px',
@@ -521,20 +506,36 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
                       <span style={{ fontSize: '9.5px', fontWeight: 800, color: 'var(--text-secondary)' }}>
                         {b.city}
                       </span>
-                      {isNearest && (
-                        <span
-                          style={{
-                            fontSize: '9px',
-                            fontWeight: 900,
-                            padding: '1px 5px',
-                            borderRadius: '8px',
-                            backgroundColor: '#DCFCE7',
-                            color: '#15803D',
-                          }}
-                        >
-                          ⚡ Nearest
-                        </span>
-                      )}
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                        {isNearest && (
+                          <span
+                            style={{
+                              fontSize: '9px',
+                              fontWeight: 900,
+                              padding: '1px 5px',
+                              borderRadius: '8px',
+                              backgroundColor: '#DCFCE7',
+                              color: '#15803D',
+                            }}
+                          >
+                            ⚡ Nearest
+                          </span>
+                        )}
+                        {isBeyond && (
+                          <span
+                            style={{
+                              fontSize: '8px',
+                              fontWeight: 900,
+                              padding: '1px 5px',
+                              borderRadius: '4px',
+                              backgroundColor: '#FEE2E2',
+                              color: '#DC2626',
+                            }}
+                          >
+                            ⛔ Beyond {maxDist} km
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     {/* Branch Name in BOLD */}
@@ -1019,11 +1020,8 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
                   </div>
                   <div>
                     <h4 style={{ fontSize: '15px', fontWeight: 900, margin: 0, color: 'var(--text-main)' }}>
-                      Edit Branch Location
+                      Edit Location
                     </h4>
-                    <span style={{ fontSize: '10.5px', color: '#7C3AED', fontWeight: 700 }}>
-                      Owner & Manager Permission Verified
-                    </span>
                   </div>
                 </div>
 
@@ -1166,6 +1164,60 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
                       }}
                     />
                   </div>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary)', display: 'block', marginBottom: '3px' }}>
+                    Max Order Distance (km)
+                  </label>
+                  <input
+                    type="number"
+                    min="1"
+                    max="500"
+                    step="1"
+                    required
+                    value={editForm.maxOrderDistanceKm}
+                    onChange={(e) => setEditForm((f) => ({ ...f, maxOrderDistanceKm: parseFloat(e.target.value) || 50 }))}
+                    style={{
+                      width: '100%',
+                      padding: '7px 10px',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'var(--bg-input)',
+                      fontSize: '12.5px',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                  <span style={{ fontSize: '10.5px', color: 'var(--text-muted)', display: 'block', marginTop: '2px' }}>
+                    Customers beyond this distance cannot place orders or select this branch.
+                  </span>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 700, display: 'block', marginBottom: '3px' }}>
+                    Table QR Max Ordering Distance (Meters)
+                  </label>
+                  <input
+                    type="number"
+                    min="10"
+                    max="5000"
+                    step="10"
+                    required
+                    value={editForm.tableQrMaxDistanceMeters}
+                    onChange={(e) => setEditForm((f) => ({ ...f, tableQrMaxDistanceMeters: parseInt(e.target.value) || 300 }))}
+                    style={{
+                      width: '100%',
+                      padding: '7px 10px',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'var(--bg-input)',
+                      fontSize: '12.5px',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                  <span style={{ fontSize: '10.5px', color: 'var(--text-muted)', display: 'block', marginTop: '2px' }}>
+                    Allowed radius for on-table physical QR orders (default 300m). Beyond this, table ordering is blocked.
+                  </span>
                 </div>
 
                 <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>

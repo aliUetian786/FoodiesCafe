@@ -38,6 +38,7 @@ export const RiderDashboardScreen: React.FC<RiderDashboardProps> = ({ initialTab
     currentBranch,
     finishRiderDelivery,
     updateRiderAvailability,
+    departRider,
     addToast,
   } = useApp();
 
@@ -598,6 +599,157 @@ export const RiderDashboardScreen: React.FC<RiderDashboardProps> = ({ initialTab
           ======================================================== */}
       {mainView === 'active' && (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
+          {/* DEPARTURE ACTION BANNER: Shown when rider has assigned orders and has not departed yet */}
+          {!isBusy && ongoingDeliveries.length > 0 && (
+            <div
+              style={{
+                backgroundColor: '#FFF7ED',
+                border: '2px solid #EA580C',
+                borderRadius: '18px',
+                padding: '16px 20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '14px',
+                boxShadow: '0 4px 16px rgba(234, 88, 12, 0.12)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <div
+                  style={{
+                    width: '46px',
+                    height: '46px',
+                    borderRadius: '14px',
+                    backgroundColor: '#EA580C',
+                    color: '#FFFFFF',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                    boxShadow: '0 4px 12px rgba(234, 88, 12, 0.3)',
+                  }}
+                >
+                  <Bike size={24} />
+                </div>
+                <div>
+                  <div style={{ fontSize: '15.5px', fontWeight: 900, color: '#9A3412', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>Ready for Departure ({ongoingDeliveries.length} {ongoingDeliveries.length === 1 ? 'Order' : 'Orders'} Assigned)</span>
+                    <span style={{ fontSize: '11px', fontWeight: 800, padding: '2px 8px', borderRadius: '12px', backgroundColor: '#DCFCE7', color: '#166534', border: '1px solid #BBF7D0' }}>
+                      Status: Ready
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#C2410C', marginTop: '3px', lineHeight: 1.4 }}>
+                    Customer Support can still assign or change your orders while you are at the branch.
+                    <br />
+                    <strong>Before you depart</strong>, click the button to set your status to <strong>Busy</strong> so Customer Support cannot assign any more orders to you.
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const targetId = activeRider?.id || currentUser?.id;
+                  if (targetId) {
+                    departRider(targetId);
+                  }
+                }}
+                style={{
+                  padding: '11px 22px',
+                  borderRadius: '12px',
+                  backgroundColor: '#EA580C',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  fontSize: '13.5px',
+                  fontWeight: 900,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 14px rgba(234, 88, 12, 0.35)',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <Bike size={18} />
+                <span>🚀 Depart for Delivery (Mark Busy)</span>
+              </button>
+            </div>
+          )}
+
+          {/* ACTIVE TRIP BANNER: Shown when rider has departed and is busy delivering */}
+          {isBusy && ongoingDeliveries.length > 0 && (
+            <div
+              style={{
+                backgroundColor: '#EFF6FF',
+                border: '2px solid #2563EB',
+                borderRadius: '18px',
+                padding: '16px 20px',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                flexWrap: 'wrap',
+                gap: '14px',
+                boxShadow: '0 4px 16px rgba(37, 99, 235, 0.12)',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+                <div
+                  style={{
+                    width: '46px',
+                    height: '46px',
+                    borderRadius: '14px',
+                    backgroundColor: '#2563EB',
+                    color: '#FFFFFF',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                    boxShadow: '0 4px 12px rgba(37, 99, 235, 0.3)',
+                  }}
+                >
+                  <Bike size={24} />
+                </div>
+                <div>
+                  <div style={{ fontSize: '15.5px', fontWeight: 900, color: '#1E40AF', display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <span>En Route on Delivery Trip</span>
+                    <span style={{ fontSize: '11px', fontWeight: 800, padding: '2px 8px', borderRadius: '12px', backgroundColor: '#FEF3C7', color: '#B45309', border: '1px solid #FDE68A' }}>
+                      Status: Busy ({ongoingDeliveries.length} {ongoingDeliveries.length === 1 ? 'Order' : 'Orders'} Remaining)
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '12px', color: '#2563EB', marginTop: '3px' }}>
+                    Customer Support sees you as <strong>Busy</strong> and cannot assign new orders. Finish deliveries below using Google Maps directions.
+                  </div>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => {
+                  const targetId = activeRider?.id || currentUser?.id;
+                  if (targetId) {
+                    updateRiderAvailability(targetId, 'available');
+                  }
+                }}
+                style={{
+                  padding: '9px 18px',
+                  borderRadius: '10px',
+                  backgroundColor: '#FFFFFF',
+                  color: '#1E40AF',
+                  border: '1.5px solid #BFDBFE',
+                  fontSize: '12.5px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                }}
+              >
+                <span>↩️ Return to Base (Mark Available)</span>
+              </button>
+            </div>
+          )}
+
           {filteredActiveDeliveries.length === 0 ? (
             <div
               style={{
@@ -659,11 +811,17 @@ export const RiderDashboardScreen: React.FC<RiderDashboardProps> = ({ initialTab
                               borderRadius: '8px',
                               fontSize: '11px',
                               fontWeight: 800,
-                              backgroundColor: ord.status === 'ready' ? '#DCFCE7' : '#EFF6FF',
-                              color: ord.status === 'ready' ? '#166534' : '#1D4ED8',
+                              backgroundColor: (isBusy || ord.status === 'out_for_delivery') ? '#EFF6FF' : '#DCFCE7',
+                              color: (isBusy || ord.status === 'out_for_delivery') ? '#1D4ED8' : '#166534',
                             }}
                           >
-                            {ord.status === 'ready' ? 'READY FOR PICKUP' : 'OUT FOR DELIVERY'}
+                            {isBusy || ord.status === 'out_for_delivery'
+                              ? 'OUT FOR DELIVERY 🛵'
+                              : ord.status === 'ready'
+                              ? 'READY AT CAFE'
+                              : ord.status === 'preparing'
+                              ? 'COOKING IN KITCHEN'
+                              : 'ASSIGNED • READY'}
                           </span>
                         </div>
                         <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px' }}>
@@ -1033,29 +1191,10 @@ export const RiderDashboardScreen: React.FC<RiderDashboardProps> = ({ initialTab
             }}
           >
             {/* Modal Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span style={{ fontSize: '19px', fontWeight: 900, color: '#EA580C' }}>
-                    Order #{selectedOrderMenu.orderNumber}
-                  </span>
-                  <span
-                    style={{
-                      padding: '3px 8px',
-                      borderRadius: '8px',
-                      fontSize: '11px',
-                      fontWeight: 800,
-                      backgroundColor: selectedOrderMenu.status === 'completed' ? '#DCFCE7' : '#FEF3C7',
-                      color: selectedOrderMenu.status === 'completed' ? '#166534' : '#92400E',
-                    }}
-                  >
-                    {selectedOrderMenu.status.toUpperCase()}
-                  </span>
-                </div>
-                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                  Placed on {selectedOrderMenu.createdAt}
-                </div>
-              </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '6px', borderBottom: '1px solid var(--border-color)' }}>
+              <h3 style={{ fontSize: '18px', fontWeight: 900, color: 'var(--text-main)', margin: 0 }}>
+                Order Details
+              </h3>
 
               <button
                 type="button"

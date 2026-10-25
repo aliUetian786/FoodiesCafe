@@ -24,6 +24,7 @@ import {
   RefreshCw,
   MapPin,
   Edit,
+  QrCode,
 } from 'lucide-react';
 import { StoreMapModal } from './StoreMapModal';
 import { CustomerLoginModal } from './CustomerLoginModal';
@@ -578,6 +579,14 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
             onClick={() => handleSidebarNav('menu')}
           />
 
+          {/* Table QR Ordering */}
+          <SidebarItem
+            icon={<QrCode size={19} />}
+            label="Table QR Ordering"
+            isActive={currentView === 'table-qr'}
+            onClick={() => handleSidebarNav('table-qr')}
+          />
+
           {/* Active Orders / Tracking */}
           <SidebarItem
             icon={<ClipboardList size={19} />}
@@ -717,32 +726,10 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
             }}
           >
             {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div
-                  style={{
-                    width: 'clamp(36px, 7vw, 42px)',
-                    height: 'clamp(36px, 7vw, 42px)',
-                    borderRadius: '50%',
-                    backgroundColor: 'var(--primary-light)',
-                    color: 'var(--primary)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    flexShrink: 0,
-                  }}
-                >
-                  <User size={20} />
-                </div>
-                <div>
-                  <h3 style={{ fontSize: 'clamp(15px, 3.5vw, 18px)', fontWeight: 900, color: 'var(--text-main)', margin: 0, letterSpacing: '-0.02em' }}>
-                    Profile Information
-                  </h3>
-                  <span style={{ fontSize: 'clamp(10.5px, 2.2vw, 11.5px)', color: 'var(--text-muted)', fontWeight: 650 }}>
-                    View and update your personal details
-                  </span>
-                </div>
-              </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, paddingBottom: '4px', borderBottom: '1px solid var(--border-color)' }}>
+              <h3 style={{ fontSize: '18px', fontWeight: 900, color: 'var(--text-main)', margin: 0, letterSpacing: '-0.02em' }}>
+                Profile
+              </h3>
 
               <button
                 type="button"

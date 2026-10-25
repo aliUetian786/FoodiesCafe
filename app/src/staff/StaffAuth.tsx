@@ -270,6 +270,11 @@ export const StaffAuth: React.FC<StaffAuthProps> = ({ onSuccess }) => {
     setCurrentRole(matchedUser.role);
     setCurrentUser(matchedUser);
 
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('foodies_staff_user', JSON.stringify(matchedUser));
+      localStorage.setItem('foodies_staff_role', matchedUser.role);
+    }
+
     if (matchedUser.branchId) {
       setCurrentBranchId(matchedUser.branchId);
       if (typeof window !== 'undefined') {

@@ -100,6 +100,7 @@ interface AppContextType {
   unassignRiderFromOrder: (orderId: string) => void;
   finishRiderDelivery: (orderId: string, paymentCollected?: boolean) => void;
   updateRiderAvailability: (riderId: string, status: 'available' | 'busy' | 'offline') => void;
+  departRider: (riderId: string) => void;
   customerCoordinates: { lat: number; lng: number } | null;
   setCustomerCoordinates: (coords: { lat: number; lng: number } | null) => void;
   
@@ -111,8 +112,16 @@ interface AppContextType {
   updateTable: (tableId: string, updates: Partial<Table>) => void;
   deleteTable: (tableId: string) => void;
   updateTableStatus: (tableId: string, status: TableStatus, reservationName?: string) => void;
+  markTableFree: (tableIdOrNumber: string) => void;
   addTableSession: (session: Omit<TableSession, 'id'>) => void;
   completeTableSession: (tableId: string) => void;
+  generateTableQr: (tableId: string, validMinutes: number, allowOnReserved?: boolean) => Promise<Table | null>;
+  toggleTableQrAllowReserved: (tableId: string, allow: boolean) => Promise<void>;
+  activeTableSession: { tableId: string; tableNumber: string; branchId: string; seatedAt: string; orderId?: string } | null;
+  setActiveTableSession: (session: { tableId: string; tableNumber: string; branchId: string; seatedAt: string; orderId?: string } | null) => void;
+  assignWaiterToOrder: (orderId: string, waiterId: string, waiterName: string) => Promise<void>;
+  cancelDineInOrder: (orderId: string, reason?: string) => Promise<void>;
+  addItemsToExistingOrder: (orderId: string, newItems: OrderItem[]) => Promise<void>;
   
   // Menu & Categories Actions
   categories: string[];
@@ -207,6 +216,8 @@ const INITIAL_BRANCHES: Branch[] = [
     deliveryEnabled: true,
     latitude: 31.5126,
     longitude: 74.3436,
+    maxOrderDistanceKm: 50,
+    tableQrMaxDistanceMeters: 300,
     paymentSettings: {
       dine_in: { COD: true, Wallet: true, Card: true, Bank: true, Installment: false },
       takeaway: { COD: true, Wallet: true, Card: true, Bank: true, Installment: false },
@@ -228,6 +239,8 @@ const INITIAL_BRANCHES: Branch[] = [
     deliveryEnabled: true,
     latitude: 33.7215,
     longitude: 73.0552,
+    maxOrderDistanceKm: 50,
+    tableQrMaxDistanceMeters: 300,
     paymentSettings: {
       dine_in: { COD: true, Wallet: true, Card: true, Bank: true, Installment: false },
       takeaway: { COD: true, Wallet: true, Card: true, Bank: true, Installment: false },
@@ -249,6 +262,8 @@ const INITIAL_BRANCHES: Branch[] = [
     deliveryEnabled: true,
     latitude: 24.8252,
     longitude: 67.0305,
+    maxOrderDistanceKm: 50,
+    tableQrMaxDistanceMeters: 300,
     paymentSettings: {
       dine_in: { COD: true, Wallet: true, Card: true, Bank: true, Installment: false },
       takeaway: { COD: true, Wallet: true, Card: true, Bank: true, Installment: false },
@@ -573,14 +588,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     status: 'active',
   };
 
-  const [currentRole, setCurrentRole] = useState<Role>('customer');
+  const [currentRole, setCurrentRole] = useState<Role>(() => {
+    if (typeof window !== 'undefined') {
+      const isStaffPath = window.location.pathname.startsWith('/staff');
+      const savedStaffRole = localStorage.getItem('foodies_staff_role');
+      if (savedStaffRole && savedStaffRole !== 'customer') {
+        return savedStaffRole as Role;
+      }
+      if (isStaffPath) {
+        const savedStaffUser = localStorage.getItem('foodies_staff_user');
+        if (savedStaffUser) {
+          try {
+            const parsed = JSON.parse(savedStaffUser);
+            if (parsed && parsed.role && parsed.role !== 'customer') {
+              return parsed.role as Role;
+            }
+          } catch (e) {}
+        }
+      }
+    }
+    return 'customer';
+  });
+
   const [currentUser, setCurrentUser] = useState<User>(() => {
     if (typeof window !== 'undefined') {
+      const isStaffPath = window.location.pathname.startsWith('/staff');
+      if (isStaffPath) {
+        try {
+          const savedStaff = localStorage.getItem('foodies_staff_user');
+          if (savedStaff) {
+            const parsedStaff = JSON.parse(savedStaff);
+            if (parsedStaff && parsedStaff.id && parsedStaff.role !== 'customer') {
+              return parsedStaff;
+            }
+          }
+        } catch (e) {}
+      }
+
+      // Check customer user if not on staff path
       try {
         const saved = localStorage.getItem('foodies_customer_user');
         if (saved) {
           const parsed = JSON.parse(saved);
-          if (parsed && parsed.name && parsed.name !== 'Guest Customer') {
+          if (parsed && parsed.name && parsed.name !== 'Guest Customer' && parsed.role === 'customer') {
             return parsed;
           }
         }
@@ -589,17 +639,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return GUEST_CUSTOMER;
   });
 
-  // Automatically keep foodies_customer_user synchronized in localStorage
+  // Automatically keep storage synchronized with proper role isolation
   useEffect(() => {
     if (typeof window === 'undefined') return;
     try {
-      if (currentUser && currentUser.name && currentUser.name !== 'Guest Customer') {
+      if (currentUser && currentUser.role && currentUser.role !== 'customer') {
+        // Staff member: save strictly to staff session keys
+        localStorage.setItem('foodies_staff_user', JSON.stringify(currentUser));
+        localStorage.setItem('foodies_staff_role', currentUser.role);
+      } else if (currentUser && currentUser.name && currentUser.name !== 'Guest Customer') {
+        // Customer: save strictly to customer key
         localStorage.setItem('foodies_customer_user', JSON.stringify(currentUser));
       } else if (currentUser && currentUser.name === 'Guest Customer') {
         localStorage.removeItem('foodies_customer_user');
       }
     } catch (e) {}
   }, [currentUser]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      if (currentRole && currentRole !== 'customer') {
+        localStorage.setItem('foodies_staff_role', currentRole);
+      }
+    } catch (e) {}
+  }, [currentRole]);
   const [currentBranchId, setCurrentBranchId] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       const manual = localStorage.getItem('foodies_customer_manual_branch');
@@ -905,61 +969,84 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch (e) {}
     }
 
-    // Load persisted user on first mount
-    const savedUser = localStorage.getItem('foodies_customer_user');
-    if (savedUser) {
-      try {
-        const parsedUser = JSON.parse(savedUser);
-        if (parsedUser && parsedUser.name && parsedUser.name !== 'Guest Customer') {
-          setCurrentUser(parsedUser);
+    // Load persisted user on first mount with strict staff vs customer isolation
+    if (typeof window !== 'undefined') {
+      const isStaffPath = window.location.pathname.startsWith('/staff');
+      if (isStaffPath) {
+        const savedStaff = localStorage.getItem('foodies_staff_user');
+        const savedStaffRole = localStorage.getItem('foodies_staff_role');
+        if (savedStaff) {
+          try {
+            const parsedStaff = JSON.parse(savedStaff);
+            if (parsedStaff && parsedStaff.id && parsedStaff.role && parsedStaff.role !== 'customer') {
+              setCurrentUser(parsedStaff);
+              if (savedStaffRole) {
+                setCurrentRole(savedStaffRole as Role);
+              } else {
+                setCurrentRole(parsedStaff.role);
+              }
+            }
+          } catch (e) {}
         }
-      } catch (e) {}
+      } else {
+        const savedUser = localStorage.getItem('foodies_customer_user');
+        if (savedUser) {
+          try {
+            const parsedUser = JSON.parse(savedUser);
+            if (parsedUser && parsedUser.name && parsedUser.name !== 'Guest Customer' && parsedUser.role === 'customer') {
+              setCurrentUser(parsedUser);
+            }
+          } catch (e) {}
+        }
+      }
     }
 
-    // Auto-detect and pick nearest branch automatically if user hasn't explicitly selected one
-    if (typeof window !== 'undefined' && !localStorage.getItem('foodies_customer_manual_branch')) {
-      const selectNearest = (userLat: number, userLng: number) => {
-        let minDistance = Infinity;
-        let nearestId = 'gulberg-lahore';
+    // Geolocation detection & nearest branch auto-lock
+    const selectNearest = (userLat: number, userLng: number) => {
+      let minDistance = Infinity;
+      let nearestId = 'gulberg-lahore';
 
-        INITIAL_BRANCHES.forEach((b) => {
-          const bLat = b.latitude ?? (b.city === 'Islamabad' ? 33.7215 : b.city === 'Karachi' ? 24.8252 : 31.5126);
-          const bLng = b.longitude ?? (b.city === 'Islamabad' ? 73.0552 : b.city === 'Karachi' ? 67.0305 : 74.3436);
-          const R = 6371;
-          const dLat = ((bLat - userLat) * Math.PI) / 180;
-          const dLon = ((bLng - userLng) * Math.PI) / 180;
-          const a =
-            Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-            Math.cos((userLat * Math.PI) / 180) *
-              Math.cos((bLat * Math.PI) / 180) *
-              Math.sin(dLon / 2) *
-              Math.sin(dLon / 2);
-          const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-          const dist = R * c;
-          if (dist < minDistance) {
-            minDistance = dist;
-            nearestId = b.id;
-          }
-        });
-
-        setCurrentBranchId(nearestId);
-        if (typeof window !== 'undefined') {
-          localStorage.setItem('foodies_customer_branch', nearestId);
+      INITIAL_BRANCHES.forEach((b) => {
+        const bLat = b.latitude ?? (b.city === 'Islamabad' ? 33.7215 : b.city === 'Karachi' ? 24.8252 : 31.5126);
+        const bLng = b.longitude ?? (b.city === 'Islamabad' ? 73.0552 : b.city === 'Karachi' ? 67.0305 : 74.3436);
+        const R = 6371;
+        const dLat = ((bLat - userLat) * Math.PI) / 180;
+        const dLon = ((bLng - userLng) * Math.PI) / 180;
+        const a =
+          Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+          Math.cos((userLat * Math.PI) / 180) *
+            Math.cos((bLat * Math.PI) / 180) *
+            Math.sin(dLon / 2) *
+            Math.sin(dLon / 2);
+        const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+        const dist = R * c;
+        if (dist < minDistance) {
+          minDistance = dist;
+          nearestId = b.id;
         }
-      };
+      });
 
-      if ('geolocation' in navigator) {
-        navigator.geolocation.getCurrentPosition(
-          (pos) => {
-            setCustomerCoordinates({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-            selectNearest(pos.coords.latitude, pos.coords.longitude);
-          },
-          () => selectNearest(31.5204, 74.3587),
-          { timeout: 5000 }
-        );
-      } else {
-        selectNearest(31.5204, 74.3587);
+      if (typeof window !== 'undefined' && !localStorage.getItem('foodies_customer_manual_branch')) {
+        setCurrentBranchId(nearestId);
+        localStorage.setItem('foodies_customer_branch', nearestId);
       }
+    };
+
+    if ('geolocation' in navigator) {
+      navigator.geolocation.getCurrentPosition(
+        (pos) => {
+          setCustomerCoordinates({ lat: pos.coords.latitude, lng: pos.coords.longitude });
+          selectNearest(pos.coords.latitude, pos.coords.longitude);
+        },
+        () => {
+          setCustomerCoordinates({ lat: 31.5204, lng: 74.3587 });
+          selectNearest(31.5204, 74.3587);
+        },
+        { timeout: 5000 }
+      );
+    } else {
+      setCustomerCoordinates({ lat: 31.5204, lng: 74.3587 });
+      selectNearest(31.5204, 74.3587);
     }
 
     // Set up persistent BroadcastChannel for instant zero-refresh cross-tab communication
@@ -1340,6 +1427,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               try { localStorage.setItem('foodies_users_live', JSON.stringify(data.users)); } catch (e) {}
               return data.users;
             });
+
+            // Synchronize active staff member's live session if authenticated
+            if (typeof window !== 'undefined') {
+              const savedStaffUser = localStorage.getItem('foodies_staff_user');
+              if (savedStaffUser) {
+                try {
+                  const parsed = JSON.parse(savedStaffUser);
+                  if (parsed && parsed.id) {
+                    const freshStaff = data.users.find((u: User) => u.id === parsed.id || (u.email && parsed.email && u.email === parsed.email));
+                    if (freshStaff && freshStaff.status === 'active' && freshStaff.role !== 'customer') {
+                      setCurrentUser((curr) => {
+                        if (curr && curr.id === freshStaff.id && curr.role === freshStaff.role && curr.name === freshStaff.name) {
+                          return curr;
+                        }
+                        return freshStaff;
+                      });
+                      setCurrentRole((currRole) => {
+                        if (currRole === 'customer' || !currRole) {
+                          return freshStaff.role;
+                        }
+                        return currRole;
+                      });
+                      localStorage.setItem('foodies_staff_user', JSON.stringify(freshStaff));
+                      localStorage.setItem('foodies_staff_role', freshStaff.role);
+                    }
+                  }
+                } catch (e) {}
+              }
+            }
           }
         }
       } catch (e) {}
@@ -1851,19 +1967,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const rider = users.find((u) => u.id === riderId);
     const riderName = rider?.name || 'Assigned Rider';
     let orderNum = '';
-    let newStatus: OrderStatus | undefined;
 
     setOrders((prev) => {
       const updated = prev.map((ord) => {
         if (ord.id === orderId || ord.orderNumber === orderId) {
           orderNum = ord.orderNumber;
-          newStatus = ord.status === 'ready' ? ('out_for_delivery' as OrderStatus) : ord.status;
           return {
             ...ord,
             assignedRiderId: riderId,
             assignedRiderName: riderName,
             riderStatus: 'assigned' as const,
-            status: newStatus,
           };
         }
         return ord;
@@ -1875,9 +1988,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return updated;
     });
 
+    // NOTE: Rider is NOT marked busy upon initial assignment!
+    // Rider remains available at cafe/branch until he explicitly clicks "Depart for Delivery".
+    // This allows Customer Support to assign 1, 2, or more orders and freely reassign/change before departure.
     setUsers((prev) => {
       const updated = prev.map((u) =>
-        u.id === riderId ? { ...u, riderAvailability: 'busy' as const, riderActiveOrderId: orderId } : u
+        u.id === riderId ? { ...u, riderActiveOrderId: u.riderActiveOrderId || orderId } : u
       );
       try {
         localStorage.setItem('foodies_users_live', JSON.stringify(updated));
@@ -1887,7 +2003,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     setCurrentUser((prev) => {
       if (prev && prev.id === riderId) {
-        const updated = { ...prev, riderAvailability: 'busy' as const, riderActiveOrderId: orderId };
+        const updated = { ...prev, riderActiveOrderId: prev.riderActiveOrderId || orderId };
         try {
           localStorage.setItem('foodies_current_user', JSON.stringify(updated));
         } catch (e) {}
@@ -1906,20 +2022,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           assignedRiderId: riderId,
           assignedRiderName: riderName,
           riderStatus: 'assigned',
-          ...(newStatus ? { status: newStatus } : {}),
-        }),
-      }).catch(() => {});
-    } catch (e) {}
-
-    // Asynchronously sync rider user update to PostgreSQL
-    try {
-      fetch('/api/users', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: riderId,
-          riderAvailability: 'busy',
-          riderActiveOrderId: orderId,
         }),
       }).catch(() => {});
     } catch (e) {}
@@ -1927,7 +2029,102 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     addToast({
       type: 'success',
       title: 'Rider Assigned! 🛵',
-      message: `Order #${orderNum || orderId} assigned to ${riderName}. Live delivery tracking is now active.`,
+      message: `Order #${orderNum || orderId} assigned to ${riderName}. You can assign more orders or change before departure.`,
+    });
+  };
+
+  const departRider = (riderId: string) => {
+    const rider = users.find((u) => u.id === riderId);
+    const riderName = rider?.name || 'Rider';
+    const activeAssigned = orders.filter(
+      (o) => o.assignedRiderId === riderId && o.type === 'delivery' && o.status !== 'completed' && o.status !== 'cancelled'
+    );
+
+    if (activeAssigned.length === 0) {
+      addToast({
+        type: 'warning',
+        title: 'No Orders Assigned',
+        message: 'You do not have any active assigned orders to depart with.',
+      });
+      return;
+    }
+
+    const orderIds = activeAssigned.map((o) => o.id);
+
+    // 1. Mark orders as out_for_delivery
+    setOrders((prev) => {
+      const updated = prev.map((ord) => {
+        if (orderIds.includes(ord.id) || (ord.assignedRiderId === riderId && ord.type === 'delivery' && ord.status !== 'completed' && ord.status !== 'cancelled')) {
+          return {
+            ...ord,
+            status: 'out_for_delivery' as OrderStatus,
+            riderStatus: 'en_route' as const,
+            dispatchedAt: new Date().toISOString(),
+          };
+        }
+        return ord;
+      });
+      try {
+        localStorage.setItem('foodies_orders_live', JSON.stringify(updated));
+      } catch (e) {}
+      broadcastOrders(updated);
+      return updated;
+    });
+
+    // 2. Mark rider status as busy
+    setUsers((prev) => {
+      const updated = prev.map((u) =>
+        u.id === riderId ? { ...u, riderAvailability: 'busy' as const, riderActiveOrderId: orderIds[0] } : u
+      );
+      try {
+        localStorage.setItem('foodies_users_live', JSON.stringify(updated));
+      } catch (e) {}
+      return updated;
+    });
+
+    setCurrentUser((prev) => {
+      if (prev && prev.id === riderId) {
+        const updated = { ...prev, riderAvailability: 'busy' as const, riderActiveOrderId: orderIds[0] };
+        try {
+          localStorage.setItem('foodies_current_user', JSON.stringify(updated));
+        } catch (e) {}
+        return updated;
+      }
+      return prev;
+    });
+
+    // 3. Persist rider busy availability to PostgreSQL
+    try {
+      fetch('/api/users', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          id: riderId,
+          riderAvailability: 'busy',
+          riderActiveOrderId: orderIds[0],
+        }),
+      }).catch(() => {});
+    } catch (e) {}
+
+    // 4. Persist orders status update to PostgreSQL
+    orderIds.forEach((oId) => {
+      try {
+        fetch('/api/orders', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            orderId: oId,
+            status: 'out_for_delivery',
+            riderStatus: 'en_route',
+          }),
+        }).catch(() => {});
+      } catch (e) {}
+    });
+
+    addToast({
+      type: 'info',
+      title: '🚀 Departure Confirmed!',
+      message: `${riderName} is now Busy. ${activeAssigned.length} ${activeAssigned.length === 1 ? 'order' : 'orders'} out for delivery. Customer Support cannot assign further orders until return.`,
     });
   };
 
@@ -1957,38 +2154,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     if (prevRiderId) {
-      setUsers((prev) => {
-        const updated = prev.map((u) =>
-          u.id === prevRiderId ? { ...u, riderAvailability: 'available' as const, riderActiveOrderId: undefined } : u
-        );
-        try {
-          localStorage.setItem('foodies_users_live', JSON.stringify(updated));
-        } catch (e) {}
-        return updated;
-      });
-
-      setCurrentUser((prev) => {
-        if (prev && prev.id === prevRiderId) {
-          const updated = { ...prev, riderAvailability: 'available' as const, riderActiveOrderId: undefined };
+      // Check if rider has any other active delivery orders remaining
+      const remainingOrders = orders.filter(
+        (o) => o.assignedRiderId === prevRiderId && o.id !== orderId && o.orderNumber !== orderId && o.status !== 'completed' && o.status !== 'cancelled'
+      );
+      if (remainingOrders.length === 0) {
+        setUsers((prev) => {
+          const updated = prev.map((u) =>
+            u.id === prevRiderId ? { ...u, riderAvailability: 'available' as const, riderActiveOrderId: undefined } : u
+          );
           try {
-            localStorage.setItem('foodies_current_user', JSON.stringify(updated));
+            localStorage.setItem('foodies_users_live', JSON.stringify(updated));
           } catch (e) {}
           return updated;
-        }
-        return prev;
-      });
+        });
 
-      try {
-        fetch('/api/users', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            id: prevRiderId,
-            riderAvailability: 'available',
-            riderActiveOrderId: null,
-          }),
-        }).catch(() => {});
-      } catch (e) {}
+        setCurrentUser((prev) => {
+          if (prev && prev.id === prevRiderId) {
+            const updated = { ...prev, riderAvailability: 'available' as const, riderActiveOrderId: undefined };
+            try {
+              localStorage.setItem('foodies_current_user', JSON.stringify(updated));
+            } catch (e) {}
+            return updated;
+          }
+          return prev;
+        });
+
+        try {
+          fetch('/api/users', {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              id: prevRiderId,
+              riderAvailability: 'available',
+              riderActiveOrderId: null,
+            }),
+          }).catch(() => {});
+        } catch (e) {}
+      }
     }
 
     try {
@@ -2015,6 +2218,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let completedOrderNumber = '';
     let riderIdToFree: string | undefined = undefined;
     let newDeliveries = 0;
+    let remainingForRider = 0;
 
     setOrders((prev) => {
       const updated = prev.map((ord) => {
@@ -2033,6 +2237,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
         return ord;
       });
+
+      if (riderIdToFree) {
+        remainingForRider = updated.filter(
+          (o) => o.assignedRiderId === riderIdToFree && o.status !== 'completed' && o.status !== 'cancelled'
+        ).length;
+      }
+
       try {
         localStorage.setItem('foodies_orders_live', JSON.stringify(updated));
       } catch (e) {}
@@ -2041,14 +2252,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     if (riderIdToFree) {
+      const shouldBeAvailable = remainingForRider === 0;
+      const nextAvailability = shouldBeAvailable ? ('available' as const) : ('busy' as const);
+
       setUsers((prev) => {
         const updated = prev.map((u) => {
           if (u.id === riderIdToFree) {
             newDeliveries = (u.riderTotalDeliveries || 0) + 1;
             return {
               ...u,
-              riderAvailability: 'available' as const,
-              riderActiveOrderId: undefined,
+              riderAvailability: nextAvailability,
+              riderActiveOrderId: shouldBeAvailable ? undefined : u.riderActiveOrderId,
               riderTotalDeliveries: newDeliveries,
             };
           }
@@ -2064,8 +2278,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (prev && prev.id === riderIdToFree) {
           const updated = {
             ...prev,
-            riderAvailability: 'available' as const,
-            riderActiveOrderId: undefined,
+            riderAvailability: nextAvailability,
+            riderActiveOrderId: shouldBeAvailable ? undefined : prev.riderActiveOrderId,
             riderTotalDeliveries: newDeliveries,
           };
           try {
@@ -2082,8 +2296,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
             id: riderIdToFree,
-            riderAvailability: 'available',
-            riderActiveOrderId: null,
+            riderAvailability: nextAvailability,
+            riderActiveOrderId: shouldBeAvailable ? null : undefined,
             riderTotalDeliveries: newDeliveries,
           }),
         }).catch(() => {});
@@ -2152,28 +2366,60 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const recordCashPayment = (orderId: string, amountReceived: number) => {
     let change = 0;
+    const ord = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
     setOrders((prev) => {
-      const updated = prev.map((ord) => {
-        if (ord.id === orderId || ord.orderNumber === orderId) {
-          change = Math.max(0, amountReceived - Number(ord.total));
-          return { ...ord, paymentStatus: 'paid' as const };
+      const updated = prev.map((item) => {
+        if (item.id === orderId || item.orderNumber === orderId) {
+          change = Math.max(0, amountReceived - Number(item.total));
+          return { ...item, paymentStatus: 'paid' as const, status: 'completed' as const };
         }
-        return ord;
+        return item;
       });
       broadcastOrders(updated);
       return updated;
     });
 
-    // Asynchronously sync payment status to PostgreSQL database
+    // Asynchronously sync payment status and completion to PostgreSQL database
     try {
       fetch('/api/orders', {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId, paymentStatus: 'paid' }),
+        body: JSON.stringify({ orderId, paymentStatus: 'paid', status: 'completed' }),
       }).catch(() => {});
     } catch (e) {}
 
-    const ord = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
+    // When cashier/customer proceeds order of cash after eating/leaving, automatically mark table free!
+    if (ord?.tableNumber) {
+      setTables((prev) => {
+        const next = prev.map((t) =>
+          t.number === ord.tableNumber || t.id === ord.tableNumber
+            ? { ...t, status: 'available' as const, reservedFor: undefined, currentOrderId: undefined }
+            : t
+        );
+        broadcastTables(next);
+        return next;
+      });
+
+      setActiveTableSessionState((prev) => {
+        if (prev && (prev.tableNumber === ord.tableNumber || prev.tableId === ord.tableNumber || prev.orderId === ord.id)) {
+          if (typeof window !== 'undefined') localStorage.removeItem('foodies_active_table_session');
+          return null;
+        }
+        return prev;
+      });
+
+      try {
+        fetch('/api/tables', {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            tableNumber: ord.tableNumber,
+            status: 'available',
+          }),
+        }).catch(() => {});
+      } catch (e) {}
+    }
+
     const addedAmount = ord ? Number(ord.total) : amountReceived;
 
     const targetShift =
@@ -2408,9 +2654,229 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
+  const [activeTableSession, setActiveTableSessionState] = useState<{
+    tableId: string;
+    tableNumber: string;
+    branchId: string;
+    seatedAt: string;
+    orderId?: string;
+  } | null>(() => {
+    if (typeof window === 'undefined') return null;
+    try {
+      const saved = localStorage.getItem('foodies_active_table_session');
+      return saved ? JSON.parse(saved) : null;
+    } catch {
+      return null;
+    }
+  });
+
+  const setActiveTableSession = (session: { tableId: string; tableNumber: string; branchId: string; seatedAt: string; orderId?: string } | null) => {
+    setActiveTableSessionState(session);
+    if (typeof window !== 'undefined') {
+      if (session) {
+        localStorage.setItem('foodies_active_table_session', JSON.stringify(session));
+      } else {
+        localStorage.removeItem('foodies_active_table_session');
+      }
+    }
+  };
+
+  const generateTableQr = async (tableId: string, validMinutes: number, allowOnReserved: boolean = false): Promise<Table | null> => {
+    const targetTable = tables.find((t) => t.id === tableId);
+    if (!targetTable) return null;
+
+    const qrToken = `QR-${(targetTable.branchId || 'gulberg').slice(0, 3).toUpperCase()}-${targetTable.number.replace(/\D/g, '') || targetTable.id}-${Math.floor(1000 + Math.random() * 9000)}`;
+    const now = new Date();
+    const expiresAt = new Date(now.getTime() + validMinutes * 60000).toISOString();
+
+    const updatedTable: Table = {
+      ...targetTable,
+      qrCode: qrToken,
+      qrGeneratedAt: now.toISOString(),
+      qrExpiresAt: expiresAt,
+      qrValidMinutes: validMinutes,
+      allowQrOrderOnReserved: allowOnReserved,
+    };
+
+    setTables((prev) => {
+      const next = prev.map((t) => (t.id === tableId ? updatedTable : t));
+      broadcastTables(next);
+      return next;
+    });
+
+    try {
+      await fetch('/api/tables', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tableId,
+          qrCode: qrToken,
+          qrExpiresAt: expiresAt,
+          allowQrOrderOnReserved: allowOnReserved,
+        }),
+      });
+    } catch (e) {}
+
+    addToast({
+      type: 'success',
+      title: `QR Code Generated: Table ${targetTable.number}`,
+      message: `Valid for ${validMinutes >= 60 ? `${validMinutes / 60} hour(s)` : `${validMinutes} mins`}. Ordering on reserved: ${allowOnReserved ? 'ALLOWED' : 'LOCKED'}.`,
+    });
+
+    return updatedTable;
+  };
+
+  const toggleTableQrAllowReserved = async (tableId: string, allow: boolean) => {
+    const targetTable = tables.find((t) => t.id === tableId);
+    if (!targetTable) return;
+
+    setTables((prev) => {
+      const next = prev.map((t) => (t.id === tableId ? { ...t, allowQrOrderOnReserved: allow } : t));
+      broadcastTables(next);
+      return next;
+    });
+
+    try {
+      await fetch('/api/tables', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tableId,
+          allowQrOrderOnReserved: allow,
+        }),
+      });
+    } catch (e) {}
+
+    addToast({
+      type: 'info',
+      title: `Table ${targetTable.number} Setting Updated`,
+      message: allow
+        ? 'In-store QR scan allowed even if table is reserved online.'
+        : 'In-store QR scan will show reserved notice and require picking another table.',
+    });
+  };
+
+  const assignWaiterToOrder = async (orderId: string, waiterId: string, waiterName: string) => {
+    setOrders((prev) => {
+      const next = prev.map((o) => (o.id === orderId ? { ...o, assignedWaiterId: waiterId, assignedWaiterName: waiterName } : o));
+      broadcastOrders(next);
+      return next;
+    });
+
+    try {
+      await fetch('/api/orders', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId,
+          assignedWaiterId: waiterId,
+          assignedWaiterName: waiterName,
+        }),
+      });
+    } catch (e) {}
+  };
+
+  const cancelDineInOrder = async (orderId: string, reason: string = 'Customer cancelled at table') => {
+    const targetOrder = orders.find((o) => o.id === orderId);
+    if (!targetOrder) return;
+
+    setOrders((prev) => {
+      const next = prev.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              status: 'cancelled' as OrderStatus,
+              notes: `${o.notes ? `${o.notes} · ` : ''}Cancelled: ${reason}`,
+            }
+          : o
+      );
+      broadcastOrders(next);
+      return next;
+    });
+
+    if (targetOrder.tableNumber) {
+      const matchingTable = tables.find(
+        (t) => t.number === targetOrder.tableNumber && (!t.branchId || t.branchId === targetOrder.branchId)
+      );
+      if (matchingTable) {
+        updateTableStatus(matchingTable.id, 'available');
+      }
+    }
+
+    try {
+      await fetch('/api/orders', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId,
+          status: 'cancelled',
+          notes: `${targetOrder.notes ? `${targetOrder.notes} · ` : ''}Cancelled: ${reason}`,
+        }),
+      });
+    } catch (e) {}
+
+    addToast({
+      type: 'warning',
+      title: 'Dine-In Order Cancelled',
+      message: `Order #${targetOrder.orderNumber} for Table ${targetOrder.tableNumber || ''} has been cancelled.`,
+    });
+  };
+
+  const addItemsToExistingOrder = async (orderId: string, newItems: OrderItem[]) => {
+    const targetOrder = orders.find((o) => o.id === orderId);
+    if (!targetOrder) return;
+
+    const extraTotal = newItems.reduce((acc, item) => acc + item.unitPrice * item.quantity, 0);
+    const updatedItems = [
+      ...targetOrder.items,
+      ...newItems.map((item) => ({ ...item, isAddOn: true, addedAtStage: 'stage2' as const })),
+    ];
+    const newAddOnSubtotal = (targetOrder.addOnSubtotal || 0) + extraTotal;
+    const newTotal = targetOrder.total + extraTotal;
+    const newVersion = (targetOrder.version || 1) + 1;
+
+    setOrders((prev) => {
+      const next = prev.map((o) =>
+        o.id === orderId
+          ? {
+              ...o,
+              items: updatedItems,
+              addOnSubtotal: newAddOnSubtotal,
+              total: newTotal,
+              version: newVersion,
+              sentToKitchen: true,
+            }
+          : o
+      );
+      broadcastOrders(next);
+      return next;
+    });
+
+    try {
+      await fetch('/api/orders', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          orderId,
+          items: updatedItems,
+          addOnSubtotal: newAddOnSubtotal,
+          total: newTotal,
+          version: newVersion,
+          sentToKitchen: true,
+        }),
+      });
+    } catch (e) {}
+
+    addToast({
+      type: 'success',
+      title: 'Extra Items Added to Table Bill',
+      message: `${newItems.length} new item(s) forwarded to the kitchen!`,
+    });
+  };
+
   const updateTableStatus = (tableId: string, status: TableStatus, reservationName?: string) => {
-    setTables((prev) =>
-      prev.map((t) =>
+    setTables((prev) => {
+      const next = prev.map((t) =>
         t.id === tableId
           ? {
               ...t,
@@ -2419,8 +2885,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               currentOrderId: status === 'available' ? undefined : t.currentOrderId,
             }
           : t
-      )
-    );
+      );
+      broadcastTables(next);
+      return next;
+    });
     addToast({
       type: 'info',
       title: 'Table Status Changed',
@@ -2439,6 +2907,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }),
       }).catch(() => {});
     } catch (e) {}
+  };
+
+  const markTableFree = (tableIdOrNumber: string) => {
+    setTables((prev) => {
+      const next = prev.map((t) =>
+        t.id === tableIdOrNumber || t.number === tableIdOrNumber
+          ? { ...t, status: 'available' as const, reservedFor: undefined, currentOrderId: undefined }
+          : t
+      );
+      broadcastTables(next);
+      return next;
+    });
+
+    setActiveTableSessionState((prev) => {
+      if (prev && (prev.tableId === tableIdOrNumber || prev.tableNumber === tableIdOrNumber)) {
+        if (typeof window !== 'undefined') localStorage.removeItem('foodies_active_table_session');
+        return null;
+      }
+      return prev;
+    });
+
+    try {
+      fetch('/api/tables', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tableNumber: tableIdOrNumber,
+          status: 'available',
+        }),
+      }).catch(() => {});
+    } catch (e) {}
+
+    addToast({
+      type: 'success',
+      title: 'Table Released & Marked Free 🪑',
+      message: `Table #${tableIdOrNumber} is now free and ready for new guests.`,
+    });
   };
 
   const toggleMenuItemBranchAvailability = (itemId: string, branchId: string) => {
@@ -2541,10 +3046,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       return updated;
     });
+
+    // Asynchronously sync payment settings to PostgreSQL database
+    try {
+      fetch('/api/branches', {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ branchId, settings: { paymentSettings: settings } }),
+      }).catch(() => {});
+    } catch (e) {}
+
     addToast({
       type: 'success',
       title: 'Payment Settings Saved! 💳',
-      message: 'Payment modes and installment rules updated for branch.',
+      message: 'Branch payment options updated.',
     });
   };
 
@@ -3688,12 +4203,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         unassignRiderFromOrder,
         finishRiderDelivery,
         updateRiderAvailability,
+        departRider,
         customerCoordinates,
         setCustomerCoordinates,
         tableSessions,
         addTableSession,
         completeTableSession,
         updateTableStatus,
+        markTableFree,
+        generateTableQr,
+        toggleTableQrAllowReserved,
+        activeTableSession,
+        setActiveTableSession,
+        assignWaiterToOrder,
+        cancelDineInOrder,
+        addItemsToExistingOrder,
         toggleMenuItemBranchAvailability,
         updateMenuItemPrice,
         updateBranchSettings,

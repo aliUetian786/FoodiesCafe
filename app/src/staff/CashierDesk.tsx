@@ -37,7 +37,9 @@ import {
   ChefHat,
   Trash2,
   UtensilsCrossed,
+  QrCode,
 } from 'lucide-react';
+import { TableQrModal } from './TableQrModal';
 
 export const CashierScreen: React.FC = () => {
   const {
@@ -60,6 +62,8 @@ export const CashierScreen: React.FC = () => {
     cart,
     addToast,
     tables,
+    updateTableStatus,
+    markTableFree,
     sendOrderToKitchen,
     hasLoadedOlderOrders,
     isFetchingOlderOrders,
@@ -99,6 +103,9 @@ export const CashierScreen: React.FC = () => {
   const [refundAmount, setRefundAmount] = useState('650');
   const [refundReason, setRefundReason] = useState('Customer food return');
 
+  // Table QR Code Management
+  const [showTableQrModal, setShowTableQrModal] = useState(false);
+
   // Rich Walk-in Order Flow States
   const [showWalkInModal, setShowWalkInModal] = useState(false);
   const [walkInStep, setWalkInStep] = useState<'menu' | 'checkout'>('menu');
@@ -124,24 +131,22 @@ export const CashierScreen: React.FC = () => {
     }
   }, [availableTables, walkInTable]);
 
-  // Cashier should ONLY see orders ordered for customers by this cashier (walk-in counter orders)
+  // Cashier should ONLY see Dine-In orders placed via Walk-in or Table QR scan!
   const cashierOrders = useMemo(() => {
     return orders.filter((o) => {
       if (o.branchId && o.branchId !== currentBranch.id) return false;
       if (isManager) return true;
+      if (o.type !== 'dine_in') return false;
       return (
-        o.cashierId === currentUser.id ||
-        (o.cashierId && currentRole === 'cashier') ||
         o.isWalkIn === true ||
-        o.customerId === currentUser.id ||
-        o.orderNumber === 'FC-8242' ||
-        o.orderNumber === 'FC-8225' ||
-        o.orderNumber === 'FC-3391' ||
+        o.isTableQr === true ||
+        !!o.tableQrSessionId ||
+        o.cashierId === currentUser.id ||
         (o.notes && o.notes.toLowerCase().includes('walk-in')) ||
         (o.pickupTime && o.pickupTime.toLowerCase().includes('walk-in'))
       );
     });
-  }, [orders, currentBranch.id, isManager, currentUser.id, currentRole]);
+  }, [orders, currentBranch.id, isManager, currentUser.id]);
 
   const filteredOrders = useMemo(() => {
     return cashierOrders.filter((o) => {
@@ -171,6 +176,14 @@ export const CashierScreen: React.FC = () => {
       return;
     }
     const res = recordCashPayment(selectedOrder.id, tendered);
+    if (selectedOrder.tableNumber) {
+      markTableFree(selectedOrder.tableNumber);
+    }
+    addToast({
+      type: 'success',
+      title: 'Payment Settled & Table Freed! 🎉',
+      message: `Cash collected: Rs. ${selectedOrder.total.toLocaleString()}. Table #${selectedOrder.tableNumber || 'Seated'} is now free for new guests.`,
+    });
     setCalculatedChange(res.change);
     setPaymentConfirmOpen(false);
   };
@@ -1691,6 +1704,27 @@ export const CashierScreen: React.FC = () => {
               <span>Walk-in Order</span>
             </button>
 
+            <button
+              onClick={() => setShowTableQrModal(true)}
+              style={{
+                padding: '8px 14px',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'var(--bg-card)',
+                border: '1.5px solid var(--primary)',
+                color: 'var(--primary)',
+                fontSize: '13px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: 'var(--shadow-sm)',
+              }}
+            >
+              <QrCode size={16} color="var(--primary)" />
+              <span>Table QR Codes</span>
+            </button>
+
             {currentShift ? (
               <button
                 onClick={() => setCloseShiftModal(true)}
@@ -2066,11 +2100,39 @@ export const CashierScreen: React.FC = () => {
             )}
 
             {/* Actions: Print Receipt & Request Refund */}
-            <div style={{ display: 'flex', gap: '10px', borderTop: '1px solid var(--border-color)', paddingTop: '14px' }}>
+            <div style={{ display: 'flex', gap: '10px', borderTop: '1px solid var(--border-color)', paddingTop: '14px', flexWrap: 'wrap' }}>
+              {selectedOrder.tableNumber && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    markTableFree(selectedOrder.tableNumber!);
+                  }}
+                  style={{
+                    flex: 1,
+                    minWidth: '160px',
+                    padding: '10px',
+                    borderRadius: 'var(--radius-md)',
+                    backgroundColor: 'var(--bg-card-subtle)',
+                    border: '1px solid var(--border-color)',
+                    color: 'var(--text-main)',
+                    fontWeight: 800,
+                    fontSize: '13px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span>Mark Table #{selectedOrder.tableNumber} Free 🪑</span>
+                </button>
+              )}
+
               <button
                 onClick={() => handlePrintReceipt()}
                 style={{
                   flex: 1,
+                  minWidth: '130px',
                   padding: '10px',
                   borderRadius: 'var(--radius-md)',
                   backgroundColor: 'var(--bg-card-subtle)',
@@ -2169,46 +2231,9 @@ export const CashierScreen: React.FC = () => {
                 flexShrink: 0,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div
-                  style={{
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '10px',
-                    backgroundColor: 'var(--primary-light)',
-                    color: 'var(--primary)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <UtensilsCrossed size={18} />
-                </div>
-                <div>
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                    <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 800, color: 'var(--text-main)' }}>
-                      {walkInStep === 'menu' ? 'Walk-in Order • Interactive Menu' : 'Finalize Walk-in Order & Dispatch'}
-                    </h3>
-                    <span
-                      style={{
-                        fontSize: '11px',
-                        fontWeight: 800,
-                        padding: '2px 8px',
-                        borderRadius: 'var(--radius-full)',
-                        backgroundColor: 'var(--primary-light)',
-                        color: 'var(--primary)',
-                      }}
-                    >
-                      {currentBranch.name}
-                    </span>
-                  </div>
-                  <p style={{ margin: 0, fontSize: '11.5px', color: 'var(--text-muted)' }}>
-                    {walkInStep === 'menu'
-                      ? 'Select dishes directly from the customer menu for the walk-in customer'
-                      : 'Select delivery type, table seating, and payment mode. Dispatches directly to kitchen queue.'}
-                  </p>
-                </div>
-              </div>
+              <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: 'var(--text-main)' }}>
+                Walk-in Order
+              </h3>
 
               <button
                 onClick={() => {
@@ -2593,158 +2618,43 @@ export const CashierScreen: React.FC = () => {
                   </div>
                 </div>
 
-                {/* 1. ORDER TYPE SELECTOR */}
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-muted)', display: 'block', marginBottom: '8px' }}>
-                    1. Delivery / Order Type
-                  </label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px' }}>
-                    <button
-                      onClick={() => setWalkInOrderType('dine_in')}
-                      style={{
-                        padding: '12px 8px',
-                        borderRadius: 'var(--radius-md)',
-                        backgroundColor: walkInOrderType === 'dine_in' ? 'var(--primary-light)' : 'var(--bg-card-subtle)',
-                        border: walkInOrderType === 'dine_in' ? '2px solid var(--primary)' : '1px solid var(--border-color)',
-                        color: walkInOrderType === 'dine_in' ? 'var(--primary)' : 'var(--text-main)',
-                        fontWeight: 800,
-                        fontSize: '13px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        gap: '6px',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <Utensils size={20} />
-                      <span>Dine-In</span>
-                    </button>
-
-                    <button
-                      onClick={() => setWalkInOrderType('takeaway')}
-                      style={{
-                        padding: '12px 8px',
-                        borderRadius: 'var(--radius-md)',
-                        backgroundColor: walkInOrderType === 'takeaway' ? 'var(--primary-light)' : 'var(--bg-card-subtle)',
-                        border: walkInOrderType === 'takeaway' ? '2px solid var(--primary)' : '1px solid var(--border-color)',
-                        color: walkInOrderType === 'takeaway' ? 'var(--primary)' : 'var(--text-main)',
-                        fontWeight: 800,
-                        fontSize: '13px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        gap: '6px',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <ShoppingBag size={20} />
-                      <span>Takeaway</span>
-                    </button>
-
-                    <button
-                      onClick={() => setWalkInOrderType('delivery')}
-                      style={{
-                        padding: '12px 8px',
-                        borderRadius: 'var(--radius-md)',
-                        backgroundColor: walkInOrderType === 'delivery' ? 'var(--primary-light)' : 'var(--bg-card-subtle)',
-                        border: walkInOrderType === 'delivery' ? '2px solid var(--primary)' : '1px solid var(--border-color)',
-                        color: walkInOrderType === 'delivery' ? 'var(--primary)' : 'var(--text-main)',
-                        fontWeight: 800,
-                        fontSize: '13px',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        alignItems: 'center',
-                        gap: '6px',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <Bike size={20} />
-                      <span>Delivery</span>
-                    </button>
-                  </div>
-                </div>
-
-                {/* 2. DINE-IN: AVAILABLE SEAT/TABLE SELECTOR */}
-                {walkInOrderType === 'dine_in' && (
-                  <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
-                    <label style={{ fontSize: '12.5px', fontWeight: 800, color: 'var(--text-main)', display: 'block', marginBottom: '8px' }}>
-                      Select Available Seat / Table:
+                {/* 1. DINE-IN: AVAILABLE SEAT/TABLE SELECTOR (Walk-in is strictly Dine-In by default) */}
+                <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                    <label style={{ fontSize: '12.5px', fontWeight: 800, color: 'var(--text-main)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                      🍽️ Select Dine-In Table for Guest:
                     </label>
-                    {availableTables.length > 0 ? (
-                      <select
-                        value={walkInTable}
-                        onChange={(e) => setWalkInTable(e.target.value)}
-                        style={{
-                          width: '100%',
-                          padding: '10px',
-                          borderRadius: 'var(--radius-md)',
-                          border: '1px solid var(--border-color)',
-                          backgroundColor: 'var(--bg-card)',
-                          color: 'var(--text-main)',
-                          fontSize: '13.5px',
-                          fontWeight: 700,
-                        }}
-                      >
-                        {availableTables.map((t) => (
-                          <option key={t.id} value={t.number}>
-                            Table #{t.number} — Capacity: {t.capacity} Seats (Available)
-                          </option>
-                        ))}
-                      </select>
-                    ) : (
-                      <div style={{ color: '#DC2626', fontSize: '12.5px', fontWeight: 700 }}>
-                        ⚠️ No tables currently available in floor grid. (Choose takeaway or mark a table available).
-                      </div>
-                    )}
+                    <span style={{ fontSize: '11px', color: 'var(--primary)', fontWeight: 750, backgroundColor: 'var(--primary-light)', padding: '2px 8px', borderRadius: '10px' }}>
+                      Dine-In Seating Only
+                    </span>
                   </div>
-                )}
-
-                {/* 2. DELIVERY: ADDRESS INPUT */}
-                {walkInOrderType === 'delivery' && (
-                  <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)', display: 'flex', flexDirection: 'column', gap: '10px' }}>
-                    <div>
-                      <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
-                        Delivery Address:
-                      </label>
-                      <input
-                        type="text"
-                        value={walkInDeliveryAddress}
-                        onChange={(e) => setWalkInDeliveryAddress(e.target.value)}
-                        placeholder="Street / House #, Sector, Area..."
-                        style={{
-                          width: '100%',
-                          padding: '9px 12px',
-                          borderRadius: '6px',
-                          border: '1px solid var(--border-color)',
-                          backgroundColor: 'var(--bg-card)',
-                          fontSize: '13px',
-                          color: 'var(--text-main)',
-                        }}
-                      />
+                  {availableTables.length > 0 ? (
+                    <select
+                      value={walkInTable}
+                      onChange={(e) => setWalkInTable(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '10px',
+                        borderRadius: 'var(--radius-md)',
+                        border: '1px solid var(--border-color)',
+                        backgroundColor: 'var(--bg-card)',
+                        color: 'var(--text-main)',
+                        fontSize: '13.5px',
+                        fontWeight: 700,
+                      }}
+                    >
+                      {availableTables.map((t) => (
+                        <option key={t.id} value={t.number}>
+                          Table #{t.number} — Capacity: {t.capacity} Seats (Available)
+                        </option>
+                      ))}
+                    </select>
+                  ) : (
+                    <div style={{ color: '#DC2626', fontSize: '12.5px', fontWeight: 700 }}>
+                      ⚠️ No tables currently available in floor grid. Please free a table first.
                     </div>
-
-                    <div>
-                      <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
-                        Customer Phone:
-                      </label>
-                      <input
-                        type="text"
-                        value={walkInCustomerPhone}
-                        onChange={(e) => setWalkInCustomerPhone(e.target.value)}
-                        placeholder="0300-1234567"
-                        style={{
-                          width: '100%',
-                          padding: '9px 12px',
-                          borderRadius: '6px',
-                          border: '1px solid var(--border-color)',
-                          backgroundColor: 'var(--bg-card)',
-                          fontSize: '13px',
-                          color: 'var(--text-main)',
-                        }}
-                      />
-                    </div>
-                  </div>
-                )}
+                  )}
+                </div>
 
                 {/* 3. MODE OF PAYMENT */}
                 <div>
@@ -2851,7 +2761,7 @@ export const CashierScreen: React.FC = () => {
       {openShiftModal && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 9999, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
           <div style={{ backgroundColor: 'var(--bg-card)', padding: '24px', borderRadius: 'var(--radius-lg)', maxWidth: '420px', width: '100%', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0 }}>Open Cashier Shift</h3>
+            <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0 }}>Open Shift</h3>
             <div>
               <label style={{ fontSize: '12.5px', fontWeight: 700, display: 'block', marginBottom: '4px' }}>
                 Opening Float (Starting cash in till)
@@ -2885,7 +2795,7 @@ export const CashierScreen: React.FC = () => {
       {closeShiftModal && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 9999, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
           <div style={{ backgroundColor: 'var(--bg-card)', padding: '24px', borderRadius: 'var(--radius-lg)', maxWidth: '440px', width: '100%', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0 }}>Close Shift & Reconcile Till</h3>
+            <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0 }}>Close Shift</h3>
             <div>
               <div style={{ fontSize: '13px', color: 'var(--text-muted)' }}>Expected in Drawer:</div>
               <div style={{ fontSize: '20px', fontWeight: 800, color: 'var(--primary)' }}>
@@ -2937,7 +2847,7 @@ export const CashierScreen: React.FC = () => {
       {refundModalOpen && (
         <div style={{ position: 'fixed', inset: 0, zIndex: 9999, backgroundColor: 'rgba(0,0,0,0.7)', display: 'flex', alignItems: 'center', justifyContent: 'center', padding: '16px' }}>
           <div style={{ backgroundColor: 'var(--bg-card)', padding: '24px', borderRadius: 'var(--radius-lg)', maxWidth: '420px', width: '100%', display: 'flex', flexDirection: 'column', gap: '16px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0 }}>Request Customer Refund</h3>
+            <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0 }}>Request Refund</h3>
             <div>
               <label style={{ fontSize: '12px', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Refund Amount (Rs.)</label>
               <input
@@ -2972,6 +2882,19 @@ export const CashierScreen: React.FC = () => {
             </div>
           </div>
         </div>
+      )}
+
+      {/* Table QR Codes Management Modal */}
+      {showTableQrModal && (
+        <TableQrModal
+          isOpen={showTableQrModal}
+          onClose={() => setShowTableQrModal(false)}
+          onSimulateCustomerScan={(tbl) => {
+            if (typeof window !== 'undefined') {
+              window.location.href = `/?tableQr=${encodeURIComponent(tbl)}`;
+            }
+          }}
+        />
       )}
     </div>
   );

@@ -6,10 +6,19 @@ export async function GET(request: Request) {
     const { searchParams } = new URL(request.url);
     const branchId = searchParams.get('branchId');
 
+    // Auto-migrate tables columns if missing
+    try {
+      await query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS qr_code TEXT`);
+      await query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS qr_expires_at TIMESTAMPTZ`);
+      await query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS allow_qr_reserved BOOLEAN DEFAULT false`);
+    } catch (e) {}
+
     let sql = `
       SELECT id, number, branch_id as "branchId", floor, capacity, chairs,
              status, current_order_id as "currentOrderId",
-             seated_at as "seatedAt", reserved_for as "reservedFor", pin
+             seated_at as "seatedAt", reserved_for as "reservedFor", pin,
+             qr_code as "qrCode", qr_expires_at as "qrExpiresAt",
+             allow_qr_reserved as "allowQrOrderOnReserved"
       FROM tables
     `;
     const params: any[] = [];
@@ -34,7 +43,7 @@ export async function GET(request: Request) {
 export async function PATCH(request: Request) {
   try {
     const body = await request.json();
-    const { tableId, tableNumber, branchId, status, pin, reservedFor, currentOrderId } = body;
+    const { tableId, tableNumber, branchId, status, pin, reservedFor, currentOrderId, qrCode, qrExpiresAt, allowQrOrderOnReserved } = body;
 
     if (!tableId && !tableNumber) {
       return NextResponse.json({ error: 'tableId or tableNumber is required' }, { status: 400 });
@@ -72,6 +81,18 @@ export async function PATCH(request: Request) {
     if (currentOrderId !== undefined && status !== 'available') {
       updates.push(`current_order_id = $${idx++}`);
       values.push(currentOrderId);
+    }
+    if (qrCode !== undefined) {
+      updates.push(`qr_code = $${idx++}`);
+      values.push(qrCode);
+    }
+    if (qrExpiresAt !== undefined) {
+      updates.push(`qr_expires_at = $${idx++}`);
+      values.push(qrExpiresAt);
+    }
+    if (allowQrOrderOnReserved !== undefined) {
+      updates.push(`allow_qr_reserved = $${idx++}`);
+      values.push(allowQrOrderOnReserved);
     }
 
     if (updates.length === 0) {

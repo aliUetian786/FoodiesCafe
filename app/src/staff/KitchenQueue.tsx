@@ -65,6 +65,14 @@ export const KitchenQueueScreen: React.FC = () => {
   const handleMarkReadyConfirm = () => {
     if (!confirmReadyOrderId) return;
     updateOrderStatus(confirmReadyOrderId, 'ready');
+    const ord = orders.find((o) => o.id === confirmReadyOrderId);
+    if (ord?.assignedWaiterName) {
+      addToast({
+        type: 'info',
+        title: 'Floor Waiter Notified 🍽️',
+        message: `Order #${ord.orderNumber} for Table ${ord.tableNumber || 'Counter'} is READY! Dispatched to Waiter ${ord.assignedWaiterName}.`,
+      });
+    }
     setConfirmReadyOrderId(null);
   };
 
@@ -74,7 +82,7 @@ export const KitchenQueueScreen: React.FC = () => {
     addToast({
       type: 'info',
       title: 'Dispatched to Floor Staff / Waiter 🍽️',
-      message: `Order #${ord?.orderNumber || ''} sent to server for Table ${ord?.tableNumber || 'Counter'}.`,
+      message: `Order #${ord?.orderNumber || ''} sent to ${ord?.assignedWaiterName || 'server'} for Table ${ord?.tableNumber || 'Counter'}.`,
     });
   };
 
@@ -731,15 +739,10 @@ export const KitchenQueueScreen: React.FC = () => {
             }}
           >
             {/* Modal Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
-              <div>
-                <h3 style={{ fontSize: '20px', fontWeight: 850, margin: 0, color: 'var(--text-main)' }}>
-                  Manage Dish Availability & Stock
-                </h3>
-                <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                  Branch: <strong>{currentBranch.name}</strong> · Mark dishes unavailable when ingredients run out, and restore availability when restocked.
-                </p>
-              </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ fontSize: '18px', fontWeight: 850, margin: 0, color: 'var(--text-main)' }}>
+                Dish Availability
+              </h3>
               <button
                 onClick={() => setUnavailableModalOpen(false)}
                 style={{

@@ -4,7 +4,7 @@
 -- ============================================================================
 
 -- 1. Branches Seed
-INSERT INTO branches (id, name, city, address, phone, opening_hours, is_open, is_busy, prep_time_estimate_min, full_edit_window_min, stop_add_ons_min_before_ready, delivery_enabled, payment_settings)
+INSERT INTO branches (id, name, city, address, phone, opening_hours, is_open, is_busy, prep_time_estimate_min, full_edit_window_min, stop_add_ons_min_before_ready, delivery_enabled, max_order_distance_km, table_qr_max_distance_meters, payment_settings)
 VALUES
 (
     'gulberg-lahore',
@@ -19,6 +19,8 @@ VALUES
     15,
     10,
     true,
+    50,
+    300,
     '{"dine_in":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"takeaway":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"delivery":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":true}}'::jsonb
 ),
 (
@@ -34,6 +36,8 @@ VALUES
     15,
     10,
     true,
+    50,
+    300,
     '{"dine_in":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"takeaway":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"delivery":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false}}'::jsonb
 ),
 (
@@ -49,6 +53,8 @@ VALUES
     15,
     10,
     true,
+    50,
+    300,
     '{"dine_in":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"takeaway":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"delivery":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":true}}'::jsonb
 )
 ON CONFLICT (id) DO UPDATE SET

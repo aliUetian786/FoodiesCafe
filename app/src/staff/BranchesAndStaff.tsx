@@ -47,6 +47,8 @@ export const BranchesStaffScreen: React.FC = () => {
     phone: '',
     latitude: 31.5126,
     longitude: 74.3436,
+    maxOrderDistanceKm: 50,
+    tableQrMaxDistanceMeters: 300,
   });
 
   // Primary Tab: Staff vs Branch entities
@@ -1070,6 +1072,8 @@ export const BranchesStaffScreen: React.FC = () => {
                         phone: b.phone,
                         latitude: b.latitude ?? (b.city === 'Islamabad' ? 33.7215 : b.city === 'Karachi' ? 24.8252 : 31.5126),
                         longitude: b.longitude ?? (b.city === 'Islamabad' ? 73.0552 : b.city === 'Karachi' ? 67.0305 : 74.3436),
+                        maxOrderDistanceKm: b.maxOrderDistanceKm ?? 50,
+                        tableQrMaxDistanceMeters: b.tableQrMaxDistanceMeters ?? 300,
                       });
                     }}
                     style={{
@@ -1131,31 +1135,24 @@ export const BranchesStaffScreen: React.FC = () => {
                 backgroundColor: 'var(--bg-card-subtle)',
                 display: 'flex',
                 alignItems: 'center',
-                gap: '12px',
+                justifyContent: 'space-between',
               }}
             >
-              <div
+              <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
+                New Staff
+              </h3>
+              <button
+                type="button"
+                onClick={() => setCreateStaffModalOpen(false)}
                 style={{
-                  width: '36px',
-                  height: '36px',
-                  borderRadius: '10px',
-                  backgroundColor: 'var(--primary-light)',
-                  color: 'var(--primary)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
+                  border: 'none',
+                  background: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--text-muted)',
                 }}
               >
-                <UserPlus size={18} />
-              </div>
-              <div>
-                <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-                  Provision New Staff Account
-                </h3>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  Issue system access PIN and assign station role
-                </span>
-              </div>
+                <X size={18} />
+              </button>
             </div>
 
             {/* Modal Form */}
@@ -1463,10 +1460,22 @@ export const BranchesStaffScreen: React.FC = () => {
               overflow: 'hidden',
             }}
           >
-            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card-subtle)' }}>
+            <div style={{ padding: '16px 20px', borderBottom: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card-subtle)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <h3 style={{ fontSize: '17px', fontWeight: 800, margin: 0 }}>
-                Edit Staff Member ({editStaffModal.id})
+                Edit Staff
               </h3>
+              <button
+                type="button"
+                onClick={() => setEditStaffModal(null)}
+                style={{
+                  border: 'none',
+                  background: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--text-muted)',
+                }}
+              >
+                <X size={18} />
+              </button>
             </div>
 
             <form onSubmit={handleSaveEditSubmit} style={{ padding: '20px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
@@ -1606,11 +1615,8 @@ export const BranchesStaffScreen: React.FC = () => {
 
             <div>
               <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0 }}>
-                Reset Login PIN for {resetPinModal.user.name}
+                Reset PIN
               </h3>
-              <p style={{ fontSize: '12.5px', color: 'var(--text-muted)', marginTop: '4px' }}>
-                New random 4-digit access PIN generated for terminal login:
-              </p>
             </div>
 
             <div
@@ -1699,30 +1705,9 @@ export const BranchesStaffScreen: React.FC = () => {
             }}
           >
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <div
-                  style={{
-                    width: '36px',
-                    height: '36px',
-                    borderRadius: '10px',
-                    backgroundColor: 'rgba(124, 58, 237, 0.1)',
-                    color: '#7C3AED',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <MapPin size={18} />
-                </div>
-                <div>
-                  <h3 style={{ fontSize: '16px', fontWeight: 900, margin: 0, color: 'var(--text-main)' }}>
-                    Edit Branch Location
-                  </h3>
-                  <span style={{ fontSize: '11px', color: '#7C3AED', fontWeight: 700 }}>
-                    Restricted to Platform Owner & Branch Manager
-                  </span>
-                </div>
-              </div>
+              <h3 style={{ fontSize: '18px', fontWeight: 900, margin: 0, color: 'var(--text-main)' }}>
+                Edit Location
+              </h3>
 
               <button
                 type="button"
@@ -1748,6 +1733,8 @@ export const BranchesStaffScreen: React.FC = () => {
                   phone: branchEditForm.phone.trim(),
                   latitude: Number(branchEditForm.latitude),
                   longitude: Number(branchEditForm.longitude),
+                  maxOrderDistanceKm: Number(branchEditForm.maxOrderDistanceKm) || 50,
+                  tableQrMaxDistanceMeters: Number(branchEditForm.tableQrMaxDistanceMeters) || 300,
                 });
                 addToast({
                   type: 'success',
@@ -1887,6 +1874,60 @@ export const BranchesStaffScreen: React.FC = () => {
                     }}
                   />
                 </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                  Max Order Distance (km)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="500"
+                  step="1"
+                  required
+                  value={branchEditForm.maxOrderDistanceKm}
+                  onChange={(e) => setBranchEditForm((f) => ({ ...f, maxOrderDistanceKm: parseFloat(e.target.value) || 50 }))}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-input)',
+                    fontSize: '13px',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginTop: '3px' }}>
+                  Orders beyond this radius will be rejected and customers cannot select this branch.
+                </span>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 700, display: 'block', marginBottom: '3px' }}>
+                  Table QR Max Ordering Distance (Meters)
+                </label>
+                <input
+                  type="number"
+                  min="10"
+                  max="5000"
+                  step="10"
+                  required
+                  value={branchEditForm.tableQrMaxDistanceMeters}
+                  onChange={(e) => setBranchEditForm((f) => ({ ...f, tableQrMaxDistanceMeters: parseInt(e.target.value) || 300 }))}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-input)',
+                    fontSize: '13px',
+                    boxSizing: 'border-box',
+                  }}
+                />
+                <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'block', marginTop: '3px' }}>
+                  Allowed radius in meters for on-table physical QR orders (default 300m).
+                </span>
               </div>
 
               <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>

@@ -189,20 +189,52 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
   // Tables for active branch
   const branchTables = tables.filter((t) => t.branchId === currentBranchId);
 
-  // Active payment settings from branch manager
-  const branchPaymentSettings = currentBranch.paymentSettings || {
-    dine_in: { COD: true, Wallet: true, Card: true, Bank: true, Installment: false },
-    takeaway: { COD: true, Wallet: true, Card: true, Bank: true, Installment: false },
-    delivery: { COD: true, Wallet: true, Card: true, Bank: true, Installment: true },
-  };
+  // Active payment settings from branch manager with robust JSON parsing
+  const rawBranchPaymentSettings = currentBranch.paymentSettings;
+  const branchPaymentSettings = React.useMemo(() => {
+    if (!rawBranchPaymentSettings) {
+      return {
+        dine_in: { COD: true, Wallet: true, Card: true, Bank: true, Installment: false },
+        takeaway: { COD: true, Wallet: true, Card: true, Bank: true, Installment: false },
+        delivery: { COD: true, Wallet: true, Card: true, Bank: true, Installment: true },
+      };
+    }
+    if (typeof rawBranchPaymentSettings === 'string') {
+      try {
+        return JSON.parse(rawBranchPaymentSettings);
+      } catch (e) {
+        return {
+          dine_in: { COD: true, Wallet: true, Card: true, Bank: true, Installment: false },
+          takeaway: { COD: true, Wallet: true, Card: true, Bank: true, Installment: false },
+          delivery: { COD: true, Wallet: true, Card: true, Bank: true, Installment: true },
+        };
+      }
+    }
+    return rawBranchPaymentSettings;
+  }, [rawBranchPaymentSettings]);
 
-  const activePaymentOptions = branchPaymentSettings[orderType] || {
-    COD: true,
-    Wallet: true,
-    Card: true,
-    Bank: true,
-    Installment: false,
-  };
+  const activePaymentOptions = React.useMemo(() => {
+    const opts = (branchPaymentSettings && branchPaymentSettings[orderType]) || {
+      COD: true,
+      Wallet: true,
+      Card: true,
+      Bank: true,
+      Installment: false,
+    };
+    return opts;
+  }, [branchPaymentSettings, orderType]);
+
+  // If currently selected payment mode is disabled by branch manager, auto-switch to first available
+  useEffect(() => {
+    if (!activePaymentOptions[selectedPaymentMode as keyof typeof activePaymentOptions]) {
+      const allowed = (['COD', 'Card', 'Bank', 'Wallet', 'Installment'] as const).find(
+        (m) => activePaymentOptions[m]
+      );
+      if (allowed) {
+        setSelectedPaymentMode(allowed);
+      }
+    }
+  }, [activePaymentOptions, selectedPaymentMode]);
 
   // Reset steps and sync values when modal opens
   useEffect(() => {
@@ -451,6 +483,46 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
 
     const finalCoords = liveCoords || customerCoordinates || undefined;
 
+    // Check branch maximum order distance acceptance (applicable to delivery, takeaway, and dine-in)
+    const maxAllowedDist = currentBranch.maxOrderDistanceKm ?? 50;
+    if (finalCoords) {
+      const bLat = currentBranch.latitude ?? (currentBranch.city === 'Islamabad' ? 33.7215 : currentBranch.city === 'Karachi' ? 24.8252 : 31.5126);
+      const bLng = currentBranch.longitude ?? (currentBranch.city === 'Islamabad' ? 73.0552 : currentBranch.city === 'Karachi' ? 67.0305 : 74.3436);
+      const R = 6371;
+      const dLat = ((bLat - finalCoords.lat) * Math.PI) / 180;
+      const dLon = ((bLng - finalCoords.lng) * Math.PI) / 180;
+      const a =
+        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+        Math.cos((finalCoords.lat * Math.PI) / 180) *
+          Math.cos((bLat * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
+      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+      const dist = Math.round(R * c * 10) / 10;
+      if (dist > maxAllowedDist) {
+        addToast({
+          type: 'error',
+          title: 'Order Cannot Be Accepted',
+          message: `${currentBranch.name} only accepts orders within ${maxAllowedDist} km (your distance is ${dist} km).`,
+        });
+        return;
+      }
+    }
+
+    // Enforce branch payment options: prevent submitting with disabled payment mode
+    if (!activePaymentOptions[selectedPaymentMode as keyof typeof activePaymentOptions]) {
+      addToast({
+        type: 'error',
+        title: 'Payment Method Unavailable',
+        message: `${selectedPaymentMode} payment is currently disabled by ${currentBranch.name}. Please select an active payment option.`,
+      });
+      const allowed = (['COD', 'Card', 'Bank', 'Wallet', 'Installment'] as const).find(
+        (m) => activePaymentOptions[m]
+      );
+      if (allowed) setSelectedPaymentMode(allowed);
+      return;
+    }
+
     let activeCustomer = currentUser;
     if ((!activeCustomer || !activeCustomer.name || activeCustomer.name === 'Guest Customer') && typeof window !== 'undefined') {
       try {
@@ -584,195 +656,41 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
             </div>
           )}
 
-          {/* Modal Header */}
+          {/* Modal Header — Clean 1-word intro without extra text or stepper lines */}
           <div
             style={{
-              padding: 'clamp(10px, 2.5vw, 15px) clamp(14px, 3.5vw, 22px)',
+              padding: '12px 20px',
               borderBottom: '1px solid var(--border-color)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'space-between',
-              gap: '8px',
               backgroundColor: 'var(--bg-card-subtle)',
               flexShrink: 0,
             }}
           >
-            <div style={{ minWidth: 0 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: 'clamp(10px, 2vw, 11px)', fontWeight: 800, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.06em' }}>
-                  FOODIES CHECKOUT · {currentBranch.name.split(' ')[0]}
-                </span>
-              </div>
-              <h3 style={{ fontSize: 'clamp(14.5px, 3vw, 17.5px)', fontWeight: 900, color: 'var(--text-main)', margin: '2px 0 0', letterSpacing: '-0.01em', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
-                {checkoutStep === 'order_review' && 'Your Order Details'}
-                {checkoutStep === 'auth' && 'Sign In'}
-                {checkoutStep === 'fulfillment' && 'Choose Your Order Type'}
-                {checkoutStep === 'details' && (orderType === 'dine_in' ? 'Select Cafe Table' : orderType === 'takeaway' ? 'Pickup Details' : 'Delivery Address')}
-                {checkoutStep === 'branch_map' && (orderType === 'delivery' ? 'Delivery Route & Store Location' : 'Store Location & Pickup Route')}
-                {checkoutStep === 'payment' && 'Select Payment Mode'}
-              </h3>
-            </div>
+            <h3 style={{ fontSize: '16px', fontWeight: 900, color: 'var(--text-main)', margin: 0, letterSpacing: '-0.01em' }}>
+              Checkout
+            </h3>
 
-            <div style={{ display: 'flex', alignItems: 'center', gap: 'clamp(6px, 1.6vw, 12px)', flexShrink: 0 }}>
-              {/* Step indicator breadcrumb for 4 checkout stages */}
-              {['fulfillment', 'details', 'branch_map', 'payment'].includes(checkoutStep) && (
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                    backgroundColor: 'var(--bg-card)',
-                    padding: '3px 7px',
-                    borderRadius: '20px',
-                    border: '1px solid var(--border-color)',
-                    boxShadow: 'var(--shadow-sm)',
-                  }}
-                >
-                  {/* Step 1: Type */}
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '3px',
-                      padding: '2px 6px',
-                      borderRadius: '10px',
-                      backgroundColor: checkoutStep === 'fulfillment' ? 'var(--primary)' : 'rgba(217, 101, 40, 0.12)',
-                      color: checkoutStep === 'fulfillment' ? '#FFFFFF' : 'var(--primary)',
-                      fontSize: '10px',
-                      fontWeight: 800,
-                      transition: 'all 0.25s ease',
-                    }}
-                  >
-                    {checkoutStep !== 'fulfillment' ? <Check size={10} strokeWidth={3} /> : <span>1</span>}
-                    <span>Type</span>
-                  </div>
-
-                  <div
-                    style={{
-                      width: '5px',
-                      height: '1.5px',
-                      backgroundColor: checkoutStep !== 'fulfillment' ? 'var(--primary)' : 'var(--border-color)',
-                      transition: 'all 0.25s ease',
-                    }}
-                  />
-
-                  {/* Step 2: Details */}
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '3px',
-                      padding: '2px 6px',
-                      borderRadius: '10px',
-                      backgroundColor:
-                        checkoutStep === 'details'
-                          ? 'var(--primary)'
-                          : ['branch_map', 'payment'].includes(checkoutStep)
-                          ? 'rgba(217, 101, 40, 0.12)'
-                          : 'transparent',
-                      color:
-                        checkoutStep === 'details'
-                          ? '#FFFFFF'
-                          : ['branch_map', 'payment'].includes(checkoutStep)
-                          ? 'var(--primary)'
-                          : 'var(--text-muted)',
-                      fontSize: '10px',
-                      fontWeight: 800,
-                      transition: 'all 0.25s ease',
-                    }}
-                  >
-                    {['branch_map', 'payment'].includes(checkoutStep) ? <Check size={10} strokeWidth={3} /> : <span>2</span>}
-                    <span>Details</span>
-                  </div>
-
-                  <div
-                    style={{
-                      width: '5px',
-                      height: '1.5px',
-                      backgroundColor: ['branch_map', 'payment'].includes(checkoutStep) ? 'var(--primary)' : 'var(--border-color)',
-                      transition: 'all 0.25s ease',
-                    }}
-                  />
-
-                  {/* Step 3: Branch Map */}
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '3px',
-                      padding: '2px 6px',
-                      borderRadius: '10px',
-                      backgroundColor:
-                        checkoutStep === 'branch_map'
-                          ? 'var(--primary)'
-                          : checkoutStep === 'payment'
-                          ? 'rgba(217, 101, 40, 0.12)'
-                          : 'transparent',
-                      color:
-                        checkoutStep === 'branch_map'
-                          ? '#FFFFFF'
-                          : checkoutStep === 'payment'
-                          ? 'var(--primary)'
-                          : 'var(--text-muted)',
-                      fontSize: '10px',
-                      fontWeight: 800,
-                      transition: 'all 0.25s ease',
-                    }}
-                  >
-                    {checkoutStep === 'payment' ? <Check size={10} strokeWidth={3} /> : <span>3</span>}
-                    <span>Branch</span>
-                  </div>
-
-                  <div
-                    style={{
-                      width: '5px',
-                      height: '1.5px',
-                      backgroundColor: checkoutStep === 'payment' ? 'var(--primary)' : 'var(--border-color)',
-                      transition: 'all 0.25s ease',
-                    }}
-                  />
-
-                  {/* Step 4: Payment */}
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '3px',
-                      padding: '2px 6px',
-                      borderRadius: '10px',
-                      backgroundColor: checkoutStep === 'payment' ? 'var(--primary)' : 'transparent',
-                      color: checkoutStep === 'payment' ? '#FFFFFF' : 'var(--text-muted)',
-                      fontSize: '10px',
-                      fontWeight: 800,
-                      transition: 'all 0.25s ease',
-                    }}
-                  >
-                    <span>4</span>
-                    <span>Payment</span>
-                  </div>
-                </div>
-              )}
-
-              <button
-                onClick={onClose}
-                style={{
-                  width: '32px',
-                  height: '32px',
-                  borderRadius: '50%',
-                  backgroundColor: 'var(--bg-card)',
-                  border: '1px solid var(--border-color)',
-                  color: 'var(--text-muted)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  flexShrink: 0,
-                }}
-                aria-label="Close"
-              >
-                <X size={16} />
-              </button>
-            </div>
+            <button
+              onClick={onClose}
+              style={{
+                width: '30px',
+                height: '30px',
+                borderRadius: '50%',
+                backgroundColor: 'var(--bg-card)',
+                border: '1px solid var(--border-color)',
+                color: 'var(--text-muted)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                flexShrink: 0,
+              }}
+              aria-label="Close"
+            >
+              <X size={15} />
+            </button>
           </div>
 
           {/* Modal Body - Strictly unscrollable, fluid typography and spacing */}
@@ -2023,10 +1941,20 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
                       {branchesWithDist.map((b) => {
                         const isCur = b.id === currentBranchId;
                         const isNear = nearestB?.id === b.id;
+                        const maxDist = b.maxOrderDistanceKm ?? 50;
+                        const isBeyond = !isNear && b.distanceKm > maxDist;
                         return (
                           <div
                             key={b.id}
                             onClick={() => {
+                              if (isBeyond) {
+                                addToast({
+                                  type: 'warning',
+                                  title: 'Branch Out of Range',
+                                  message: `${b.name} only accepts orders within ${maxDist} km (you are ${b.distanceKm} km away).`,
+                                });
+                                return;
+                              }
                               setCurrentBranchId(b.id);
                               if (typeof window !== 'undefined') {
                                 localStorage.setItem('foodies_customer_branch', b.id);
@@ -2038,19 +1966,28 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
                               borderRadius: '8px',
                               border: isCur ? '1.5px solid var(--primary)' : '1px solid var(--border-color)',
                               backgroundColor: isCur ? 'rgba(217, 101, 40, 0.08)' : 'var(--bg-card-subtle)',
-                              cursor: 'pointer',
+                              cursor: isBeyond ? 'not-allowed' : 'pointer',
+                              opacity: isBeyond ? 0.65 : 1,
                               display: 'flex',
                               flexDirection: 'column',
                               gap: '2px',
+                              transition: 'all 0.15s ease',
                             }}
                           >
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                               <span style={{ fontSize: '9px', fontWeight: 800, color: 'var(--text-muted)' }}>{b.city}</span>
-                              {isNear && (
-                                <span style={{ fontSize: '8.5px', fontWeight: 900, backgroundColor: '#DCFCE7', color: '#15803D', padding: '1px 4px', borderRadius: '4px' }}>
-                                  Nearest
-                                </span>
-                              )}
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                                {isNear && (
+                                  <span style={{ fontSize: '8.5px', fontWeight: 900, backgroundColor: '#DCFCE7', color: '#15803D', padding: '1px 4px', borderRadius: '4px' }}>
+                                    Nearest
+                                  </span>
+                                )}
+                                {isBeyond && (
+                                  <span style={{ fontSize: '8px', fontWeight: 900, backgroundColor: '#FEE2E2', color: '#DC2626', padding: '1px 4px', borderRadius: '4px' }}>
+                                    ⛔ Beyond {maxDist}km
+                                  </span>
+                                )}
+                              </div>
                             </div>
                             {/* Branch Name in BOLD */}
                             <div style={{ fontSize: '11px', fontWeight: 850, color: 'var(--text-main)', lineHeight: 1.2 }}>
@@ -2060,7 +1997,7 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
                             <div style={{ fontSize: '9.5px', fontWeight: 450, color: 'var(--text-muted)', lineHeight: 1.3 }}>
                               {b.address}
                             </div>
-                            <div style={{ fontSize: '9.5px', color: 'var(--primary)', fontWeight: 800, marginTop: '2px' }}>
+                            <div style={{ fontSize: '9.5px', color: isBeyond ? '#DC2626' : 'var(--primary)', fontWeight: 800, marginTop: '2px' }}>
                               📍 {b.distanceKm} km {isCur && '• Active'}
                             </div>
                           </div>
@@ -2198,7 +2135,18 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
 
                     <button
                       type="button"
-                      onClick={() => goToStep('payment', 'forward')}
+                      onClick={() => {
+                        const maxAllowed = activeB?.maxOrderDistanceKm ?? 50;
+                        if (activeB && activeB.distanceKm > maxAllowed) {
+                          addToast({
+                            type: 'error',
+                            title: 'Cannot Accept Order',
+                            message: `${activeB.name} only accepts orders within ${maxAllowed} km. Your current distance is ${activeB.distanceKm} km.`,
+                          });
+                          return;
+                        }
+                        goToStep('payment', 'forward');
+                      }}
                       style={{
                         padding: 'clamp(8px, 1.8vw, 10px) clamp(14px, 3vw, 20px)',
                         borderRadius: 'var(--radius-md)',
@@ -2316,7 +2264,7 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
                     )}
 
                     {/* 2. Wallet */}
-                    {activePaymentOptions.Wallet && (
+                    {activePaymentOptions.Wallet ? (
                       <div
                         onClick={() => setSelectedPaymentMode('Wallet')}
                         style={{
@@ -2346,6 +2294,38 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
                           </div>
                         </div>
                         {selectedPaymentMode === 'Wallet' && <CheckCircle2 size={16} color="var(--primary)" />}
+                      </div>
+                    ) : (
+                      <div
+                        style={{
+                          padding: 'clamp(6px, 1.3vw, 8px) clamp(8px, 1.8vw, 12px)',
+                          borderRadius: '10px',
+                          border: '1px dashed var(--border-color)',
+                          backgroundColor: 'var(--bg-card-subtle)',
+                          opacity: 0.6,
+                          cursor: 'not-allowed',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                        }}
+                        title="Wallet payment is disabled by branch manager"
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <div style={{ width: 'clamp(28px, 5vw, 32px)', height: 'clamp(28px, 5vw, 32px)', borderRadius: '7px', backgroundColor: 'var(--bg-card)', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                            <Smartphone size={16} />
+                          </div>
+                          <div>
+                            <div style={{ fontWeight: 700, fontSize: 'clamp(11.5px, 2.4vw, 12.5px)', color: 'var(--text-muted)', lineHeight: 1.2 }}>
+                              Mobile Wallet (JazzCash / Easypaisa)
+                            </div>
+                            <div style={{ fontSize: 'clamp(9.5px, 1.8vw, 10.5px)', color: '#DC2626', fontWeight: 750 }}>
+                              Disabled by Branch Manager
+                            </div>
+                          </div>
+                        </div>
+                        <span style={{ fontSize: '10px', fontWeight: 800, padding: '2px 6px', borderRadius: '4px', backgroundColor: '#FEE2E2', color: '#DC2626' }}>
+                          OFF
+                        </span>
                       </div>
                     )}
 

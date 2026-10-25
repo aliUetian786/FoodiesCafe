@@ -401,6 +401,9 @@ export const OwnerOverviewScreen: React.FC<{ onNavigate: (v: string) => void }> 
                         onClick={() => {
                           setCurrentBranchId(b.id);
                           setCurrentRole('branch_manager');
+                          if (typeof window !== 'undefined') {
+                            localStorage.setItem('foodies_staff_role', 'branch_manager');
+                          }
                           onNavigate('staff-manager');
                           addToast({
                             type: 'success',

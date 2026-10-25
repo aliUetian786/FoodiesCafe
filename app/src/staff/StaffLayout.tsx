@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useApp } from '@/context/AppContext';
+import { Role } from '@/types/cafe';
 import {
   Sun,
   Moon,
@@ -26,6 +27,7 @@ import {
   User,
   Edit,
   X,
+  Menu,
   Mail,
   KeyRound,
   CheckCircle2,
@@ -62,9 +64,21 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
   } = useApp();
 
   const [collapsed, setCollapsed] = useState(false);
+  const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
   const [staffProfileModalOpen, setStaffProfileModalOpen] = useState(false);
   const [staffStoreMapModalOpen, setStaffStoreMapModalOpen] = useState(false);
   const [staffStoreMapInEdit, setStaffStoreMapInEdit] = useState(false);
+
+  // Close mobile sidebar on Escape key
+  React.useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') {
+        setMobileSidebarOpen(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, []);
 
   // Automated Mailer Configuration State (Owner & Manager Only)
   const [staffMailConfigOpen, setStaffMailConfigOpen] = useState(false);
@@ -85,9 +99,34 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
     }
   }, [staffProfileModalOpen, staffMailConfigOpen]);
 
+  // Determine effective staff role, prioritizing currentRole, then currentUser.role, then foodies_staff_role
+  const effectiveRole: Role = (() => {
+    if (currentRole && currentRole !== 'customer') return currentRole;
+    if (currentUser?.role && currentUser.role !== 'customer') return currentUser.role;
+    if (typeof window !== 'undefined') {
+      const savedRole = localStorage.getItem('foodies_staff_role');
+      if (savedRole && savedRole !== 'customer') return savedRole as Role;
+      const savedUser = localStorage.getItem('foodies_staff_user');
+      if (savedUser) {
+        try {
+          const parsed = JSON.parse(savedUser);
+          if (parsed && parsed.role && parsed.role !== 'customer') return parsed.role as Role;
+        } catch (e) {}
+      }
+    }
+    return 'branch_manager';
+  })();
+
+  // Keep state currentRole aligned with effectiveRole
+  React.useEffect(() => {
+    if (currentRole !== effectiveRole && effectiveRole !== 'customer') {
+      setCurrentRole(effectiveRole);
+    }
+  }, [currentRole, effectiveRole, setCurrentRole]);
+
   const isManagerOrOwner =
-    currentRole === 'branch_manager' ||
-    currentRole === 'platform_owner' ||
+    effectiveRole === 'branch_manager' ||
+    effectiveRole === 'platform_owner' ||
     currentUser?.role === 'branch_manager' ||
     currentUser?.role === 'platform_owner';
 
@@ -98,9 +137,33 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
   );
   const suspendedStaffCount = branchSubordinates.filter((u) => u.status === 'suspended').length;
 
+  const handleStaffSignOut = () => {
+    if (typeof window !== 'undefined') {
+      localStorage.removeItem('foodies_staff_user');
+      localStorage.removeItem('foodies_staff_role');
+      localStorage.removeItem('foodies_staff_view');
+    }
+    setCurrentRole('customer');
+    setCurrentUser({
+      id: 'user-guest',
+      name: 'Guest Customer',
+      phone: '',
+      email: '',
+      role: 'customer',
+      status: 'active',
+    });
+    setMobileSidebarOpen(false);
+    onNavigate('staff-auth');
+  };
+
   // Active session revocation: if current subordinate staff user is suspended or deleted, auto-signout
   React.useEffect(() => {
-    if (!currentUser || currentUser.role === 'platform_owner' || currentUser.role === 'branch_manager') {
+    // Guard: ignore if customer or guest
+    if (!currentUser || currentUser.role === 'customer' || currentUser.name === 'Guest Customer') {
+      return;
+    }
+    // Platform Owner and Branch Manager sessions are master roles and are never auto-revoked
+    if (currentUser.role === 'platform_owner' || currentUser.role === 'branch_manager') {
       return;
     }
     const freshUser = (users || []).find(
@@ -112,32 +175,14 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
         title: 'Session Terminated 🚫',
         message: 'Your staff account was removed by the branch manager. You have been logged out.',
       });
-      setCurrentRole('customer');
-      setCurrentUser({
-        id: 'user-guest',
-        name: 'Guest Customer',
-        phone: '',
-        email: '',
-        role: 'customer',
-        status: 'active',
-      });
-      onNavigate('staff-auth');
+      handleStaffSignOut();
     } else if (freshUser.status === 'suspended') {
       addToast({
         type: 'error',
         title: 'Account Suspended 🚫',
         message: 'Your staff account has been suspended by the branch manager. Access is revoked.',
       });
-      setCurrentRole('customer');
-      setCurrentUser({
-        id: 'user-guest',
-        name: 'Guest Customer',
-        phone: '',
-        email: '',
-        role: 'customer',
-        status: 'active',
-      });
-      onNavigate('staff-auth');
+      handleStaffSignOut();
     }
   }, [users, currentUser, onNavigate, setCurrentUser, addToast]);
 
@@ -193,7 +238,7 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
 
   // Define sidebar menu items based on current role
   const getNavItems = () => {
-    if (currentRole === 'platform_owner') {
+    if (effectiveRole === 'platform_owner') {
       return [
         { id: 'mgmt-overview', label: 'Owner Overview', icon: BarChart3 },
         { id: 'mgmt-branches', label: 'Branches & Staff', icon: Building2 },
@@ -204,14 +249,13 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
       ];
     }
 
-    if (currentRole === 'branch_manager') {
+    if (effectiveRole === 'branch_manager') {
       return [
         {
           id: 'staff-manager',
           label: 'Branch Operations',
           icon: BarChart3,
-          badge: pendingRefundCount > 0 ? `${pendingRefundCount} Action Req` : undefined,
-          actionRequired: pendingRefundCount > 0 ? `Action Req (${pendingRefundCount})` : undefined,
+          actionRequired: pendingRefundCount > 0 ? `${pendingRefundCount}` : undefined,
           canEdit: true,
         },
         {
@@ -219,14 +263,14 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
           label: 'Staff Accounts',
           icon: Users,
           badge: branchSubordinates.length > 0 ? `${branchSubordinates.length} Staff` : undefined,
-          actionRequired: suspendedStaffCount > 0 ? `${suspendedStaffCount} Suspended` : undefined,
+          actionRequired: suspendedStaffCount > 0 ? `${suspendedStaffCount}` : undefined,
           canEdit: true,
         },
         {
           id: 'mgmt-menu',
           label: 'Menu, Categories & Customer Services',
           icon: UtensilsCrossed,
-          actionRequired: pendingBannerApprovalCount > 0 ? `Approval Req (${pendingBannerApprovalCount})` : undefined,
+          actionRequired: pendingBannerApprovalCount > 0 ? `${pendingBannerApprovalCount}` : undefined,
           canEdit: true,
         },
         {
@@ -239,7 +283,7 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
           id: 'staff-cashier',
           label: 'Cash Desk Monitor',
           icon: Banknote,
-          actionRequired: pendingRefundCount > 0 ? `Approval Req (${pendingRefundCount})` : undefined,
+          actionRequired: pendingRefundCount > 0 ? `${pendingRefundCount}` : undefined,
           canEdit: false,
         },
         {
@@ -285,7 +329,7 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
       ];
     }
 
-    if (currentRole === 'delivery_staff') {
+    if (effectiveRole === 'delivery_staff') {
       const myActiveDeliveries = orders.filter(
         (o) =>
           o.type === 'delivery' &&
@@ -309,21 +353,19 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
       ];
     }
 
-    if (currentRole === 'kitchen_staff') {
+    if (effectiveRole === 'kitchen_staff') {
       return [{ id: 'staff-kitchen', label: 'Kitchen Queue', icon: ChefHat }];
     }
 
-    if (currentRole === 'cashier') {
+    if (effectiveRole === 'cashier') {
       const cashierOrdersCount = orders.filter((o) => {
         if (o.branchId && o.branchId !== currentBranch.id) return false;
+        if (o.type !== 'dine_in') return false;
         const isCashierOrder =
-          o.cashierId === currentUser.id ||
-          (o.cashierId && currentRole === 'cashier') ||
           o.isWalkIn === true ||
-          o.customerId === currentUser.id ||
-          o.orderNumber === 'FC-8242' ||
-          o.orderNumber === 'FC-8225' ||
-          o.orderNumber === 'FC-3391' ||
+          o.isTableQr === true ||
+          !!o.tableQrSessionId ||
+          o.cashierId === currentUser.id ||
           (o.notes && o.notes.toLowerCase().includes('walk-in')) ||
           (o.pickupTime && o.pickupTime.toLowerCase().includes('walk-in'));
         return isCashierOrder && o.status !== 'completed' && o.status !== 'cancelled';
@@ -344,7 +386,7 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
       ];
     }
 
-    if (currentRole === 'floor_staff') {
+    if (effectiveRole === 'floor_staff') {
       const floorOrdersCount = orders.filter((o) => {
         if (o.branchId && o.branchId !== currentBranch.id) return false;
         if (o.type !== 'dine_in') return false;
@@ -369,7 +411,7 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
       ];
     }
 
-    if (currentRole === 'branch_representative') {
+    if (effectiveRole === 'branch_representative') {
       return [
         {
           id: 'staff-rep-dinein',
@@ -416,8 +458,279 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
         backgroundColor: 'var(--bg-main)',
       }}
     >
-      {/* Collapsible Left Sidebar */}
+      {/* ============ MOBILE LEFT SLIDE DRAWER (FOR SMALL SCREENS) ============ */}
+      {/* Backdrop overlay */}
+      <div
+        onClick={() => setMobileSidebarOpen(false)}
+        className="staff-mobile-drawer-backdrop"
+        style={{
+          position: 'fixed',
+          inset: 0,
+          zIndex: 10000,
+          backgroundColor: 'rgba(15, 12, 10, 0.55)',
+          backdropFilter: 'blur(4px)',
+          opacity: mobileSidebarOpen ? 1 : 0,
+          pointerEvents: mobileSidebarOpen ? 'auto' : 'none',
+          transition: 'opacity 0.28s cubic-bezier(0.2, 0.8, 0.25, 1)',
+        }}
+      />
+
+      {/* Drawer Panel: smooth slide in from left and slide out to left */}
+      <div
+        className="staff-mobile-drawer-panel"
+        style={{
+          position: 'fixed',
+          top: 0,
+          left: 0,
+          bottom: 0,
+          width: '300px',
+          maxWidth: '85vw',
+          backgroundColor: 'var(--bg-card)',
+          zIndex: 10001,
+          transform: mobileSidebarOpen ? 'translateX(0)' : 'translateX(-100%)',
+          transition: 'transform 0.32s cubic-bezier(0.16, 1, 0.3, 1), box-shadow 0.32s ease',
+          display: 'flex',
+          flexDirection: 'column',
+          boxShadow: mobileSidebarOpen ? '6px 0 36px rgba(0, 0, 0, 0.22)' : 'none',
+          overflow: 'hidden',
+        }}
+      >
+        {/* Drawer Header: Avatar / Staff info + Close Button X */}
+        <div
+          style={{
+            height: '70px',
+            boxSizing: 'border-box',
+            borderBottom: '1px solid var(--border-color)',
+            padding: '0 16px',
+            background: 'linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%)',
+            color: '#FFFFFF',
+            position: 'relative',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            flexShrink: 0,
+          }}
+        >
+          {/* Avatar Picture */}
+          <div
+            style={{
+              width: '40px',
+              height: '40px',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(255, 255, 255, 0.25)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              border: '2px solid rgba(255, 255, 255, 0.5)',
+              flexShrink: 0,
+            }}
+          >
+            <User size={22} color="#FFFFFF" />
+          </div>
+
+          {/* Account Details: Staff Name and Role */}
+          <div style={{ flex: 1, minWidth: 0, paddingRight: '36px' }}>
+            <div
+              style={{
+                fontWeight: 900,
+                fontSize: '15px',
+                letterSpacing: '-0.01em',
+                lineHeight: 1.2,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              }}
+            >
+              {(currentUser?.name || 'Staff Member').replace(/\s*\(.*?\)/g, '').trim()}
+            </div>
+            <div
+              style={{
+                fontSize: '11px',
+                fontWeight: 700,
+                opacity: 0.9,
+                marginTop: '2px',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                textTransform: 'uppercase',
+                letterSpacing: '0.04em',
+              }}
+            >
+              {effectiveRole.replace(/_/g, ' ')} · {currentBranch.name.replace(' Branch', '')}
+            </div>
+          </div>
+
+          {/* Close Button X */}
+          <button
+            type="button"
+            onClick={() => setMobileSidebarOpen(false)}
+            style={{
+              position: 'absolute',
+              right: '12px',
+              top: '50%',
+              transform: 'translateY(-50%)',
+              width: '32px',
+              height: '32px',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(255, 255, 255, 0.2)',
+              border: 'none',
+              color: '#FFFFFF',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              cursor: 'pointer',
+            }}
+            aria-label="Close menu"
+          >
+            <X size={17} />
+          </button>
+        </div>
+
+        {/* Section title */}
+        <div style={{ padding: '14px 18px 6px' }}>
+          <span style={{ fontSize: '10.5px', fontWeight: 850, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.08em' }}>
+            Staff Operations
+          </span>
+        </div>
+
+        {/* Drawer Body: Navigation items */}
+        <nav
+          style={{
+            flex: 1,
+            padding: '4px 12px 14px',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '6px',
+            overflowY: 'auto',
+          }}
+        >
+          {navItems.map((item: any) => {
+            const Icon = item.icon;
+            const active = currentView === item.id;
+
+            return (
+              <button
+                key={item.id}
+                type="button"
+                onClick={() => {
+                  onNavigate(item.id);
+                  setMobileSidebarOpen(false);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '12px',
+                  padding: '11px 14px',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: active ? 'var(--primary)' : item.actionRequired ? 'rgba(234, 88, 12, 0.08)' : 'var(--bg-card-subtle)',
+                  color: active ? '#FFFFFF' : item.actionRequired ? 'var(--text-main)' : 'var(--text-main)',
+                  fontWeight: active ? 800 : 650,
+                  fontSize: '13.5px',
+                  cursor: 'pointer',
+                  border: active
+                    ? '1px solid var(--primary)'
+                    : item.actionRequired
+                    ? '1.5px solid #EA580C'
+                    : '1px solid var(--border-color)',
+                  textAlign: 'left',
+                  width: '100%',
+                  boxSizing: 'border-box',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
+                  <Icon size={19} color={active ? '#FFFFFF' : item.actionRequired ? '#EA580C' : 'var(--text-main)'} />
+                  {item.hasDot && (
+                    <span
+                      style={{
+                        position: 'absolute',
+                        top: '-3px',
+                        right: '-3px',
+                        width: '8px',
+                        height: '8px',
+                        borderRadius: '50%',
+                        backgroundColor: '#DC2626',
+                        border: '1.5px solid #FFFFFF',
+                      }}
+                    />
+                  )}
+                </div>
+
+                <span style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flex: 1, gap: '6px', minWidth: 0 }}>
+                  <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                    {item.label}
+                  </span>
+
+                  {item.actionRequired ? (
+                    <span
+                      style={{
+                        fontSize: '10px',
+                        fontWeight: 900,
+                        padding: '1px 7px',
+                        borderRadius: '10px',
+                        background: active ? '#FFFFFF' : 'linear-gradient(135deg, #DC2626, #EA580C)',
+                        color: active ? '#DC2626' : '#FFFFFF',
+                        flexShrink: 0,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        minWidth: '18px',
+                        height: '18px',
+                      }}
+                    >
+                      {item.actionRequired}
+                    </span>
+                  ) : item.badge ? (
+                    <span
+                      style={{
+                        fontSize: '10.5px',
+                        fontWeight: 800,
+                        padding: '1px 7px',
+                        borderRadius: '10px',
+                        backgroundColor: active ? '#FFFFFF' : 'var(--primary)',
+                        color: active ? 'var(--primary)' : '#FFFFFF',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {item.badge}
+                    </span>
+                  ) : null}
+                </span>
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Drawer Footer: Staff Sign Out */}
+        <div style={{ padding: '12px 14px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card)' }}>
+          <button
+            type="button"
+            onClick={handleStaffSignOut}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              width: '100%',
+              padding: '11px 14px',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: 'var(--bg-card-subtle)',
+              border: '1px solid var(--border-color)',
+              color: 'var(--text-main)',
+              fontSize: '13px',
+              fontWeight: 700,
+              cursor: 'pointer',
+              justifyContent: 'flex-start',
+            }}
+          >
+            <LogOut size={16} color="var(--primary)" />
+            <span>Staff Sign Out</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Collapsible Left Sidebar (Desktop Only) */}
       <aside
+        className="staff-desktop-sidebar"
         style={{
           width: collapsed ? '72px' : '260px',
           backgroundColor: 'var(--bg-card)',
@@ -574,25 +887,24 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
                     {item.actionRequired ? (
                       <span
                         style={{
-                          fontSize: '9.5px',
+                          fontSize: '10px',
                           fontWeight: 900,
-                          padding: '2px 8px',
-                          borderRadius: '8px',
+                          padding: '1px 7px',
+                          borderRadius: '10px',
                           background: active ? '#FFFFFF' : 'linear-gradient(135deg, #DC2626, #EA580C)',
                           color: active ? '#DC2626' : '#FFFFFF',
                           marginLeft: 'auto',
                           display: 'inline-flex',
                           alignItems: 'center',
-                          gap: '3px',
+                          justifyContent: 'center',
                           boxShadow: active ? 'none' : '0 2px 8px rgba(234, 88, 12, 0.4)',
                           animation: 'pulseActionReq 1.8s infinite ease-in-out',
-                          letterSpacing: '0.01em',
+                          minWidth: '18px',
+                          height: '18px',
                           flexShrink: 0,
-                          textTransform: 'uppercase',
                         }}
-                        title="Important: Manager Action / Approval Required"
+                        title="Pending Actions"
                       >
-                        <span>⚠️</span>
                         <span>{item.actionRequired}</span>
                       </span>
                     ) : item.badge ? (
@@ -621,9 +933,8 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
         {/* Sidebar Footer: Staff Sign Out */}
         <div style={{ padding: '12px 8px', borderTop: '1px solid var(--border-color)' }}>
           <button
-            onClick={() => {
-              onNavigate('staff-auth');
-            }}
+            type="button"
+            onClick={handleStaffSignOut}
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -660,6 +971,7 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
       >
         {/* Staff Top Bar */}
         <header
+          className="staff-header-inner"
           style={{
             height: '60px',
             flexShrink: 0,
@@ -676,10 +988,33 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
           }}
         >
           {/* Branch & Mode Info */}
-          <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {/* 3 Horizontal Lines (Hamburger Menu) Button - Mobile Only */}
+            <button
+              type="button"
+              onClick={() => setMobileSidebarOpen(true)}
+              className="staff-mobile-menu-btn"
+              style={{
+                width: '38px',
+                height: '38px',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'var(--bg-card-subtle)',
+                border: '1px solid var(--border-color)',
+                color: 'var(--text-main)',
+                alignItems: 'center',
+                justifyContent: 'center',
+                cursor: 'pointer',
+                flexShrink: 0,
+                transition: 'all 0.15s ease',
+              }}
+              aria-label="Open staff navigation menu"
+            >
+              <Menu size={20} strokeWidth={2.4} />
+            </button>
+
             <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13.5px', fontWeight: 700 }}>
               <MapPin size={16} color="var(--primary)" />
-              <span>{currentBranch.name}</span>
+              <span className="staff-header-branch-name">{currentBranch.name}</span>
             </div>
 
             {currentBranch.isBusy && (
@@ -691,19 +1026,23 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
                   color: 'var(--status-preparing-text)',
                   padding: '3px 8px',
                   borderRadius: 'var(--radius-full)',
+                  whiteSpace: 'nowrap',
                 }}
               >
-                BUSY MODE ACTIVE
+                BUSY
               </span>
             )}
           </div>
 
           {/* User Profile (Status / Role before clean person's name at the very end of header) */}
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {((currentUser?.role === 'platform_owner' || currentUser?.id === 'user-owner' || currentUser?.name?.includes('Jahangir')) && currentRole === 'branch_manager') && (
+            {((currentUser?.role === 'platform_owner' || currentUser?.id === 'user-owner' || currentUser?.name?.includes('Jahangir')) && effectiveRole === 'branch_manager') && (
               <button
                 onClick={() => {
                   setCurrentRole('platform_owner');
+                  if (typeof window !== 'undefined') {
+                    localStorage.setItem('foodies_staff_role', 'platform_owner');
+                  }
                   onNavigate('mgmt-overview');
                 }}
                 style={{
@@ -749,7 +1088,7 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
                 }}
               >
                 <MapPin size={13} />
-                <span>Edit Branch Location 📍</span>
+                <span className="staff-edit-branch-text">Edit Branch Location 📍</span>
               </button>
             )}
 
@@ -786,11 +1125,11 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
                   border: '1px solid rgba(224, 122, 95, 0.25)',
                 }}
               >
-                {currentRole.replace(/_/g, ' ')}
+                {effectiveRole.replace(/_/g, ' ')}
               </span>
 
               {/* Person's Name without any brackets at the end of header */}
-              <div style={{ fontSize: '13.5px', fontWeight: 750, color: 'var(--text-main)', letterSpacing: '-0.01em' }}>
+              <div className="staff-header-name" style={{ fontSize: '13.5px', fontWeight: 750, color: 'var(--text-main)', letterSpacing: '-0.01em' }}>
                 {(currentUser?.name || 'Staff Member').replace(/\s*\(.*?\)/g, '').trim()}
               </div>
             </button>
@@ -809,6 +1148,7 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
 
           return (
             <main
+              className="staff-main-content"
               style={{
                 flex: 1,
                 padding: isManager ? '20px 24px' : isStaticWorkspace ? '8px 14px 10px' : '24px',
@@ -862,31 +1202,10 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
             }}
           >
             {/* Header */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div
-                  style={{
-                    width: '38px',
-                    height: '38px',
-                    borderRadius: '50%',
-                    backgroundColor: 'var(--primary-light)',
-                    color: 'var(--primary)',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <User size={19} />
-                </div>
-                <div>
-                  <h3 style={{ fontSize: '16px', fontWeight: 900, color: 'var(--text-main)', margin: 0 }}>
-                    Staff Profile
-                  </h3>
-                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 650 }}>
-                    Operational account & branch assignment
-                  </span>
-                </div>
-              </div>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingBottom: '4px', borderBottom: '1px solid var(--border-color)' }}>
+              <h3 style={{ fontSize: '17px', fontWeight: 900, color: 'var(--text-main)', margin: 0 }}>
+                Staff Profile
+              </h3>
 
               <button
                 type="button"
@@ -1158,12 +1477,9 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
           >
             {/* Header */}
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Sparkles size={20} color="#EA580C" />
-                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 900, color: 'var(--text-main)' }}>
-                  Automated Customer Mailer Setup
-                </h3>
-              </div>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 900, color: 'var(--text-main)' }}>
+                Mailer Setup
+              </h3>
               <button
                 onClick={() => setStaffMailConfigOpen(false)}
                 style={{
