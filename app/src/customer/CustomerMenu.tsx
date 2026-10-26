@@ -319,20 +319,6 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
         id={`menu-item-${item.id}`}
         data-category={item.category}
         className="foodies-dish-card"
-        onClick={(e) => {
-          if (isAvailable && inCartQty === 0) {
-            triggerFlyToCart(e, () => {
-              addToCart({
-                id: `cart-${item.id}-${Date.now()}`,
-                menuItemId: item.id,
-                name: item.name,
-                unitPrice: displayPrice,
-                quantity: 1,
-                size: item.sizes?.[0]?.name || 'Standard',
-              });
-            }, item.image);
-          }
-        }}
         style={{
           backgroundColor: 'var(--bg-card)',
           borderRadius: 'var(--radius-lg)',
@@ -341,11 +327,10 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
           boxShadow: isAvailable ? 'var(--shadow-md)' : 'none',
           display: 'flex',
           flexDirection: 'column',
-          cursor: isAvailable ? 'pointer' : 'not-allowed',
+          cursor: 'default',
           opacity: isAvailable ? 1 : 0.6,
           filter: isAvailable ? 'none' : 'grayscale(70%)',
           position: 'relative',
-          transition: 'transform 0.15s ease, box-shadow 0.15s ease',
         }}
       >
         {/* Photo & Category Badge */}
@@ -492,8 +477,7 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
                 {isAvailable ? (
                   <>
                     <Plus size={13} className="dish-btn-icon" />
-                    <span className="dish-btn-text-desktop">Add</span>
-                    <span className="dish-btn-text-mobile">Order</span>
+                    <span>Order</span>
                   </>
                 ) : (
                   <span
@@ -1219,6 +1203,28 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
           display: none;
         }
 
+        .foodies-dish-card {
+          cursor: default !important;
+        }
+        .foodies-dish-card:active {
+          transform: none !important;
+        }
+        .dish-order-btn {
+          cursor: pointer !important;
+          transition: transform 0.15s ease, background-color 0.15s ease, box-shadow 0.15s ease !important;
+        }
+        .dish-order-btn:active {
+          transform: scale(0.92) !important;
+          box-shadow: 0 1px 4px var(--primary-glow) !important;
+        }
+        .dish-stepper-btn {
+          cursor: pointer !important;
+          transition: transform 0.15s ease, background-color 0.15s ease !important;
+        }
+        .dish-stepper-btn:active {
+          transform: scale(0.90) !important;
+        }
+
         /* 1) Intermediate width (861px - 1200px):
            Remove 3rd card of item (2 items in row) and shrink rest of 2 cards and checkout card */
         @media (max-width: 1200px) and (min-width: 861px) {
@@ -1247,7 +1253,9 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
         /* 2) When screen area becomes small (<= 860px):
            Remove checkout card entirely from side, only display the 2 item cards in blank space,
            and start shrinking them as screen boundary touches them.
-           Mobile checkout bar appears at the bottom. */
+           Mobile checkout bar appears at the bottom.
+           Remove Description / Details, Category badge, and Price(Cash) label so only item name shows,
+           with Rs. and + Order aligned in same row. */
         @media (max-width: 860px) {
           .foodies-menu-container {
             padding-top: 0 !important;
@@ -1272,14 +1280,33 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
           .foodies-mobile-checkout-bar {
             display: flex !important;
           }
+          .foodies-dish-card .dish-cat-badge {
+            display: none !important;
+          }
+          .foodies-dish-card .dish-desc {
+            display: none !important;
+          }
+          .foodies-dish-card .dish-price-label {
+            display: none !important;
+          }
           .foodies-dish-card .dish-content {
             padding: 10px 12px 12px !important;
           }
           .foodies-dish-card .dish-title {
             font-size: 13.5px !important;
           }
+          .foodies-dish-card .dish-action-row {
+            display: flex !important;
+            align-items: center !important;
+            justify-content: space-between !important;
+            flex-direction: row !important;
+            flex-wrap: nowrap !important;
+            margin-top: auto !important;
+            gap: 4px !important;
+          }
           .foodies-dish-card .dish-price {
             font-size: 13.5px !important;
+            white-space: nowrap !important;
           }
           .dish-order-btn,
           .dish-qty-stepper {

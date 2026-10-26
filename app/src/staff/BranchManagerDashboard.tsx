@@ -38,8 +38,6 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
     updateBranchSettings,
     updateBranchPaymentSettings,
     orders,
-    menuItems,
-    toggleMenuItemBranchAvailability,
     refundRequests,
     decideRefund,
     users,
@@ -269,9 +267,6 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
                 placeholder="e.g. 50"
                 style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-input)', fontSize: '14px', color: 'var(--text-main)' }}
               />
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px', display: 'block' }}>
-                Branch only accepts orders (delivery, takeaway, dine-in) if the customer is within this distance (e.g. 50 km).
-              </span>
             </div>
 
             <div>
@@ -285,9 +280,6 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
                 placeholder="e.g. 300"
                 style={{ width: '100%', padding: '10px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-input)', fontSize: '14px', color: 'var(--text-main)' }}
               />
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '3px', display: 'block' }}>
-                Allowed distance in meters for on-table QR ordering (default 300m). Customers beyond this radius cannot place orders or check in.
-              </span>
             </div>
 
             <button
@@ -303,75 +295,79 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
                 cursor: 'pointer',
               }}
             >
-              Save Operational & Distance Rules (Requires Confirmation)
+              Confirm Action
             </button>
           </div>
         </div>
 
-        {/* Busy Mode & Branch Hours Panel */}
-        <div style={{ backgroundColor: 'var(--bg-card)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-color)', padding: '24px', boxShadow: 'var(--shadow-sm)', display: 'flex', flexDirection: 'column', gap: '18px' }}>
+        {/* Refund Approvals Queue (Moved into first grid) */}
+        <div style={{ backgroundColor: 'var(--bg-card)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-color)', padding: '24px', boxShadow: 'var(--shadow-sm)', display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <h3 style={{ fontSize: '17px', fontWeight: 800, margin: 0 }}>
-            Operational State & Busy Mode
+            Refund Approvals Queue
           </h3>
 
-          <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '16px', borderRadius: 'var(--radius-md)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <div style={{ fontWeight: 800, fontSize: '14px' }}>Busy Mode Switch</div>
-              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                Extends customer prep times and shows warning banner.
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {pendingRefunds.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)', fontSize: '13px' }}>
+                No pending refunds requiring manager sign-off.
               </div>
-            </div>
-            <button
-              onClick={handleToggleBusyMode}
-              style={{
-                padding: '8px 14px',
-                borderRadius: 'var(--radius-full)',
-                backgroundColor: isBusyMode ? '#DC2626' : '#16A34A',
-                color: '#FFFFFF',
-                fontWeight: 800,
-                fontSize: '12px',
-                cursor: 'pointer',
-              }}
-            >
-              {isBusyMode ? 'BUSY (ON)' : 'NORMAL (OFF)'}
-            </button>
-          </div>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', fontSize: '13px', color: 'var(--text-secondary)' }}>
-            <div>🕒 <strong>Opening Hours:</strong> {currentBranch.openingHours}</div>
-            <div>📍 <strong>Address:</strong> {currentBranch.address}</div>
-            <div>📞 <strong>Branch Phone:</strong> {currentBranch.phone}</div>
-          </div>
-
-          {/* Branch Staff Accounts Quick Summary */}
-          <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '12px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-            <div>
-              <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase' }}>
-                Branch Staff Accounts
-              </span>
-              <div style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-main)', marginTop: '2px' }}>
-                {branchSubordinates.length} Subordinates · {activeStaffCount} Active
-              </div>
-            </div>
-            <button
-              onClick={() => onNavigate?.('staff-manager-accounts')}
-              style={{
-                fontSize: '11.5px',
-                fontWeight: 750,
-                color: 'var(--primary)',
-                backgroundColor: 'var(--primary-light)',
-                border: '1px solid rgba(234, 88, 12, 0.2)',
-                borderRadius: 'var(--radius-md)',
-                padding: '6px 12px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '4px',
-              }}
-            >
-              <span>Manage Staff Accounts</span>
-              <ChevronRight size={14} />
-            </button>
+            ) : (
+              pendingRefunds.map((ref) => (
+                <div
+                  key={ref.id}
+                  style={{
+                    padding: '14px',
+                    borderRadius: 'var(--radius-md)',
+                    backgroundColor: 'var(--bg-card-subtle)',
+                    border: '1px solid var(--border-color)',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '8px',
+                  }}
+                >
+                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                    <span style={{ fontWeight: 800, fontSize: '14px' }}>Order #{ref.orderNumber}</span>
+                    <span style={{ fontWeight: 800, color: '#DC2626', fontSize: '14px' }}>Rs. {ref.amount.toLocaleString()}</span>
+                  </div>
+                  <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)' }}>
+                    Reason: {ref.reason} · Requested by: {ref.requestedBy}
+                  </div>
+                  <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
+                    <button
+                      onClick={() => setRefundDecisionModal({ id: ref.id, amount: ref.amount, reason: ref.reason, approve: true })}
+                      style={{
+                        flex: 1,
+                        padding: '6px',
+                        borderRadius: '6px',
+                        backgroundColor: '#16A34A',
+                        color: '#FFFFFF',
+                        fontWeight: 700,
+                        fontSize: '12px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Approve Refund
+                    </button>
+                    <button
+                      onClick={() => setRefundDecisionModal({ id: ref.id, amount: ref.amount, reason: ref.reason, approve: false })}
+                      style={{
+                        flex: 1,
+                        padding: '6px',
+                        borderRadius: '6px',
+                        backgroundColor: 'var(--bg-card)',
+                        border: '1px solid #DC2626',
+                        color: '#DC2626',
+                        fontWeight: 700,
+                        fontSize: '12px',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Reject
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       </div>
@@ -400,59 +396,94 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
           </div>
 
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-            <button
-              type="button"
-              onClick={handleApplyToAllOrderTypes}
-              title="Sync current tab payment options across Dine-In, Takeaway & Delivery"
-              style={{
-                padding: '7px 14px',
-                borderRadius: 'var(--radius-full)',
-                border: '1px solid var(--border-color)',
-                backgroundColor: 'var(--bg-card-subtle)',
-                color: 'var(--primary)',
-                fontWeight: 800,
-                fontSize: '11.5px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              <span>⚡ Apply to All Order Types</span>
-            </button>
+            {/* Desktop View: Separate Button + Tab Pills */}
+            <div className="bm-payment-tabs-desktop" style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              <button
+                type="button"
+                onClick={handleApplyToAllOrderTypes}
+                title="Sync current tab payment options across Dine-In, Takeaway & Delivery"
+                style={{
+                  padding: '7px 14px',
+                  borderRadius: 'var(--radius-full)',
+                  border: '1px solid var(--border-color)',
+                  backgroundColor: 'var(--bg-card-subtle)',
+                  color: 'var(--primary)',
+                  fontWeight: 800,
+                  fontSize: '11.5px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <span>⚡ Apply to All Order Types</span>
+              </button>
 
-            {/* Order Type Tabs */}
-            <div
-              style={{
-                display: 'flex',
-                backgroundColor: 'var(--bg-card-subtle)',
-                borderRadius: 'var(--radius-full)',
-                padding: '4px',
-                gap: '4px',
-              }}
-            >
-              {(['dine_in', 'takeaway', 'delivery'] as const).map((tab) => (
-                <button
-                  key={tab}
-                  type="button"
-                  onClick={() => setPaymentOrderTypeTab(tab)}
-                  style={{
-                    padding: '7px 16px',
-                    borderRadius: 'var(--radius-full)',
-                    border: 'none',
-                    backgroundColor: paymentOrderTypeTab === tab ? 'var(--primary)' : 'transparent',
-                    color: paymentOrderTypeTab === tab ? '#FFFFFF' : 'var(--text-secondary)',
-                    fontWeight: 800,
-                    fontSize: '12px',
-                    cursor: 'pointer',
-                    transition: 'all 0.15s ease',
-                    textTransform: 'capitalize',
-                  }}
-                >
-                  {tab.replace('_', '-')}
-                </button>
-              ))}
+              {/* Order Type Tabs */}
+              <div
+                style={{
+                  display: 'flex',
+                  backgroundColor: 'var(--bg-card-subtle)',
+                  borderRadius: 'var(--radius-full)',
+                  padding: '4px',
+                  gap: '4px',
+                }}
+              >
+                {(['dine_in', 'takeaway', 'delivery'] as const).map((tab) => (
+                  <button
+                    key={tab}
+                    type="button"
+                    onClick={() => setPaymentOrderTypeTab(tab)}
+                    style={{
+                      padding: '7px 16px',
+                      borderRadius: 'var(--radius-full)',
+                      border: 'none',
+                      backgroundColor: paymentOrderTypeTab === tab ? 'var(--primary)' : 'transparent',
+                      color: paymentOrderTypeTab === tab ? '#FFFFFF' : 'var(--text-secondary)',
+                      fontWeight: 800,
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                      textTransform: 'capitalize',
+                    }}
+                  >
+                    {tab.replace('_', '-')}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Mobile / Phone View: Single Dropdown with all 4 options */}
+            <div className="bm-payment-tabs-mobile" style={{ display: 'none', width: '100%' }}>
+              <select
+                value={paymentOrderTypeTab}
+                onChange={(e) => {
+                  const val = e.target.value;
+                  if (val === 'apply_all') {
+                    handleApplyToAllOrderTypes();
+                  } else {
+                    setPaymentOrderTypeTab(val as 'dine_in' | 'takeaway' | 'delivery');
+                  }
+                }}
+                style={{
+                  width: '100%',
+                  padding: '9px 14px',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1.5px solid var(--primary)',
+                  backgroundColor: 'var(--bg-card-subtle)',
+                  color: 'var(--primary)',
+                  fontWeight: 800,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  outline: 'none',
+                }}
+              >
+                <option value="dine_in">Dine-In</option>
+                <option value="takeaway">Takeaway</option>
+                <option value="delivery">Delivery</option>
+                <option value="apply_all">⚡ Apply to All Order Types</option>
+              </select>
             </div>
           </div>
         </div>
@@ -650,127 +681,6 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
           </div>
         </div>
       </div>
-
-      {/* MENU AVAILABILITY TOGGLES & REFUND APPROVALS QUEUE */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '24px' }}>
-        {/* Menu Availability Toggles */}
-        <div style={{ backgroundColor: 'var(--bg-card)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-color)', padding: '24px', boxShadow: 'var(--shadow-sm)', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <h3 style={{ fontSize: '17px', fontWeight: 800, margin: 0 }}>
-            Branch Menu Availability Toggles
-          </h3>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '360px', overflowY: 'auto' }}>
-            {menuItems.map((item) => {
-              const isAvailable = item.branchAvailability[currentBranch.id] ?? item.isAvailable;
-              return (
-                <div
-                  key={item.id}
-                  style={{
-                    display: 'flex',
-                    justifyContent: 'space-between',
-                    alignItems: 'center',
-                    padding: '10px 12px',
-                    borderRadius: 'var(--radius-md)',
-                    backgroundColor: 'var(--bg-card-subtle)',
-                  }}
-                >
-                  <div>
-                    <div style={{ fontWeight: 700, fontSize: '13.5px' }}>{item.name}</div>
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{item.category} · Rs. {item.basePrice}</div>
-                  </div>
-
-                  <button
-                    onClick={() => toggleMenuItemBranchAvailability(item.id, currentBranch.id)}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: 'var(--radius-full)',
-                      backgroundColor: isAvailable ? 'var(--status-ready-bg)' : 'var(--status-cancelled-bg)',
-                      color: isAvailable ? 'var(--status-ready-text)' : 'var(--status-cancelled-text)',
-                      fontWeight: 800,
-                      fontSize: '11px',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {isAvailable ? 'IN STOCK' : 'OUT OF STOCK'}
-                  </button>
-                </div>
-              );
-            })}
-          </div>
-        </div>
-
-        {/* Refund Approvals Queue */}
-        <div style={{ backgroundColor: 'var(--bg-card)', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-color)', padding: '24px', boxShadow: 'var(--shadow-sm)', display: 'flex', flexDirection: 'column', gap: '14px' }}>
-          <h3 style={{ fontSize: '17px', fontWeight: 800, margin: 0 }}>
-            Refund Approvals Queue
-          </h3>
-
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {pendingRefunds.length === 0 ? (
-              <div style={{ textAlign: 'center', padding: '40px', color: 'var(--text-muted)', fontSize: '13px' }}>
-                No pending refunds requiring manager sign-off.
-              </div>
-            ) : (
-              pendingRefunds.map((ref) => (
-                <div
-                  key={ref.id}
-                  style={{
-                    padding: '14px',
-                    borderRadius: 'var(--radius-md)',
-                    backgroundColor: 'var(--bg-card-subtle)',
-                    border: '1px solid var(--border-color)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '8px',
-                  }}
-                >
-                  <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                    <span style={{ fontWeight: 800, fontSize: '14px' }}>Order #{ref.orderNumber}</span>
-                    <span style={{ fontWeight: 800, color: '#DC2626', fontSize: '14px' }}>Rs. {ref.amount.toLocaleString()}</span>
-                  </div>
-                  <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)' }}>
-                    Reason: {ref.reason} · Requested by: {ref.requestedBy}
-                  </div>
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '4px' }}>
-                    <button
-                      onClick={() => setRefundDecisionModal({ id: ref.id, amount: ref.amount, reason: ref.reason, approve: true })}
-                      style={{
-                        flex: 1,
-                        padding: '6px',
-                        borderRadius: '6px',
-                        backgroundColor: '#16A34A',
-                        color: '#FFFFFF',
-                        fontWeight: 700,
-                        fontSize: '12px',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Approve Refund
-                    </button>
-                    <button
-                      onClick={() => setRefundDecisionModal({ id: ref.id, amount: ref.amount, reason: ref.reason, approve: false })}
-                      style={{
-                        flex: 1,
-                        padding: '6px',
-                        borderRadius: '6px',
-                        backgroundColor: 'var(--bg-card)',
-                        border: '1px solid #DC2626',
-                        color: '#DC2626',
-                        fontWeight: 700,
-                        fontSize: '12px',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Reject
-                    </button>
-                  </div>
-                </div>
-              ))
-            )}
-          </div>
-        </div>
-      </div>
-
       {/* Confirmation Modal for Timing Settings (PRD Section F16) */}
       <ModalConfirmation
         isOpen={timingConfirmOpen}

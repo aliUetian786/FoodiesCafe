@@ -20,9 +20,16 @@ import { ProfileScreen as CustomerProfile } from '@/customer/CustomerProfile';
 export default function CustomerMainPage() {
   const { currentUser } = useApp();
 
-  // Customer web ALWAYS redirects to home page on refresh per user requirement
-  // Cart items remain persisted in localStorage ('foodies_cart')
-  const [currentView, setCurrentView] = useState<string>('home');
+  // Customer web defaults to home page on refresh, or directly to table-qr when table QR code is scanned
+  const [currentView, setCurrentView] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      if (params.get('tableQr') || params.get('table')) {
+        return 'table-qr';
+      }
+    }
+    return 'home';
+  });
   const [cartOpen, setCartOpen] = useState(false);
   const [checkoutInitialStep, setCheckoutInitialStep] = useState<'order_review' | 'auth' | 'fulfillment'>('order_review');
   const [orderNowHover, setOrderNowHover] = useState(false);

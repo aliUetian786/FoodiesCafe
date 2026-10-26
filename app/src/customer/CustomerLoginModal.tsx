@@ -228,6 +228,7 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ isOpen, 
 
   return (
     <div
+      className="foodies-modal-overlay"
       style={{
         position: 'fixed',
         inset: 0,
@@ -252,6 +253,7 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ isOpen, 
 
       {/* Main Login Card */}
       <div
+        className="foodies-modal-card"
         style={{
           position: 'relative',
           zIndex: 10,

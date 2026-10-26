@@ -30,6 +30,7 @@ export const ModalConfirmation: React.FC<ModalConfirmationProps> = ({
 
   return (
     <div
+      className="foodies-modal-overlay"
       style={{
         position: 'fixed',
         inset: 0,
@@ -44,6 +45,7 @@ export const ModalConfirmation: React.FC<ModalConfirmationProps> = ({
       }}
     >
       <div
+        className="foodies-modal-card"
         style={{
           backgroundColor: 'var(--bg-card)',
           borderRadius: 'var(--radius-lg)',

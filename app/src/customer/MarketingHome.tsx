@@ -213,6 +213,7 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({
           </div>
           <button
             onClick={() => onNavigate('menu')}
+            className="home-view-full-menu-btn"
             style={{
               padding: '10px 20px',
               borderRadius: 'var(--radius-full)',

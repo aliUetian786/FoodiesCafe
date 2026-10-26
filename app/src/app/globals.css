@@ -199,6 +199,17 @@ button {
   to { opacity: 1; transform: translateY(0); }
 }
 
+@keyframes slideUpDrawer {
+  from {
+    transform: translateY(100%);
+    opacity: 0.6;
+  }
+  to {
+    transform: translateY(0);
+    opacity: 1;
+  }
+}
+
 @keyframes pulseGlow {
   0%, 100% { box-shadow: 0 0 15px var(--primary-glow); }
   50% { box-shadow: 0 0 28px var(--primary-glow); }
@@ -312,6 +323,51 @@ button {
   }
   .staff-header-name {
     display: none !important;
+  }
+}
+
+/* Hide 'View Full Menu' button on small screens (<= 768px) */
+@media (max-width: 768px) {
+  .home-view-full-menu-btn {
+    display: none !important;
+  }
+}
+
+/* Unified Mobile Pop-Up / Bottom Drawer System (Matching Table QR Scanner design) */
+@media (max-width: 768px) {
+  .foodies-modal-overlay {
+    align-items: flex-end !important;
+    justify-content: center !important;
+    padding: 0 !important;
+  }
+  .foodies-modal-card {
+    width: 100% !important;
+    max-width: 100% !important;
+    border-top-left-radius: 24px !important;
+    border-top-right-radius: 24px !important;
+    border-bottom-left-radius: 0 !important;
+    border-bottom-right-radius: 0 !important;
+    border-bottom: none !important;
+    box-shadow: 0 -8px 32px rgba(0, 0, 0, 0.28) !important;
+    animation: slideUpDrawer 0.25s cubic-bezier(0.16, 1, 0.3, 1) !important;
+    max-height: 90vh !important;
+  }
+}
+
+/* Branch Manager Payment Modes Order Type Switcher (Desktop Tabs vs Phone Single Dropdown) */
+.bm-payment-tabs-desktop {
+  display: flex !important;
+}
+.bm-payment-tabs-mobile {
+  display: none !important;
+}
+@media (max-width: 640px) {
+  .bm-payment-tabs-desktop {
+    display: none !important;
+  }
+  .bm-payment-tabs-mobile {
+    display: flex !important;
+    width: 100% !important;
   }
 }
 

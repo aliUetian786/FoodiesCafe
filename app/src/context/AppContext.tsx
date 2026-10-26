@@ -666,6 +666,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, [currentRole]);
   const [currentBranchId, setCurrentBranchId] = useState<string>(() => {
     if (typeof window !== 'undefined') {
+      const urlParams = new URLSearchParams(window.location.search);
+      const urlBranch = urlParams.get('branch');
+      if (urlBranch) return urlBranch;
       const manual = localStorage.getItem('foodies_customer_manual_branch');
       if (manual) return manual;
       const saved = localStorage.getItem('foodies_customer_branch');

@@ -59,6 +59,7 @@ export const TableSelectionScreen: React.FC<TableSelectionScreenProps> = ({ onNa
     currentBranch,
     tables,
     currentBranchId,
+    setCurrentBranchId,
     updateTableStatus,
     markTableFree,
     recordCashPayment,
@@ -83,8 +84,12 @@ export const TableSelectionScreen: React.FC<TableSelectionScreenProps> = ({ onNa
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const urlTableNum = params.get('tableQr') || params.get('table');
+      const urlBranch = params.get('branch');
       if (urlTableNum) {
-        const match = branchTables.find(
+        const candidateTables = urlBranch
+          ? tables.filter((t) => !t.branchId || t.branchId === urlBranch)
+          : branchTables;
+        const match = candidateTables.find(
           (t) =>
             t.number.toLowerCase() === urlTableNum.toLowerCase() ||
             t.number.replace(/\D/g, '') === urlTableNum.replace(/\D/g, '')
@@ -104,8 +109,17 @@ export const TableSelectionScreen: React.FC<TableSelectionScreenProps> = ({ onNa
     if (typeof window !== 'undefined') {
       const params = new URLSearchParams(window.location.search);
       const urlTableNum = params.get('tableQr') || params.get('table');
+      const urlBranch = params.get('branch');
+
+      if (urlBranch && urlBranch !== currentBranchId && setCurrentBranchId) {
+        setCurrentBranchId(urlBranch);
+      }
+
       if (urlTableNum) {
-        const match = branchTables.find(
+        const candidateTables = urlBranch
+          ? tables.filter((t) => !t.branchId || t.branchId === urlBranch)
+          : branchTables;
+        const match = candidateTables.find(
           (t) =>
             t.number.toLowerCase() === urlTableNum.toLowerCase() ||
             t.number.replace(/\D/g, '') === urlTableNum.replace(/\D/g, '')
@@ -115,7 +129,7 @@ export const TableSelectionScreen: React.FC<TableSelectionScreenProps> = ({ onNa
         }
       }
     }
-  }, [branchTables, selectedTableId]);
+  }, [tables, branchTables, selectedTableId, currentBranchId, setCurrentBranchId]);
 
   // Check if customer already has an active order on this table
   const activeOrderOnThisTable = useMemo(() => {

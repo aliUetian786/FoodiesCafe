@@ -358,6 +358,7 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
 
   return (
     <div
+      className="foodies-modal-overlay"
       style={{
         position: 'fixed',
         inset: 0,
@@ -373,6 +374,7 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
     >
       {/* Modal Dialog Container - Compact Checkout Size per requirement */}
       <div
+        className="foodies-modal-card"
         style={{
           position: 'relative',
           backgroundColor: '#FFFFFF',

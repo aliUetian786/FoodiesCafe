@@ -561,6 +561,7 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
       {/* Backdrop */}
       <div
         onClick={onClose}
+        className="foodies-modal-overlay"
         style={{
           position: 'fixed',
           inset: 0,
@@ -577,6 +578,7 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
         {/* Modal Card */}
         <div
           onClick={(e) => e.stopPropagation()}
+          className="foodies-modal-card"
           style={{
             backgroundColor: 'var(--bg-card)',
             borderRadius: '24px',
@@ -701,13 +703,13 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'clamp(8px, 1.8vw, 12px)', boxSizing: 'border-box' }}>
                 <div
                   style={{
-                    height: 'clamp(250px, 48vh, 310px)',
+                    height: 'auto',
                     minHeight: 0,
-                    maxHeight: 'clamp(250px, 48vh, 310px)',
+                    maxHeight: '235px',
                     backgroundColor: 'var(--bg-card-subtle)',
                     borderRadius: '16px',
                     border: '1px solid var(--border-color)',
-                    padding: 'clamp(8px, 2vw, 14px)',
+                    padding: 'clamp(8px, 2vw, 12px)',
                     display: 'flex',
                     flexDirection: 'column',
                     justifyContent: 'space-between',
@@ -738,8 +740,18 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
                     </span>
                   </div>
 
-                  {/* List of cart items - fluid compact spacing */}
-                  <div style={{ flex: 1, overflowY: cart.length > 3 ? 'auto' : 'hidden', display: 'flex', flexDirection: 'column', gap: 'clamp(4px, 1.2vw, 6px)', paddingRight: '2px' }}>
+                  {/* List of cart items - vertically scrollable showing 2 items at a time and card size not bigger than that */}
+                  <div
+                    style={{
+                      maxHeight: '112px',
+                      overflowY: cart.length > 2 ? 'auto' : 'hidden',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 'clamp(4px, 1.2vw, 6px)',
+                      paddingRight: '2px',
+                      boxSizing: 'border-box',
+                    }}
+                  >
                     {cart.length === 0 ? (
                       <div style={{ textAlign: 'center', margin: 'auto', padding: '20px 10px', color: 'var(--text-muted)' }}>
                         <ShoppingBag size={28} style={{ margin: '0 auto 6px', opacity: 0.5 }} />

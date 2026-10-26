@@ -1,6 +1,7 @@
 'use client';
 
 import React, { useState, useMemo } from 'react';
+import QRCode from 'qrcode';
 import { useApp } from '@/context/AppContext';
 import { Table, TableStatus } from '@/types/cafe';
 import { TableQrCodeSvg } from '@/components/common/TableQrCodeSvg';
@@ -18,6 +19,9 @@ import {
   Check,
   ShieldCheck,
   ExternalLink,
+  Download,
+  Globe,
+  Edit2,
 } from 'lucide-react';
 
 interface TableQrModalProps {
@@ -52,6 +56,19 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
   const [customMinInput, setCustomMinInput] = useState<string>('90');
   const [copiedLink, setCopiedLink] = useState(false);
   const [isGenerating, setIsGenerating] = useState(false);
+  const [includeBranding, setIncludeBranding] = useState<boolean>(true);
+
+  // Persistent custom origin/host setting for QR code links
+  const [customOrigin, setCustomOrigin] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const saved = localStorage.getItem('foodies_qr_custom_origin');
+      if (saved) return saved;
+      return window.location.origin;
+    }
+    return 'https://foodiescafe.pk';
+  });
+  const [isEditingOrigin, setIsEditingOrigin] = useState(false);
+  const [originInput, setOriginInput] = useState('');
 
   // Active table
   const activeTable = useMemo(() => {
@@ -60,11 +77,12 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
 
   if (!isOpen) return null;
 
-  const origin =
+  const detectedOrigin =
     typeof window !== 'undefined' ? window.location.origin : 'https://foodiescafe.pk';
+  const effectiveOrigin = (customOrigin || detectedOrigin).replace(/\/+$/, '');
 
   const customerQrUrl = activeTable
-    ? `${origin}/?tableQr=${encodeURIComponent(activeTable.number)}&branch=${encodeURIComponent(currentBranch.id)}&token=${encodeURIComponent(activeTable.qrCode || `QR-${activeTable.number}`)}`
+    ? `${effectiveOrigin}/?tableQr=${encodeURIComponent(activeTable.number)}&branch=${encodeURIComponent(currentBranch.id)}&token=${encodeURIComponent(activeTable.qrCode || `QR-${activeTable.number}`)}`
     : '';
 
   const handleGenerateQr = async () => {
@@ -100,63 +118,97 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
     }
   };
 
-  const handlePrintTentCard = () => {
-    if (typeof window !== 'undefined') {
-      const printWindow = window.open('', '_blank');
-      if (printWindow) {
-        printWindow.document.write(`
-          <!DOCTYPE html>
-          <html>
-            <head>
-              <title>FoodiesCafe Table Tent Card - ${activeTable?.number}</title>
-              <style>
-                body {
-                  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
-                  text-align: center;
-                  padding: 40px;
-                  color: #0F0C0A;
-                }
-                .card {
-                  max-width: 380px;
-                  margin: 0 auto;
-                  border: 2px solid #EA580C;
-                  border-radius: 16px;
-                  padding: 24px;
-                  box-shadow: 0 4px 14px rgba(0,0,0,0.1);
-                }
-                .logo { font-size: 20px; font-weight: 900; color: #EA580C; letter-spacing: 1px; }
-                .table-num { font-size: 38px; font-weight: 900; margin: 8px 0; color: #0F0C0A; }
-                .sub { font-size: 13px; color: #64748B; margin-bottom: 20px; }
-                .instructions { font-size: 13px; font-weight: 700; margin-top: 18px; line-height: 1.5; }
-                .wifi { margin-top: 16px; font-size: 11px; color: #94A3B8; }
-                @media print {
-                  button { display: none; }
-                }
-              </style>
-            </head>
-            <body>
-              <div class="card">
-                <div class="logo">FOODIES CAFE</div>
-                <div class="table-num">TABLE ${activeTable?.number}</div>
-                <div class="sub">${activeTable?.floor || 'Main Dining Hall'} · ${currentBranch.name}</div>
-                <div style="margin: 16px 0;">
-                  <img src="https://api.qrserver.com/v1/create-qr-code/?size=200x200&data=${encodeURIComponent(customerQrUrl)}" width="200" height="200" style="display: block; margin: 0 auto; border-radius: 8px;" />
+  const handleDownloadPng = async () => {
+    if (!customerQrUrl || !activeTable) return;
+    try {
+      const dataUrl = await QRCode.toDataURL(customerQrUrl, {
+        errorCorrectionLevel: 'H',
+        margin: 3,
+        width: 600,
+        color: { dark: '#0F0C0A', light: '#FFFFFF' },
+      });
+      const a = document.createElement('a');
+      a.download = `FoodiesCafe-Table-${activeTable.number}-QR.png`;
+      a.href = dataUrl;
+      a.click();
+      addToast({
+        type: 'success',
+        title: 'QR Code Saved! 💾',
+        message: `High-resolution PNG downloaded for Table ${activeTable.number}. Ready to print or scan!`,
+      });
+    } catch (err) {
+      console.error('Download QR PNG error:', err);
+    }
+  };
+
+  const handlePrintTentCard = async () => {
+    if (typeof window !== 'undefined' && activeTable && customerQrUrl) {
+      try {
+        const qrDataUrl = await QRCode.toDataURL(customerQrUrl, {
+          errorCorrectionLevel: 'H',
+          margin: 3,
+          width: 450,
+          color: { dark: '#0F0C0A', light: '#FFFFFF' },
+        });
+
+        const printWindow = window.open('', '_blank');
+        if (printWindow) {
+          printWindow.document.write(`
+            <!DOCTYPE html>
+            <html>
+              <head>
+                <title>FoodiesCafe Table Tent Card - ${activeTable.number}</title>
+                <style>
+                  body {
+                    font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+                    text-align: center;
+                    padding: 40px;
+                    color: #0F0C0A;
+                  }
+                  .card {
+                    max-width: 380px;
+                    margin: 0 auto;
+                    border: 2px solid #EA580C;
+                    border-radius: 16px;
+                    padding: 24px;
+                    box-shadow: 0 4px 14px rgba(0,0,0,0.1);
+                  }
+                  .logo { font-size: 20px; font-weight: 900; color: #EA580C; letter-spacing: 1px; }
+                  .table-num { font-size: 38px; font-weight: 900; margin: 8px 0; color: #0F0C0A; }
+                  .sub { font-size: 13px; color: #64748B; margin-bottom: 20px; }
+                  .instructions { font-size: 13px; font-weight: 700; margin-top: 18px; line-height: 1.5; }
+                  .wifi { margin-top: 16px; font-size: 11px; color: #94A3B8; }
+                  @media print {
+                    button { display: none; }
+                  }
+                </style>
+              </head>
+              <body>
+                <div class="card">
+                  <div class="logo">FOODIES CAFE</div>
+                  <div class="table-num">TABLE ${activeTable.number}</div>
+                  <div class="sub">${activeTable.floor || 'Main Dining Hall'} · ${currentBranch.name}</div>
+                  <div style="margin: 16px 0;">
+                    <img src="${qrDataUrl}" width="200" height="200" alt="Table QR" style="display: block; margin: 0 auto; border-radius: 8px;" />
+                  </div>
+                  <div class="instructions">
+                    📱 <strong>SCAN WITH YOUR PHONE CAMERA</strong><br/>
+                    Browse fresh food menu & order directly to this table!
+                  </div>
+                  <div class="wifi">
+                    📶 Free Guest Wi-Fi: <strong>FoodiesCafe-Guest</strong> · Pass: <strong>foodies123</strong>
+                  </div>
                 </div>
-                <div class="instructions">
-                  📱 <strong>SCAN WITH YOUR PHONE CAMERA</strong><br/>
-                  Browse fresh food menu & order directly to this table!
-                </div>
-                <div class="wifi">
-                  📶 Free Guest Wi-Fi: <strong>FoodiesCafe-Guest</strong> · Pass: <strong>foodies123</strong>
-                </div>
-              </div>
-              <script>
-                window.onload = function() { window.print(); }
-              </script>
-            </body>
-          </html>
-        `);
-        printWindow.document.close();
+                <script>
+                  window.onload = function() { window.print(); }
+                </script>
+              </body>
+            </html>
+          `);
+          printWindow.document.close();
+        }
+      } catch (err) {
+        console.error('Failed to generate print tent card QR:', err);
       }
     }
   };
@@ -179,6 +231,7 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
   return (
     <div
       onClick={onClose}
+      className="foodies-modal-overlay"
       style={{
         position: 'fixed',
         inset: 0,
@@ -193,6 +246,7 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
     >
       <div
         onClick={(e) => e.stopPropagation()}
+        className="foodies-modal-card"
         style={{
           width: '100%',
           maxWidth: '820px',
@@ -575,10 +629,58 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
               <TableQrCodeSvg
                 value={customerQrUrl || `FC-TABLE-${activeTable?.number}`}
-                size={170}
+                size={175}
                 tableNumber={activeTable?.number}
-                includeBranding={true}
+                includeBranding={includeBranding}
               />
+
+              {/* Branding and standard pills */}
+              <div
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  marginTop: '10px',
+                  flexWrap: 'wrap',
+                  justifyContent: 'center',
+                }}
+              >
+                <button
+                  type="button"
+                  onClick={() => setIncludeBranding((prev) => !prev)}
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 750,
+                    color: includeBranding ? 'var(--primary)' : 'var(--text-muted)',
+                    backgroundColor: includeBranding ? 'rgba(234, 88, 12, 0.08)' : 'var(--bg-card)',
+                    border: '1px solid var(--border-color)',
+                    padding: '3px 9px',
+                    borderRadius: 'var(--radius-full)',
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    transition: 'all 0.15s ease',
+                  }}
+                  title="Toggle center Foodies branding badge"
+                >
+                  <span>Brand Badge: {includeBranding ? 'ON ✓' : 'OFF'}</span>
+                </button>
+
+                <span
+                  style={{
+                    fontSize: '10.5px',
+                    fontWeight: 750,
+                    color: '#15803D',
+                    backgroundColor: '#DCFCE7',
+                    border: '1px solid #86EFAC',
+                    padding: '3px 8px',
+                    borderRadius: 'var(--radius-full)',
+                  }}
+                >
+                  ✓ ISO/IEC 18004 Standard
+                </span>
+              </div>
 
               {activeTable?.qrExpiresAt && (
                 <div
@@ -597,7 +699,7 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
               )}
             </div>
 
-            {/* Scan URL String */}
+            {/* Scan URL String & Base Host Editor */}
             <div
               style={{
                 width: '100%',
@@ -611,21 +713,121 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
                 textAlign: 'left',
               }}
             >
-              <div style={{ fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '2px' }}>
-                Customer Scan URL:
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  marginBottom: '3px',
+                }}
+              >
+                <span style={{ fontWeight: 800, color: 'var(--text-secondary)' }}>
+                  Customer Scan URL:
+                </span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setIsEditingOrigin(!isEditingOrigin);
+                    setOriginInput(customOrigin || detectedOrigin);
+                  }}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    color: 'var(--primary)',
+                    fontSize: '10.5px',
+                    fontWeight: 750,
+                    cursor: 'pointer',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '3px',
+                    padding: 0,
+                  }}
+                >
+                  <Edit2 size={10} />
+                  <span>{isEditingOrigin ? 'Close' : 'Set Domain'}</span>
+                </button>
               </div>
-              {customerQrUrl}
+
+              {isEditingOrigin ? (
+                <div style={{ marginTop: '6px', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                  <input
+                    type="text"
+                    value={originInput}
+                    onChange={(e) => setOriginInput(e.target.value)}
+                    placeholder="https://your-domain.vercel.app"
+                    style={{
+                      width: '100%',
+                      padding: '5px 8px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-color)',
+                      fontSize: '11.5px',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                  <div style={{ display: 'flex', gap: '6px' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const trimmed = originInput.trim();
+                        if (trimmed) {
+                          setCustomOrigin(trimmed);
+                          if (typeof localStorage !== 'undefined') {
+                            localStorage.setItem('foodies_qr_custom_origin', trimmed);
+                          }
+                        }
+                        setIsEditingOrigin(false);
+                      }}
+                      style={{
+                        padding: '4px 8px',
+                        borderRadius: '4px',
+                        backgroundColor: 'var(--primary)',
+                        color: '#FFFFFF',
+                        border: 'none',
+                        fontSize: '11px',
+                        fontWeight: 750,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Save Domain
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setCustomOrigin(detectedOrigin);
+                        if (typeof localStorage !== 'undefined') {
+                          localStorage.removeItem('foodies_qr_custom_origin');
+                        }
+                        setIsEditingOrigin(false);
+                      }}
+                      style={{
+                        padding: '4px 8px',
+                        borderRadius: '4px',
+                        backgroundColor: 'var(--bg-card-subtle)',
+                        color: 'var(--text-main)',
+                        border: '1px solid var(--border-color)',
+                        fontSize: '11px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      Reset to Detected
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                customerQrUrl
+              )}
             </div>
 
-            {/* Action Buttons: Copy, Simulate Scan, Print */}
+            {/* Action Buttons: Copy, Download PNG, Simulate Scan, Print */}
             <div style={{ display: 'flex', gap: '8px', width: '100%', flexWrap: 'wrap' }}>
               <button
                 type="button"
                 onClick={handleCopyLink}
                 style={{
                   flex: 1,
-                  minWidth: '120px',
-                  padding: '9px 12px',
+                  minWidth: '100px',
+                  padding: '9px 10px',
                   borderRadius: '8px',
                   border: '1px solid var(--border-color)',
                   backgroundColor: 'var(--bg-card)',
@@ -636,11 +838,36 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: '6px',
+                  gap: '5px',
                 }}
               >
                 {copiedLink ? <Check size={14} color="#16A34A" /> : <Copy size={14} />}
                 <span>{copiedLink ? 'Copied!' : 'Copy Link'}</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={handleDownloadPng}
+                style={{
+                  flex: 1,
+                  minWidth: '115px',
+                  padding: '9px 10px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)',
+                  backgroundColor: 'var(--bg-card)',
+                  color: 'var(--text-main)',
+                  fontWeight: 750,
+                  fontSize: '12px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '5px',
+                }}
+                title="Download high-resolution PNG image"
+              >
+                <Download size={14} color="var(--primary)" />
+                <span>Save PNG 💾</span>
               </button>
 
               <button
@@ -655,8 +882,8 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
                 }}
                 style={{
                   flex: 1,
-                  minWidth: '130px',
-                  padding: '9px 12px',
+                  minWidth: '115px',
+                  padding: '9px 10px',
                   borderRadius: '8px',
                   backgroundColor: 'var(--primary)',
                   color: '#FFFFFF',
@@ -667,12 +894,12 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
-                  gap: '6px',
+                  gap: '5px',
                 }}
                 title="Test customer view immediately"
               >
                 <Smartphone size={14} />
-                <span>Simulate Scan 📱</span>
+                <span>Simulate 📱</span>
               </button>
 
               <button

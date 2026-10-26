@@ -31,6 +31,7 @@ export const CustomerFloorSeatingModal: React.FC<CustomerFloorSeatingModalProps>
 
   return (
     <div
+      className="foodies-modal-overlay"
       style={{
         position: 'fixed',
         inset: 0,
@@ -45,6 +46,7 @@ export const CustomerFloorSeatingModal: React.FC<CustomerFloorSeatingModalProps>
       }}
     >
       <div
+        className="foodies-modal-card"
         style={{
           backgroundColor: 'var(--bg-card)',
           borderRadius: 'var(--radius-lg)',
