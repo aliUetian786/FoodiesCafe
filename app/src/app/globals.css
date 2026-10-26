@@ -371,3 +371,52 @@ button {
   }
 }
 
+/* Branch Staff Management (Option 2) Mobile Responsive Styling */
+.bm-staff-desktop-banner {
+  display: flex !important;
+}
+.bm-staff-desktop-kpis {
+  display: flex !important;
+}
+.bm-staff-desktop-controls {
+  display: flex !important;
+}
+.bm-staff-mobile-card {
+  display: none !important;
+}
+.bm-staff-mobile-roles {
+  display: none !important;
+}
+.bm-staff-mobile-search-row {
+  display: none !important;
+}
+
+@media (max-width: 768px) {
+  .bm-staff-desktop-banner {
+    display: none !important;
+  }
+  .bm-staff-desktop-kpis {
+    display: none !important;
+  }
+  .bm-staff-desktop-controls {
+    display: none !important;
+  }
+  .bm-staff-mobile-card {
+    display: flex !important;
+  }
+  .bm-staff-mobile-roles {
+    display: flex !important;
+  }
+  .bm-staff-mobile-search-row {
+    display: flex !important;
+  }
+  .bm-staff-main-container {
+    background-color: transparent !important;
+    border: none !important;
+    padding: 0 !important;
+    box-shadow: none !important;
+    gap: 12px !important;
+  }
+}
+
+
