@@ -67,7 +67,33 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
     currentRole,
     updateBranchSettings,
     addToast,
+    customerCoordinates,
+    setCustomerCoordinates,
   } = useApp();
+
+  // Pakistani Locality Identifier for delivery pins
+  const getLocationLabel = (lat: number, lng: number): string => {
+    const lahoreDist = calculateDistanceKm(lat, lng, 31.5204, 74.3587);
+    const islamabadDist = calculateDistanceKm(lat, lng, 33.6844, 73.0479);
+    const karachiDist = calculateDistanceKm(lat, lng, 24.8607, 67.0011);
+
+    if (lahoreDist < 25) {
+      if (lat > 31.53) return 'Gulberg / Cantt, Lahore';
+      if (lat < 31.48) return 'DHA / Model Town, Lahore';
+      return 'Central Lahore Area';
+    }
+    if (islamabadDist < 25) {
+      if (lat > 33.71) return 'Sector F-7 / Blue Area, Islamabad';
+      if (lat < 33.65) return 'Rawalpindi / Islamabad Express';
+      return 'Islamabad Metropolitan Area';
+    }
+    if (karachiDist < 30) {
+      if (lat < 24.84) return 'Clifton / DHA Phase 5, Karachi';
+      if (lat > 24.9) return 'Gulshan-e-Iqbal / PECHS, Karachi';
+      return 'Karachi South Coast';
+    }
+    return `Custom Location (${lat.toFixed(3)}, ${lng.toFixed(3)})`;
+  };
 
   // Active fulfillment type preview (delivery vs takeaway/dine_in)
   const [activeOrderType, setActiveOrderType] = useState<'dine_in' | 'takeaway' | 'delivery'>(orderType);
@@ -77,9 +103,51 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
   }, [orderType]);
 
   // User location state
-  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [userCoords, setUserCoords] = useState<{ lat: number; lng: number } | null>(customerCoordinates || null);
   const [locating, setLocating] = useState(false);
   const [locationStatus, setLocationStatus] = useState<string>('Detecting location...');
+
+  // Update user location handler & auto-select nearest branch
+  const handleUpdateLocation = (coords: { lat: number; lng: number }, userAction = true) => {
+    setUserCoords(coords);
+    if (setCustomerCoordinates) setCustomerCoordinates(coords);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('foodies_customer_coordinates', JSON.stringify(coords));
+    }
+
+    // Auto-select nearest branch based on the new location
+    let nearest = branches[0];
+    let minD = Infinity;
+    branches.forEach((b) => {
+      const bLat = b.latitude ?? (b.city === 'Islamabad' ? 33.7215 : b.city === 'Karachi' ? 24.8252 : 31.5126);
+      const bLng = b.longitude ?? (b.city === 'Islamabad' ? 73.0552 : b.city === 'Karachi' ? 67.0305 : 74.3436);
+      const d = calculateDistanceKm(coords.lat, coords.lng, bLat, bLng);
+      if (d < minD) {
+        minD = d;
+        nearest = b;
+      }
+    });
+
+    if (nearest) {
+      setSelectedBranchId(nearest.id);
+      setCurrentBranchId(nearest.id);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('foodies_customer_branch', nearest.id);
+        localStorage.setItem('foodies_customer_selected_branch', nearest.id);
+      }
+    }
+
+    const area = getLocationLabel(coords.lat, coords.lng);
+    setLocationStatus(area);
+
+    if (userAction && nearest) {
+      addToast({
+        type: 'info',
+        title: 'Location Set 📍',
+        message: `${area}. Nearest branch (${nearest.name}) auto-selected. You can also pick any branch.`,
+      });
+    }
+  };
 
   // Active selected branch in the modal
   const [selectedBranchId, setSelectedBranchId] = useState<string>(currentBranchId || branches[0]?.id || '');
@@ -233,26 +301,13 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
 
   // Handlers
   const handleSelectBranch = (bId: string) => {
-    const target = branchesWithDistance.find((item) => item.id === bId);
-    const isNearest = nearestBranch?.id === bId;
-    const maxDist = target?.maxOrderDistanceKm ?? 50;
-    const dist = target?.distanceKm ?? 0;
-
-    // Reject selection if branch is not nearest and exceeds configured max order distance
-    if (!isNearest && dist > maxDist) {
-      addToast({
-        type: 'warning',
-        title: 'Branch Out of Range',
-        message: `${target?.name || 'This branch'} only accepts orders within ${maxDist} km (you are ${dist} km away).`,
-      });
-      return;
-    }
-
+    // Freedom to order from ANY branch of customer's choice
     setSelectedBranchId(bId);
     setCurrentBranchId(bId);
     if (typeof window !== 'undefined') {
       localStorage.setItem('foodies_customer_branch', bId);
       localStorage.setItem('foodies_customer_manual_branch', bId);
+      localStorage.setItem('foodies_customer_selected_branch', bId);
     }
     const b = branches.find((item) => item.id === bId);
     addToast({
@@ -482,8 +537,6 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
                 const isSelected = b.id === selectedBranchId;
                 const isCurrentActive = b.id === currentBranchId;
                 const isNearest = nearestBranch?.id === b.id;
-                const maxDist = b.maxOrderDistanceKm ?? 50;
-                const isBeyond = !isNearest && b.distanceKm > maxDist;
 
                 return (
                   <div
@@ -496,8 +549,8 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
                         ? '1.5px solid var(--primary)'
                         : '1px solid var(--border-color)',
                       backgroundColor: isSelected ? 'rgba(217, 101, 40, 0.05)' : '#FFFFFF',
-                      cursor: isBeyond ? 'not-allowed' : 'pointer',
-                      opacity: isBeyond ? 0.65 : 1,
+                      cursor: 'pointer',
+                      opacity: 1,
                       display: 'flex',
                       flexDirection: 'column',
                       gap: '4px',
@@ -523,18 +576,18 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
                             ⚡ Nearest
                           </span>
                         )}
-                        {isBeyond && (
+                        {isSelected && (
                           <span
                             style={{
-                              fontSize: '8px',
+                              fontSize: '9px',
                               fontWeight: 900,
                               padding: '1px 5px',
-                              borderRadius: '4px',
-                              backgroundColor: '#FEE2E2',
-                              color: '#DC2626',
+                              borderRadius: '8px',
+                              backgroundColor: 'var(--primary-light)',
+                              color: 'var(--primary)',
                             }}
                           >
-                            ⛔ Beyond {maxDist} km
+                            ✓ Selected
                           </span>
                         )}
                       </div>
@@ -628,11 +681,114 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
             onMouseUp={handleMouseUp}
             onMouseLeave={handleMouseUp}
           >
+            {/* Quick Location Jump Toolbar */}
+            <div
+              style={{
+                padding: '5px 10px',
+                backgroundColor: '#FFFFFF',
+                borderBottom: '1px solid var(--border-color)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: '6px',
+                overflowX: 'auto',
+                flexShrink: 0,
+                zIndex: 10,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '5px', overflowX: 'auto' }}>
+                <button
+                  type="button"
+                  onClick={() => {
+                    if (typeof window !== 'undefined' && 'geolocation' in navigator) {
+                      navigator.geolocation.getCurrentPosition(
+                        (pos) => handleUpdateLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+                        () => addToast({ type: 'warning', title: 'GPS Unavailable', message: 'Could not access GPS. Please click on the map.' }),
+                        { timeout: 6000 }
+                      );
+                    }
+                  }}
+                  title="Take me to my current GPS location"
+                  style={{
+                    padding: '3px 9px',
+                    borderRadius: '12px',
+                    backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                    border: '1px solid rgba(37, 99, 235, 0.25)',
+                    color: '#2563EB',
+                    fontSize: '10.5px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                  }}
+                >
+                  <Navigation size={12} />
+                  <span>My Current GPS</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateLocation({ lat: 31.5204, lng: 74.3587 })}
+                  style={{
+                    padding: '3px 8px',
+                    borderRadius: '12px',
+                    backgroundColor: 'var(--bg-card)',
+                    border: '1px solid var(--border-color)',
+                    color: 'var(--text-main)',
+                    fontSize: '10.5px',
+                    fontWeight: 750,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  📍 Lahore
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateLocation({ lat: 33.6844, lng: 73.0479 })}
+                  style={{
+                    padding: '3px 8px',
+                    borderRadius: '12px',
+                    backgroundColor: 'var(--bg-card)',
+                    border: '1px solid var(--border-color)',
+                    color: 'var(--text-main)',
+                    fontSize: '10.5px',
+                    fontWeight: 750,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  📍 Islamabad
+                </button>
+                <button
+                  type="button"
+                  onClick={() => handleUpdateLocation({ lat: 24.8607, lng: 67.0011 })}
+                  style={{
+                    padding: '3px 8px',
+                    borderRadius: '12px',
+                    backgroundColor: 'var(--bg-card)',
+                    border: '1px solid var(--border-color)',
+                    color: 'var(--text-main)',
+                    fontSize: '10.5px',
+                    fontWeight: 750,
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  📍 Karachi
+                </button>
+              </div>
+              <span style={{ fontSize: '9.5px', color: 'var(--primary)', fontWeight: 800, whiteSpace: 'nowrap' }}>
+                💡 Click map to set location
+              </span>
+            </div>
+
             {/* Zoom / Control Buttons */}
             <div
               style={{
                 position: 'absolute',
-                top: '10px',
+                top: '46px',
                 right: '10px',
                 zIndex: 20,
                 display: 'flex',
@@ -708,7 +864,7 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                cursor: isDragging ? 'grabbing' : 'grab',
+                cursor: isDragging ? 'grabbing' : 'crosshair',
                 transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomLevel})`,
                 transformOrigin: 'center center',
                 transition: isDragging ? 'none' : 'transform 0.15s ease-out',
@@ -717,6 +873,25 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
               <svg
                 viewBox={`0 0 ${mapWidth} ${mapHeight}`}
                 style={{ width: '100%', height: '100%', maxWidth: `${mapWidth}px`, maxHeight: `${mapHeight}px` }}
+                onClick={(e) => {
+                  const svg = e.currentTarget;
+                  const rect = svg.getBoundingClientRect();
+                  const clickX = ((e.clientX - rect.left) / rect.width) * mapWidth;
+                  const clickY = ((e.clientY - rect.top) / rect.height) * mapHeight;
+                  
+                  const minLat = 24.0;
+                  const maxLat = 34.5;
+                  const minLng = 66.5;
+                  const maxLng = 75.2;
+                  const padding = 45;
+                  
+                  const xRatio = Math.max(0, Math.min(1, (clickX - padding) / (mapWidth - padding * 2)));
+                  const yRatio = Math.max(0, Math.min(1, (mapHeight - padding - clickY) / (mapHeight - padding * 2)));
+                  const newLat = Number((minLat + yRatio * (maxLat - minLat)).toFixed(4));
+                  const newLng = Number((minLng + xRatio * (maxLng - minLng)).toFixed(4));
+                  
+                  handleUpdateLocation({ lat: newLat, lng: newLng });
+                }}
               >
                 <defs>
                   <pattern id="compactGrid" width="24" height="24" patternUnits="userSpaceOnUse">
@@ -819,7 +994,15 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
                   if (b.id === selectedBranchId) return null;
                   const pt = projectCoords(b.resolvedLat, b.resolvedLng);
                   return (
-                    <g key={`pin-${b.id}`} transform={`translate(${pt.x}, ${pt.y})`} onClick={() => handleSelectBranch(b.id)} style={{ cursor: 'pointer' }}>
+                    <g
+                      key={`pin-${b.id}`}
+                      transform={`translate(${pt.x}, ${pt.y})`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        handleSelectBranch(b.id);
+                      }}
+                      style={{ cursor: 'pointer' }}
+                    >
                       <circle r="9" fill="#FFFFFF" stroke="var(--border-color)" strokeWidth="1.5" />
                       <circle r="4" fill="var(--text-muted)" />
                       <text x="0" y="16" textAnchor="middle" fill="var(--text-secondary)" fontSize="8" fontWeight="800">
@@ -829,7 +1012,7 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
                   );
                 })}
 
-                {/* Customer Pin (Blue Radar Pin from checkout) */}
+                {/* Customer Pin (Blue Radar Pin) */}
                 {userPoint && (
                   <g transform={`translate(${userPoint.x}, ${userPoint.y})`}>
                     <circle r="14" fill="rgba(37, 99, 235, 0.2)">
@@ -838,9 +1021,9 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
                     </circle>
                     <circle r="5" fill="#2563EB" stroke="#FFFFFF" strokeWidth="1.5" />
                     <g transform="translate(0, -12)">
-                      <rect x="-30" y="-8" width="60" height="15" rx="7" fill="#2563EB" />
+                      <rect x="-35" y="-8" width="70" height="15" rx="7" fill="#2563EB" />
                       <text x="0" y="2.5" textAnchor="middle" fill="#FFFFFF" fontSize="7.5" fontWeight="900">
-                        YOU (DEST)
+                        {isDelivery ? 'DELIVER HERE' : 'YOU (DEST)'}
                       </text>
                     </g>
                   </g>

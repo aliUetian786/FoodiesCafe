@@ -207,9 +207,21 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
     }
   }, [menuItems]);
 
-  // Redux Toolkit memoized selectors for zero-lag calculations
-  const cartCount = useAppSelector(selectCartCount);
-  const cartSubtotal = useAppSelector(selectCartSubtotal);
+  // Redux Toolkit memoized selectors with direct React state fallback for zero-lag calculations
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const reduxCartCount = useAppSelector(selectCartCount);
+  const reduxCartSubtotal = useAppSelector(selectCartSubtotal);
+  const derivedCartCount = (cart || []).reduce((sum, i) => sum + (i.quantity || 1), 0);
+  const derivedSubtotal = (cart || []).reduce((sum, i) => sum + (Number(i.unitPrice) || 0) * (i.quantity || 1), 0);
+
+  const rawCartCount = reduxCartCount > 0 ? reduxCartCount : derivedCartCount;
+  const rawCartSubtotal = reduxCartSubtotal > 0 ? reduxCartSubtotal : derivedSubtotal;
+  const cartCount = mounted ? rawCartCount : 0;
+  const cartSubtotal = mounted ? rawCartSubtotal : 0;
 
   // Snappy flying piece animation from clicked order item to header cart button
   const triggerFlyToCart = (

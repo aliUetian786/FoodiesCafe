@@ -101,7 +101,7 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ isOpen, 
         addToast({
           type: 'success',
           title: 'Verification Code Sent! ✉️',
-          message: `A 4-digit code was sent to ${cleanEmail}. Please check your inbox!`,
+          message: 'A 4-digit code was sent. Please check your inbox!',
         });
       } else if (data.mailError) {
         addToast({
@@ -433,7 +433,7 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ isOpen, 
         ) : (
           /* Step 2: 4-digit Code Confirmation */
           <form onSubmit={handleVerifyOtp} style={{ display: 'flex', flexDirection: 'column', gap: '14px', position: 'relative', zIndex: 1 }}>
-            {/* Dev Mode Banner or Info Box */}
+            {/* Dev Mode Banner (only if simulated in development) */}
             {isDevMode && sentOtp ? (
               <div
                 style={{
@@ -455,22 +455,7 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ isOpen, 
                   <span style={{ fontSize: '18px', letterSpacing: '4px', fontWeight: 900, color: '#EA580C' }}>{sentOtp}</span>
                 </div>
               </div>
-            ) : (
-              <div
-                style={{
-                  backgroundColor: '#EFF6FF',
-                  border: '1px solid #BFDBFE',
-                  borderRadius: 'var(--radius-md)',
-                  padding: '10px 14px',
-                  textAlign: 'center',
-                  fontSize: '12px',
-                  color: '#1E40AF',
-                  fontWeight: 650,
-                }}
-              >
-                Verification code dispatched to <strong>{email}</strong>. Please check your inbox or spam.
-              </div>
-            )}
+            ) : null}
 
             <div>
               <label style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>

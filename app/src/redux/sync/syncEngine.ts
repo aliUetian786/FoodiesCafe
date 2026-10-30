@@ -31,6 +31,27 @@ export async function runSync(options?: { full?: boolean; force?: boolean }): Pr
   const state = store.getState();
   const branchId = state.cafe.currentBranchId;
   const hasLoadedOlder = state.orders.hasLoadedOlderOrders;
+  const currentUser = state.ui.currentUser;
+
+  // Retrieve customer identifiers so all orders across branches stay synced to customer account
+  let phoneParam = '';
+  let custIdParam = '';
+  let emailParam = '';
+  if (currentUser) {
+    if (currentUser.phone) phoneParam = `&customerPhone=${encodeURIComponent(currentUser.phone)}`;
+    if (currentUser.id && currentUser.id !== 'user-guest') custIdParam = `&customerId=${encodeURIComponent(currentUser.id)}`;
+    if (currentUser.email) emailParam = `&customerEmail=${encodeURIComponent(currentUser.email)}`;
+  } else if (typeof window !== 'undefined') {
+    try {
+      const saved = localStorage.getItem('foodies_customer_user');
+      if (saved) {
+        const u = JSON.parse(saved);
+        if (u.phone) phoneParam = `&customerPhone=${encodeURIComponent(u.phone)}`;
+        if (u.id && u.id !== 'user-guest') custIdParam = `&customerId=${encodeURIComponent(u.id)}`;
+        if (u.email) emailParam = `&customerEmail=${encodeURIComponent(u.email)}`;
+      }
+    } catch (e) {}
+  }
 
   isSyncing = true;
   const controller = new AbortController();
@@ -39,7 +60,7 @@ export async function runSync(options?: { full?: boolean; force?: boolean }): Pr
   try {
     const scopeParam = shouldFullSync ? 'full' : 'live';
     const olderParam = hasLoadedOlder ? 'true' : 'false';
-    const url = `/api/sync?scope=${scopeParam}&branchId=${encodeURIComponent(branchId)}&older=${olderParam}`;
+    const url = `/api/sync?scope=${scopeParam}&branchId=${encodeURIComponent(branchId)}&older=${olderParam}${phoneParam}${custIdParam}${emailParam}`;
 
     const res = await fetch(url, {
       signal: controller.signal,
@@ -70,13 +91,13 @@ export async function runSync(options?: { full?: boolean; force?: boolean }): Pr
       if (Array.isArray(data.sessions)) {
         store.dispatch(setTableSessions(data.sessions));
       }
+      if (Array.isArray(data.branches) && data.branches.length > 0) {
+        store.dispatch(setBranches(data.branches));
+      }
 
       // Dispatch static updates if full sync
       if (shouldFullSync) {
         lastFullSyncTime = now;
-        if (Array.isArray(data.branches) && data.branches.length > 0) {
-          store.dispatch(setBranches(data.branches));
-        }
         if (Array.isArray(data.menuItems) && data.menuItems.length > 0) {
           store.dispatch(setMenuItems(data.menuItems));
         }

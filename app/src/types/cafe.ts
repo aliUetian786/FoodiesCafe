@@ -123,6 +123,7 @@ export interface Order {
   customerId: string;
   customerName: string;
   customerPhone: string;
+  customerEmail?: string;
   type: OrderType;
   tableNumber?: string;
   tablePin?: string;
@@ -263,6 +264,7 @@ export interface Complaint {
   customerId: string;
   customerName: string;
   customerPhone: string;
+  customerEmail?: string;
   branchId: string;
   orderId?: string;
   orderNumber?: string;

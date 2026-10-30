@@ -33,14 +33,41 @@ interface OrderTrackingScreenProps {
 export const OrderTrackingScreen: React.FC<OrderTrackingScreenProps> = ({ onNavigate }) => {
   const { orders, currentBranch, currentUser, cancelOrder } = useApp();
 
-  // Find customer's relevant orders
+  // Find customer's relevant orders with multi-source fallback
   const normalizePhone = (p?: string) => (p || '').replace(/\D/g, '').slice(-10);
   const cleanPhone = normalizePhone(currentUser?.phone);
-  const customerOrders = orders.filter((o) => {
-    if (cleanPhone && normalizePhone(o.customerPhone) === cleanPhone) return true;
-    if (currentUser?.id && currentUser.id !== 'user-guest' && o.customerId === currentUser.id) return true;
-    return false;
-  });
+
+  const customerOrders = React.useMemo(() => {
+    let localPlacedIds: string[] = [];
+    let localCachedOrders: Order[] = [];
+    if (typeof window !== 'undefined') {
+      try {
+        localPlacedIds = JSON.parse(localStorage.getItem('foodies_customer_order_ids') || '[]');
+        localCachedOrders = JSON.parse(localStorage.getItem('foodies_customer_history_cache') || '[]');
+      } catch (e) {}
+    }
+
+    const pool = [...orders];
+    localCachedOrders.forEach((co) => {
+      if (!pool.some((o) => o.id === co.id || o.orderNumber === co.orderNumber)) {
+        pool.push(co);
+      }
+    });
+
+    return pool.filter((o) => {
+      // 1. Placed on this device/browser
+      if (localPlacedIds.includes(o.id) || localPlacedIds.includes(o.orderNumber)) return true;
+      // 2. Phone match
+      if (cleanPhone && normalizePhone(o.customerPhone) === cleanPhone) return true;
+      // 3. Customer ID match
+      if (currentUser?.id && currentUser.id !== 'user-guest' && o.customerId === currentUser.id) return true;
+      // 4. Email match
+      if (currentUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === currentUser.email.toLowerCase()) return true;
+      // 5. Customer name match if authenticated
+      if (currentUser?.name && currentUser.name !== 'Guest Customer' && o.customerName === currentUser.name) return true;
+      return false;
+    });
+  }, [orders, cleanPhone, currentUser]);
 
   const relevantOrders = customerOrders;
 

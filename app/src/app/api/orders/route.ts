@@ -22,6 +22,7 @@ async function ensureOrdersColumns() {
     await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS assigned_waiter_id VARCHAR(64)`);
     await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS assigned_waiter_name VARCHAR(255)`);
     await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_table_qr BOOLEAN DEFAULT false`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_email VARCHAR(255)`);
     await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS waiter_notified BOOLEAN DEFAULT false`);
     ordersColumnsMigrated = true;
   } catch (e) {}
@@ -46,6 +47,7 @@ export async function GET(request: Request) {
     let sql = `
       SELECT id, order_number as "orderNumber", branch_id as "branchId",
              customer_id as "customerId", customer_name as "customerName", customer_phone as "customerPhone",
+             customer_email as "customerEmail",
              type, table_number as "tableNumber", table_pin as "tablePin", pickup_time as "pickupTime",
              status, payment_status as "paymentStatus", payment_method as "paymentMethod",
              items, original_subtotal as "originalSubtotal", add_on_subtotal as "addOnSubtotal",
@@ -179,6 +181,7 @@ export async function POST(request: Request) {
       customerId,
       customerName,
       customerPhone,
+      customerEmail = null,
       type,
       tableNumber,
       tablePin,
@@ -217,7 +220,7 @@ export async function POST(request: Request) {
     try {
       const sql = `
         INSERT INTO orders (
-          id, order_number, branch_id, customer_id, customer_name, customer_phone,
+          id, order_number, branch_id, customer_id, customer_name, customer_phone, customer_email,
           type, table_number, table_pin, pickup_time, status, payment_status,
           payment_method, items, original_subtotal, add_on_subtotal, tax, total,
           notes, delivery_address, version, sent_to_kitchen, sent_to_kitchen_at,
@@ -225,12 +228,13 @@ export async function POST(request: Request) {
           assigned_rider_id, assigned_rider_name, rider_status, delivered_at, payment_collected, customer_coordinates,
           assigned_waiter_id, assigned_waiter_name, is_table_qr, waiter_notified
         ) VALUES (
-          $1, $2, $3, $4, $5, $6,
-          $7, $8, $9, $10, $11, $12,
-          $13, $14::jsonb, $15, $16, $17, $18,
-          $19, $20, $21, $22, $23, $24, $25, $26, $27, $28,
-          $29, $30, $31, $32, $33, $34::jsonb,
-          $35, $36, $37, $38
+          $1, $2, $3, $4, $5, $6, $7,
+          $8, $9, $10, $11, $12, $13,
+          $14, $15::jsonb, $16, $17, $18, $19,
+          $20, $21, $22, $23, $24,
+          $25, $26, $27, $28, $29,
+          $30, $31, $32, $33, $34, $35::jsonb,
+          $36, $37, $38, $39
         ) RETURNING *
       `;
 
@@ -241,6 +245,7 @@ export async function POST(request: Request) {
         customerId,
         customerName,
         customerPhone,
+        customerEmail || null,
         type,
         tableNumber || null,
         tablePin || null,

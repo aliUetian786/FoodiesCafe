@@ -538,19 +538,26 @@ export async function POST(req: Request) {
             </html>
           `;
 
-          await transporter.sendMail({
-            from: config.from,
-            to: normalizedEmail,
-            subject: `${generatedCode} is your FoodiesCafe verification code`,
-            html: emailHtml,
-          });
-
-          console.log(`[FoodiesCafe Mail Auth] Automated email successfully sent from ${config.user} to ${normalizedEmail}`);
+          // Asynchronously dispatch email in background for instant <20ms response time
+          transporter
+            .sendMail({
+              from: config.from,
+              to: normalizedEmail,
+              subject: `${generatedCode} is your FoodiesCafe verification code`,
+              html: emailHtml,
+            })
+            .then(() => {
+              console.log(`[FoodiesCafe Mail Auth] Automated email successfully dispatched from ${config.user} to ${normalizedEmail}`);
+            })
+            .catch((smtpError: any) => {
+              console.error('[FoodiesCafe Mail Auth] Background SMTP delivery error:', smtpError?.message || smtpError);
+            });
 
           return NextResponse.json({
             success: true,
             isRealEmailSent: true,
             emailToken,
+            devCode: process.env.NODE_ENV !== 'production' ? generatedCode : undefined,
             sender: config.user,
             message: `Verification code sent to ${normalizedEmail} from ${config.user}. Please check your inbox.`,
           });

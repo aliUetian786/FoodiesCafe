@@ -47,14 +47,38 @@ export const ordersSlice = createSlice({
   initialState,
   reducers: {
     setOrders: (state, action: PayloadAction<Order[]>) => {
-      const sanitized = action.payload.filter(
+      const incoming = action.payload.filter(
         (o) =>
           !String(o.id).startsWith('ord-seed-') &&
           !['FC-6744', 'FC-7819', 'FC-8812', 'FC-9021'].includes(o.orderNumber)
       );
-      state.orders = sanitized;
+
+      // Create lookup map of incoming orders by id and orderNumber
+      const incomingMap = new Map<string, Order>();
+      incoming.forEach((o) => {
+        if (o.id) incomingMap.set(o.id, o);
+        if (o.orderNumber) incomingMap.set(o.orderNumber, o);
+      });
+
+      // Preserve existing orders that aren't in the incoming payload (e.g. from other branches or locally active)
+      const merged: Order[] = [...incoming];
+
+      for (const existing of state.orders) {
+        if (!incomingMap.has(existing.id) && !incomingMap.has(existing.orderNumber)) {
+          merged.push(existing);
+        }
+      }
+
+      // Keep orders sorted newest first
+      merged.sort((a, b) => {
+        const timeA = new Date(a.createdAt).getTime() || 0;
+        const timeB = new Date(b.createdAt).getTime() || 0;
+        return timeB - timeA;
+      });
+
+      state.orders = merged;
       state.lastSynced = new Date().toISOString();
-      persistOrders(sanitized);
+      persistOrders(merged);
     },
     upsertOrder: (state, action: PayloadAction<Order>) => {
       const ord = action.payload;

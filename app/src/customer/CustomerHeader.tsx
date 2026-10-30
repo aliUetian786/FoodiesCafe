@@ -143,8 +143,16 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
     }
   }, [branches, currentBranchId, setCurrentBranchId]);
 
-  // Redux Toolkit memoized selector for instant zero-lag cart count
-  const cartCount = useAppSelector(selectCartCount);
+  // Redux Toolkit memoized selector with direct React state fallback for zero-lag updates
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const reduxCartCount = useAppSelector(selectCartCount);
+  const derivedCartCount = (cart || []).reduce((sum, i) => sum + (i.quantity || 1), 0);
+  const rawCartCount = reduxCartCount > 0 ? reduxCartCount : derivedCartCount;
+  const cartCount = mounted ? rawCartCount : 0;
 
   useEffect(() => {
     if (cartCount > prevCartRef.current && cartCount > 0) {

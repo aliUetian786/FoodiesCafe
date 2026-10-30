@@ -119,6 +119,7 @@ interface AppContextType {
       customerId?: string;
       customerName?: string;
       customerPhone?: string;
+      customerEmail?: string;
       cashierId?: string;
       cashierName?: string;
       isWalkIn?: boolean;
@@ -692,7 +693,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     return 'gulberg-lahore';
   });
-  const [branches, setBranches] = useState<Branch[]>(INITIAL_BRANCHES);
+  const [branches, setBranches] = useState<Branch[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('foodies_branches_live');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch (e) {}
+    }
+    return INITIAL_BRANCHES;
+  });
   const [menuItems, setMenuItems] = useState<MenuItem[]>(INITIAL_MENU);
   const [orders, setOrders] = useState<Order[]>(INITIAL_ORDERS);
   const [hasLoadedOlderOrders, setHasLoadedOlderOrders] = useState<boolean>(false);
@@ -749,6 +761,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     return [];
   });
+
+  // Automatically keep cart synchronized with localStorage and Redux store
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem('foodies_cart', JSON.stringify(cart));
+      store.dispatch(setReduxCart(cart));
+    } catch (e) {}
+  }, [cart]);
   const [menuSearchQuery, setMenuSearchQuery] = useState<string>('');
   const [toasts, setToasts] = useState<Toast[]>([]);
   const [customerCoordinates, setCustomerCoordinates] = useState<{ lat: number; lng: number } | null>(null);
@@ -775,6 +796,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         liveBroadcastChannelRef.current.postMessage({
           type: 'SYNC_MANAGER_ACCESS_REQUESTS',
           payload: reqs,
+          senderId: tabIdRef.current,
+        });
+      }
+    } catch (e) {}
+  };
+
+  const broadcastBranches = (branchesList: Branch[]) => {
+    if (typeof window === 'undefined') return;
+    try {
+      localStorage.setItem('foodies_branches_live', JSON.stringify(branchesList));
+      store.dispatch(setReduxBranches(branchesList));
+      broadcastStateMutation('SYNC_BRANCHES', branchesList);
+      if (liveBroadcastChannelRef.current) {
+        liveBroadcastChannelRef.current.postMessage({
+          type: 'SYNC_BRANCHES',
+          payload: branchesList,
           senderId: tabIdRef.current,
         });
       }
@@ -1174,6 +1211,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       liveBroadcastChannelRef.current = channel;
       channel.onmessage = (event) => {
         if (!event.data || event.data.senderId === tabIdRef.current) return;
+        if (event.data?.type === 'SYNC_BRANCHES' && Array.isArray(event.data.payload)) {
+          setBranches(event.data.payload);
+        }
         if (event.data?.type === 'SYNC_ORDERS' && Array.isArray(event.data.payload)) {
           setOrders(event.data.payload);
         }
@@ -1216,6 +1256,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Storage event listener for cross-tab sync
     const handleStorage = (e: StorageEvent) => {
+      if (e.key === 'foodies_branches_live' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (Array.isArray(parsed)) {
+            setBranches(parsed);
+          }
+        } catch (err) {}
+      }
       if (e.key === 'foodies_orders_live' && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
@@ -1519,10 +1567,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const existing = prev.find(
         (i) => i.menuItemId === item.menuItemId && i.size === item.size && JSON.stringify(i.extras) === JSON.stringify(item.extras)
       );
-      if (existing) {
-        return prev.map((i) => (i === existing ? { ...i, quantity: i.quantity + item.quantity } : i));
-      }
-      return [...prev, item];
+      const nextCart = existing
+        ? prev.map((i) => (i === existing ? { ...i, quantity: i.quantity + item.quantity } : i))
+        : [...prev, item];
+      try {
+        localStorage.setItem('foodies_cart', JSON.stringify(nextCart));
+        store.dispatch(setReduxCart(nextCart));
+      } catch (e) {}
+      return nextCart;
     });
     addToast({
       type: 'success',
@@ -1532,8 +1584,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateCartItemQty = (itemId: string, delta: number) => {
-    setCart((prev) =>
-      prev
+    setCart((prev) => {
+      const nextCart = prev
         .map((i) => {
           if (i.id === itemId) {
             const newQty = i.quantity + delta;
@@ -1541,15 +1593,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }
           return i;
         })
-        .filter(Boolean) as OrderItem[]
-    );
+        .filter(Boolean) as OrderItem[];
+      try {
+        localStorage.setItem('foodies_cart', JSON.stringify(nextCart));
+        store.dispatch(setReduxCart(nextCart));
+      } catch (e) {}
+      return nextCart;
+    });
   };
 
   const removeFromCart = (itemId: string) => {
-    setCart((prev) => prev.filter((i) => i.id !== itemId));
+    setCart((prev) => {
+      const nextCart = prev.filter((i) => i.id !== itemId);
+      try {
+        localStorage.setItem('foodies_cart', JSON.stringify(nextCart));
+        store.dispatch(setReduxCart(nextCart));
+      } catch (e) {}
+      return nextCart;
+    });
   };
 
-  const clearCart = () => setCart([]);
+  const clearCart = () => {
+    try {
+      localStorage.setItem('foodies_cart', JSON.stringify([]));
+      store.dispatch(setReduxCart([]));
+    } catch (e) {}
+    setCart([]);
+  };
 
   // Place Order
   const placeOrder = (
@@ -1564,6 +1634,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       customerId?: string;
       customerName?: string;
       customerPhone?: string;
+      customerEmail?: string;
       cashierId?: string;
       cashierName?: string;
       isWalkIn?: boolean;
@@ -1694,6 +1765,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return updatedOrder;
     }
 
+    const targetCustomerEmail = options?.customerEmail || (!isStaffOrCashier ? currentUser.email : undefined);
+
     const newOrder: Order = {
       id: `ord-${Date.now()}`,
       orderNumber: `FC-${Math.floor(1000 + Math.random() * 9000)}`,
@@ -1701,6 +1774,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       customerId: targetCustomerId,
       customerName: options?.customerName || (isStaffOrCashier ? 'Walk-in Guest' : currentUser.name),
       customerPhone: targetCustomerPhone,
+      customerEmail: targetCustomerEmail,
       type,
       tableNumber,
       tablePin,
@@ -1726,6 +1800,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isWalkIn,
       customerCoordinates: options?.customerCoordinates || customerCoordinates || undefined,
     };
+
+    // Guarantee that this customer's order is immediately remembered on this device/account
+    if (typeof window !== 'undefined') {
+      try {
+        const myIds = JSON.parse(localStorage.getItem('foodies_customer_order_ids') || '[]');
+        if (!myIds.includes(newOrder.id)) {
+          myIds.unshift(newOrder.id);
+          localStorage.setItem('foodies_customer_order_ids', JSON.stringify(myIds));
+        }
+        const cache = JSON.parse(localStorage.getItem('foodies_customer_history_cache') || '[]');
+        const updatedCache = [newOrder, ...cache.filter((o: any) => o.id !== newOrder.id)];
+        localStorage.setItem('foodies_customer_history_cache', JSON.stringify(updatedCache));
+      } catch (e) {}
+    }
 
     setOrders((prev) => {
       const updated = [newOrder, ...prev];
@@ -1774,13 +1862,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
 
-    // Asynchronously persist order to PostgreSQL database
+    // Persist order to PostgreSQL database and safely broadcast once confirmed in DB
     try {
       fetch('/api/orders', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newOrder),
-      }).catch(() => {});
+      })
+        .then((res) => res.json())
+        .then((data) => {
+          if (data?.order) {
+            store.dispatch(upsertReduxOrder(data.order));
+            broadcastStateMutation('SYNC_ORDERS', [data.order]);
+          }
+        })
+        .catch(() => {});
     } catch (e) {}
 
     return newOrder;
@@ -3010,9 +3106,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateBranchSettings = (branchId: string, settings: Partial<Branch>) => {
-    setBranches((prev) =>
-      prev.map((b) => (b.id === branchId ? { ...b, ...settings } : b))
-    );
+    setBranches((prev) => {
+      const updated = prev.map((b) => (b.id === branchId ? { ...b, ...settings } : b));
+      broadcastBranches(updated);
+      return updated;
+    });
 
     // Asynchronously sync branch settings to PostgreSQL database
     try {
@@ -3045,9 +3143,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const updateBranchPaymentSettings = (branchId: string, settings: BranchPaymentSettings) => {
     setBranches((prev) => {
       const updated = prev.map((b) => (b.id === branchId ? { ...b, paymentSettings: settings } : b));
-      if (typeof window !== 'undefined') {
-        localStorage.setItem('foodies_branches_live', JSON.stringify(updated));
-      }
+      broadcastBranches(updated);
       return updated;
     });
 

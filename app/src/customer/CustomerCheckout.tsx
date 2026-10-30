@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useApp, useAppSelector, selectCartCount, selectCartSubtotal } from '@/context/AppContext';
+import { useApp, useAppSelector, selectCartCount, selectCartSubtotal, selectBranches } from '@/context/AppContext';
 import { CustomerFloorSeatingModal } from './CustomerFloorSeatingModal';
 import {
   X,
@@ -60,19 +60,139 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
     addToast,
     users,
     customerCoordinates,
+    setCustomerCoordinates,
   } = useApp();
 
+  // Redux Toolkit memoized selectors with direct React state fallback for zero-lag calculations
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => {
+    setMounted(true);
+  }, []);
+
+  const reduxSubtotal = useAppSelector(selectCartSubtotal);
+  const reduxCartCount = useAppSelector(selectCartCount);
+  const reduxBranches = useAppSelector(selectBranches);
+  const derivedCartCount = (cart || []).reduce((sum, i) => sum + (i.quantity || 1), 0);
+  const derivedSubtotal = (cart || []).reduce((sum, i) => sum + (Number(i.unitPrice) || 0) * (i.quantity || 1), 0);
+
+  const rawCartCount = reduxCartCount > 0 ? reduxCartCount : derivedCartCount;
+  const rawSubtotal = reduxSubtotal > 0 ? reduxSubtotal : derivedSubtotal;
+  const cartCount = mounted ? rawCartCount : 0;
+  const subtotal = mounted ? rawSubtotal : 0;
+  const total = subtotal;
+
   const [liveCoords, setLiveCoords] = useState<{ lat: number; lng: number } | null>(null);
+  const [deliveryCoords, setDeliveryCoords] = useState<{ lat: number; lng: number }>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('foodies_customer_coordinates');
+        if (saved) return JSON.parse(saved);
+      } catch (e) {}
+    }
+    return customerCoordinates || { lat: 31.5204, lng: 74.3587 };
+  });
+  const [hasManuallyMovedPin, setHasManuallyMovedPin] = useState(false);
+
+  // Haversine distance calculator in kilometers
+  const calculateDistanceKm = (lat1: number, lon1: number, lat2: number, lon2: number): number => {
+    const R = 6371;
+    const dLat = ((lat2 - lat1) * Math.PI) / 180;
+    const dLon = ((lon2 - lon1) * Math.PI) / 180;
+    const a =
+      Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+      Math.cos((lat1 * Math.PI) / 180) *
+        Math.cos((lat2 * Math.PI) / 180) *
+        Math.sin(dLon / 2) *
+        Math.sin(dLon / 2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+    return Math.round(R * c * 10) / 10;
+  };
+
+  // Pakistani Locality Identifier for delivery pins
+  const getLocationLabel = (lat: number, lng: number): string => {
+    const lahoreDist = calculateDistanceKm(lat, lng, 31.5204, 74.3587);
+    const islamabadDist = calculateDistanceKm(lat, lng, 33.6844, 73.0479);
+    const karachiDist = calculateDistanceKm(lat, lng, 24.8607, 67.0011);
+
+    if (lahoreDist < 25) {
+      if (lat > 31.53) return 'Gulberg / Cantt, Lahore';
+      if (lat < 31.48) return 'DHA / Model Town, Lahore';
+      return 'Central Lahore Area';
+    }
+    if (islamabadDist < 25) {
+      if (lat > 33.71) return 'Sector F-7 / Blue Area, Islamabad';
+      if (lat < 33.65) return 'Rawalpindi / Islamabad Express';
+      return 'Islamabad Metropolitan Area';
+    }
+    if (karachiDist < 30) {
+      if (lat < 24.84) return 'Clifton / DHA Phase 5, Karachi';
+      if (lat > 24.9) return 'Gulshan-e-Iqbal / PECHS, Karachi';
+      return 'Karachi South Coast';
+    }
+    return `Custom Location (${lat.toFixed(3)}, ${lng.toFixed(3)})`;
+  };
 
   useEffect(() => {
     if (typeof window !== 'undefined' && 'geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
-        (pos) => setLiveCoords({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+        (pos) => {
+          const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+          setLiveCoords(coords);
+          if (!hasManuallyMovedPin) {
+            setDeliveryCoords(coords);
+            if (setCustomerCoordinates) setCustomerCoordinates(coords);
+          }
+        },
         () => {},
         { timeout: 6000 }
       );
     }
-  }, []);
+  }, [hasManuallyMovedPin, setCustomerCoordinates]);
+
+  // Handler when user sets or changes delivery location on the map
+  const handleUpdateDeliveryLocation = (coords: { lat: number; lng: number }, userAction = true) => {
+    setDeliveryCoords(coords);
+    setLiveCoords(coords);
+    setHasManuallyMovedPin(true);
+    if (setCustomerCoordinates) setCustomerCoordinates(coords);
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('foodies_customer_coordinates', JSON.stringify(coords));
+    }
+
+    // Auto-select nearest branch based on the new location
+    let nearest = branches[0];
+    let minD = Infinity;
+    branches.forEach((b) => {
+      const bLat = b.latitude ?? (b.city === 'Islamabad' ? 33.7215 : b.city === 'Karachi' ? 24.8252 : 31.5126);
+      const bLng = b.longitude ?? (b.city === 'Islamabad' ? 73.0552 : b.city === 'Karachi' ? 67.0305 : 74.3436);
+      const d = calculateDistanceKm(coords.lat, coords.lng, bLat, bLng);
+      if (d < minD) {
+        minD = d;
+        nearest = b;
+      }
+    });
+
+    if (nearest) {
+      setCurrentBranchId(nearest.id);
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('foodies_customer_branch', nearest.id);
+        localStorage.setItem('foodies_customer_selected_branch', nearest.id);
+      }
+    }
+
+    const areaName = getLocationLabel(coords.lat, coords.lng);
+    if (orderType === 'delivery') {
+      setDeliveryAddress(`${areaName} (Pin: ${coords.lat.toFixed(3)}, ${coords.lng.toFixed(3)})`);
+    }
+
+    if (userAction && nearest) {
+      addToast({
+        type: 'info',
+        title: 'Delivery Location Set 📍',
+        message: `${areaName}. Nearest branch (${nearest.name}) auto-selected. You can also pick any branch to order from.`,
+      });
+    }
+  };
 
   // User auth state with React state + localStorage fallback
   const isUserLoggedIn = Boolean(
@@ -189,8 +309,17 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
   // Tables for active branch
   const branchTables = tables.filter((t) => t.branchId === currentBranchId);
 
+  // Dynamic live branch reference reacting instantly to cross-tab BroadcastChannel & Redux updates
+  const liveBranch = React.useMemo(() => {
+    return (
+      (branches || []).find((b) => b.id === currentBranchId) ||
+      (reduxBranches || []).find((b) => b.id === currentBranchId) ||
+      currentBranch
+    );
+  }, [branches, reduxBranches, currentBranchId, currentBranch]);
+
   // Active payment settings from branch manager with robust JSON parsing
-  const rawBranchPaymentSettings = currentBranch.paymentSettings;
+  const rawBranchPaymentSettings = liveBranch?.paymentSettings || currentBranch?.paymentSettings;
   const branchPaymentSettings = React.useMemo(() => {
     if (!rawBranchPaymentSettings) {
       return {
@@ -232,9 +361,16 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
       );
       if (allowed) {
         setSelectedPaymentMode(allowed);
+        if (checkoutStep === 'payment') {
+          addToast({
+            type: 'info',
+            title: 'Payment Mode Updated',
+            message: `${selectedPaymentMode} is disabled at this branch. Switched to ${allowed}.`,
+          });
+        }
       }
     }
-  }, [activePaymentOptions, selectedPaymentMode]);
+  }, [activePaymentOptions, selectedPaymentMode, checkoutStep, addToast]);
 
   // Reset steps and sync values when modal opens
   useEffect(() => {
@@ -307,11 +443,6 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
 
   if (!isOpen) return null;
 
-  // Redux Toolkit memoized selectors for real-time fast calculation
-  const subtotal = useAppSelector(selectCartSubtotal);
-  const cartCount = useAppSelector(selectCartCount);
-  const total = subtotal;
-
   const handleGuestSubmit = async (e?: React.FormEvent) => {
     if (e) e.preventDefault();
     const cleanEmail = guestEmail.trim().toLowerCase();
@@ -350,7 +481,7 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
         addToast({
           type: 'success',
           title: 'Verification Code Sent! ✉️',
-          message: `A 4-digit code was sent to ${cleanEmail}. Check your inbox or spam.`,
+          message: 'A 4-digit code was sent. Check your inbox or spam.',
         });
       } else if (data.mailError) {
         addToast({
@@ -483,31 +614,17 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
       ? `${deliveryAddress.trim()} (Notes: ${deliveryInstructions.trim()})`
       : deliveryAddress.trim();
 
-    const finalCoords = liveCoords || customerCoordinates || undefined;
+    const finalCoords = deliveryCoords || liveCoords || customerCoordinates || undefined;
 
-    // Check branch maximum order distance acceptance (applicable to delivery, takeaway, and dine-in)
-    const maxAllowedDist = currentBranch.maxOrderDistanceKm ?? 50;
+    // Branch order placement allowed from ANY branch chosen by customer
     if (finalCoords) {
       const bLat = currentBranch.latitude ?? (currentBranch.city === 'Islamabad' ? 33.7215 : currentBranch.city === 'Karachi' ? 24.8252 : 31.5126);
       const bLng = currentBranch.longitude ?? (currentBranch.city === 'Islamabad' ? 73.0552 : currentBranch.city === 'Karachi' ? 67.0305 : 74.3436);
-      const R = 6371;
-      const dLat = ((bLat - finalCoords.lat) * Math.PI) / 180;
-      const dLon = ((bLng - finalCoords.lng) * Math.PI) / 180;
-      const a =
-        Math.sin(dLat / 2) * Math.sin(dLat / 2) +
-        Math.cos((finalCoords.lat * Math.PI) / 180) *
-          Math.cos((bLat * Math.PI) / 180) *
-          Math.sin(dLon / 2) *
-          Math.sin(dLon / 2);
-      const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-      const dist = Math.round(R * c * 10) / 10;
+      const dist = calculateDistanceKm(finalCoords.lat, finalCoords.lng, bLat, bLng);
+      const maxAllowedDist = currentBranch.maxOrderDistanceKm ?? 50;
       if (dist > maxAllowedDist) {
-        addToast({
-          type: 'error',
-          title: 'Order Cannot Be Accepted',
-          message: `${currentBranch.name} only accepts orders within ${maxAllowedDist} km (your distance is ${dist} km).`,
-        });
-        return;
+        // Log custom branch order; customer has full freedom to order from any branch
+        console.log(`[Order] Custom branch delivery: ${currentBranch.name} (${dist} km). Order accepted.`);
       }
     }
 
@@ -538,7 +655,7 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
       } catch (e) {}
     }
 
-    placeOrder(
+    const createdOrder = placeOrder(
       orderType,
       orderType === 'dine_in' ? selectedTable : undefined,
       orderType === 'dine_in' ? tablePin : undefined,
@@ -550,9 +667,24 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
         customerId: activeCustomer?.id,
         customerName: activeCustomer?.name,
         customerPhone: activeCustomer?.phone,
+        customerEmail: activeCustomer?.email || guestEmail,
         customerCoordinates: finalCoords,
       }
     );
+
+    // Save to dedicated customer order IDs and history cache
+    if (typeof window !== 'undefined' && createdOrder) {
+      try {
+        const myIds = JSON.parse(localStorage.getItem('foodies_customer_order_ids') || '[]');
+        if (!myIds.includes(createdOrder.id)) {
+          myIds.unshift(createdOrder.id);
+          localStorage.setItem('foodies_customer_order_ids', JSON.stringify(myIds));
+        }
+        const cache = JSON.parse(localStorage.getItem('foodies_customer_history_cache') || '[]');
+        const updatedCache = [createdOrder, ...cache.filter((o: any) => o.id !== createdOrder.id)];
+        localStorage.setItem('foodies_customer_history_cache', JSON.stringify(updatedCache));
+      } catch (e) {}
+    }
 
     onClose();
     onNavigate('order-tracking');
@@ -955,7 +1087,7 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
                   <p style={{ fontSize: 'clamp(11px, 2.2vw, 12px)', color: 'var(--text-secondary)', marginTop: '3px' }}>
                     {authOtpStep === 'email'
                       ? 'Receive an instant 4-digit verification code to your email'
-                      : `Enter 4-digit code sent to ${guestEmail}`}
+                      : 'Enter the 4-digit verification code'}
                   </p>
                 </div>
 
@@ -1088,22 +1220,7 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
                           <span style={{ fontSize: '18px', letterSpacing: '4px', fontWeight: 900, color: '#EA580C' }}>{authSentOtp}</span>
                         </div>
                       </div>
-                    ) : (
-                      <div
-                        style={{
-                          backgroundColor: '#EFF6FF',
-                          border: '1px solid #BFDBFE',
-                          borderRadius: 'var(--radius-md)',
-                          padding: '10px 14px',
-                          textAlign: 'center',
-                          fontSize: '12px',
-                          color: '#1E40AF',
-                          fontWeight: 650,
-                        }}
-                      >
-                        Code sent to <strong>{guestEmail}</strong>. Please check your inbox and spam folder.
-                      </div>
-                    )}
+                    ) : null}
 
                     <div>
                       <label style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
@@ -1744,9 +1861,32 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
                     {/* Address & Phone Inputs */}
                     <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', margin: '2px 0', flex: 1, justifyContent: 'center' }}>
                       <div>
-                        <label style={{ fontSize: '10.5px', fontWeight: 800, color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>
-                          Complete Street Address *
-                        </label>
+                        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '2px' }}>
+                          <label style={{ fontSize: '10.5px', fontWeight: 800, color: 'var(--text-secondary)' }}>
+                            Complete Street Address *
+                          </label>
+                          <button
+                            type="button"
+                            onClick={() => goToStep('branch_map', 'forward')}
+                            style={{
+                              background: 'none',
+                              border: 'none',
+                              color: 'var(--primary)',
+                              fontSize: '11px',
+                              fontWeight: 800,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                              padding: '2px 7px',
+                              borderRadius: '6px',
+                              backgroundColor: 'rgba(217, 101, 40, 0.08)',
+                            }}
+                          >
+                            <MapPin size={12} />
+                            <span>Select / Pin on Map 📍</span>
+                          </button>
+                        </div>
                         <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
                           <MapPin size={14} color="var(--primary)" style={{ position: 'absolute', left: '8px' }} />
                           <input
@@ -1871,7 +2011,7 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
                       boxShadow: '0 4px 12px var(--primary-glow)',
                     }}
                   >
-                    <span>Review Store Map & Route</span>
+                    <span>{orderType === 'delivery' ? 'Select Location & Store on Map' : 'Review Store Map & Route'}</span>
                     <ArrowRight size={15} />
                   </button>
                 </div>
@@ -1881,33 +2021,28 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
             {/* STAGE 2.5: BRANCH LOCATOR & ROUTE DIRECTION REVIEW (Shows Before Payment Step) */}
             {checkoutStep === 'branch_map' && (() => {
               // Geolocation & branch calculations
-              const defaultCoords = liveCoords || customerCoordinates || { lat: 31.5204, lng: 74.3587 };
+              const activeCoords = deliveryCoords || liveCoords || customerCoordinates || { lat: 31.5204, lng: 74.3587 };
               const branchesWithDist = branches.map((b) => {
                 const bLat = b.latitude ?? (b.city === 'Islamabad' ? 33.7215 : b.city === 'Karachi' ? 24.8252 : 31.5126);
                 const bLng = b.longitude ?? (b.city === 'Islamabad' ? 73.0552 : b.city === 'Karachi' ? 67.0305 : 74.3436);
-                const R = 6371;
-                const dLat = ((bLat - defaultCoords.lat) * Math.PI) / 180;
-                const dLon = ((bLng - defaultCoords.lng) * Math.PI) / 180;
-                const a = Math.sin(dLat / 2) * Math.sin(dLat / 2) + Math.cos(defaultCoords.lat * Math.PI / 180) * Math.cos(bLat * Math.PI / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
-                const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
-                const dist = Math.round(R * c * 10) / 10;
+                const dist = calculateDistanceKm(activeCoords.lat, activeCoords.lng, bLat, bLng);
                 return { ...b, resolvedLat: bLat, resolvedLng: bLng, distanceKm: dist };
               });
               const nearestB = [...branchesWithDist].sort((a, b) => a.distanceKm - b.distanceKm)[0];
-              const activeB = branchesWithDist.find((b) => b.id === currentBranchId) || branchesWithDist[0];
+              const activeB = branchesWithDist.find((b) => b.id === currentBranchId) || nearestB || branchesWithDist[0];
 
               // Coordinate Projection (500x260)
               const mW = 500;
               const mH = 260;
+              const minLat = 24.0; const maxLat = 34.5;
+              const minLng = 66.5; const maxLng = 75.2;
+              const pad = 35;
               const proj = (lat: number, lng: number) => {
-                const minLat = 24.0; const maxLat = 34.5;
-                const minLng = 66.5; const maxLng = 75.2;
-                const pad = 35;
                 const x = pad + ((lng - minLng) / (maxLng - minLng)) * (mW - pad * 2);
                 const y = mH - (pad + ((lat - minLat) / (maxLat - minLat)) * (mH - pad * 2));
                 return { x, y };
               };
-              const uPt = proj(defaultCoords.lat, defaultCoords.lng);
+              const uPt = proj(activeCoords.lat, activeCoords.lng);
               const bPt = activeB ? proj(activeB.resolvedLat, activeB.resolvedLng) : null;
 
               // DIRECTION LINE REQUIREMENT:
@@ -1951,38 +2086,35 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
                       }}
                     >
                       <div style={{ fontSize: '10.5px', fontWeight: 800, color: 'var(--text-secondary)', padding: '2px 4px' }}>
-                        Select Store:
+                        Order from Store:
                       </div>
                       {branchesWithDist.map((b) => {
                         const isCur = b.id === currentBranchId;
                         const isNear = nearestB?.id === b.id;
-                        const maxDist = b.maxOrderDistanceKm ?? 50;
-                        const isBeyond = !isNear && b.distanceKm > maxDist;
                         return (
                           <div
                             key={b.id}
                             onClick={() => {
-                              if (isBeyond) {
-                                addToast({
-                                  type: 'warning',
-                                  title: 'Branch Out of Range',
-                                  message: `${b.name} only accepts orders within ${maxDist} km (you are ${b.distanceKm} km away).`,
-                                });
-                                return;
-                              }
+                              // Customer has full freedom to order food from ANY branch
                               setCurrentBranchId(b.id);
                               if (typeof window !== 'undefined') {
                                 localStorage.setItem('foodies_customer_branch', b.id);
                                 localStorage.setItem('foodies_customer_manual_branch', b.id);
+                                localStorage.setItem('foodies_customer_selected_branch', b.id);
                               }
+                              addToast({
+                                type: 'success',
+                                title: 'Store Selected! 🍽️',
+                                message: `Now ordering food from ${b.name}.`,
+                              });
                             }}
                             style={{
                               padding: '8px',
                               borderRadius: '8px',
                               border: isCur ? '1.5px solid var(--primary)' : '1px solid var(--border-color)',
                               backgroundColor: isCur ? 'rgba(217, 101, 40, 0.08)' : 'var(--bg-card-subtle)',
-                              cursor: isBeyond ? 'not-allowed' : 'pointer',
-                              opacity: isBeyond ? 0.65 : 1,
+                              cursor: 'pointer',
+                              opacity: 1,
                               display: 'flex',
                               flexDirection: 'column',
                               gap: '2px',
@@ -1993,13 +2125,13 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
                               <span style={{ fontSize: '9px', fontWeight: 800, color: 'var(--text-muted)' }}>{b.city}</span>
                               <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
                                 {isNear && (
-                                  <span style={{ fontSize: '8.5px', fontWeight: 900, backgroundColor: '#DCFCE7', color: '#15803D', padding: '1px 4px', borderRadius: '4px' }}>
-                                    Nearest
+                                  <span style={{ fontSize: '8px', fontWeight: 900, backgroundColor: '#DCFCE7', color: '#15803D', padding: '1px 4px', borderRadius: '4px' }}>
+                                    ⚡ Nearest
                                   </span>
                                 )}
-                                {isBeyond && (
-                                  <span style={{ fontSize: '8px', fontWeight: 900, backgroundColor: '#FEE2E2', color: '#DC2626', padding: '1px 4px', borderRadius: '4px' }}>
-                                    ⛔ Beyond {maxDist}km
+                                {isCur && (
+                                  <span style={{ fontSize: '8px', fontWeight: 900, backgroundColor: 'var(--primary-light)', color: 'var(--primary)', padding: '1px 4px', borderRadius: '4px' }}>
+                                    ✓ Selected
                                   </span>
                                 )}
                               </div>
@@ -2012,116 +2144,279 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
                             <div style={{ fontSize: '9.5px', fontWeight: 450, color: 'var(--text-muted)', lineHeight: 1.3 }}>
                               {b.address}
                             </div>
-                            <div style={{ fontSize: '9.5px', color: isBeyond ? '#DC2626' : 'var(--primary)', fontWeight: 800, marginTop: '2px' }}>
-                              📍 {b.distanceKm} km {isCur && '• Active'}
+                            <div style={{ fontSize: '9.5px', color: 'var(--primary)', fontWeight: 800, marginTop: '2px' }}>
+                              📍 {b.distanceKm} km {isCur && '• Active Store'}
                             </div>
                           </div>
                         );
                       })}
                     </div>
 
-                    {/* Right 3 Quarters (~72%): Compact Map with Direction Line */}
+                    {/* Right 3 Quarters (~72%): Compact Interactive Map with Direction Line */}
                     <div
                       style={{
                         flex: 1,
                         backgroundColor: '#F7F6F1',
                         position: 'relative',
                         display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
+                        flexDirection: 'column',
                         overflow: 'hidden',
                       }}
                     >
-                      <svg viewBox={`0 0 ${mW} ${mH}`} style={{ width: '100%', height: '100%' }}>
-                        <defs>
-                          <pattern id="ckGrid" width="24" height="24" patternUnits="userSpaceOnUse">
-                            <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#EBE8DE" strokeWidth="0.8" />
-                          </pattern>
-                          <linearGradient id="ckRouteGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                            <stop offset="0%" stopColor={isDeliv ? 'var(--primary)' : '#2563EB'} />
-                            <stop offset="100%" stopColor={isDeliv ? '#2563EB' : 'var(--primary)'} />
-                          </linearGradient>
-                          <marker id="arrowDeliveryCheckout" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                            <path d="M 0 1 L 10 5 L 0 9 z" fill="#2563EB" />
-                          </marker>
-                          <marker id="arrowToBranchCheckout" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
-                            <path d="M 0 1 L 10 5 L 0 9 z" fill="var(--primary)" />
-                          </marker>
-                        </defs>
+                      {/* Interactive Top Toolbar: Quick Location Jump & Hint */}
+                      <div
+                        style={{
+                          padding: '4px 8px',
+                          backgroundColor: '#FFFFFF',
+                          borderBottom: '1px solid var(--border-color)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          gap: '4px',
+                          overflowX: 'auto',
+                          flexShrink: 0,
+                          zIndex: 10,
+                        }}
+                      >
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '4px', overflowX: 'auto' }}>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              if (typeof window !== 'undefined' && 'geolocation' in navigator) {
+                                navigator.geolocation.getCurrentPosition(
+                                  (pos) => handleUpdateDeliveryLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
+                                  () => addToast({ type: 'warning', title: 'GPS Unavailable', message: 'Could not access GPS. Please click on the map.' }),
+                                  { timeout: 6000 }
+                                );
+                              }
+                            }}
+                            title="Take me to my current GPS location"
+                            style={{
+                              padding: '2px 8px',
+                              borderRadius: '10px',
+                              backgroundColor: 'rgba(37, 99, 235, 0.1)',
+                              border: '1px solid rgba(37, 99, 235, 0.25)',
+                              color: '#2563EB',
+                              fontSize: '9.5px',
+                              fontWeight: 800,
+                              cursor: 'pointer',
+                              whiteSpace: 'nowrap',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '3px',
+                            }}
+                          >
+                            <span>🎯 My Current GPS</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateDeliveryLocation({ lat: 31.5204, lng: 74.3587 })}
+                            style={{
+                              padding: '2px 7px',
+                              borderRadius: '10px',
+                              backgroundColor: 'var(--bg-card)',
+                              border: '1px solid var(--border-color)',
+                              color: 'var(--text-main)',
+                              fontSize: '9.5px',
+                              fontWeight: 750,
+                              cursor: 'pointer',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            📍 Lahore
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateDeliveryLocation({ lat: 33.6844, lng: 73.0479 })}
+                            style={{
+                              padding: '2px 7px',
+                              borderRadius: '10px',
+                              backgroundColor: 'var(--bg-card)',
+                              border: '1px solid var(--border-color)',
+                              color: 'var(--text-main)',
+                              fontSize: '9.5px',
+                              fontWeight: 750,
+                              cursor: 'pointer',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            📍 Islamabad
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateDeliveryLocation({ lat: 24.8607, lng: 67.0011 })}
+                            style={{
+                              padding: '2px 7px',
+                              borderRadius: '10px',
+                              backgroundColor: 'var(--bg-card)',
+                              border: '1px solid var(--border-color)',
+                              color: 'var(--text-main)',
+                              fontSize: '9.5px',
+                              fontWeight: 750,
+                              cursor: 'pointer',
+                              whiteSpace: 'nowrap',
+                            }}
+                          >
+                            📍 Karachi
+                          </button>
+                        </div>
+                        <span style={{ fontSize: '8.5px', color: 'var(--primary)', fontWeight: 800, whiteSpace: 'nowrap' }}>
+                          💡 Click map to set pin
+                        </span>
+                      </div>
 
-                        <rect width={mW} height={mH} fill="#F7F6F1" />
-                        <rect width={mW} height={mH} fill="url(#ckGrid)" />
+                      {/* SVG Interactive Canvas */}
+                      <div
+                        style={{
+                          flex: 1,
+                          position: 'relative',
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          overflow: 'hidden',
+                        }}
+                      >
+                        <svg
+                          viewBox={`0 0 ${mW} ${mH}`}
+                          style={{ width: '100%', height: '100%', cursor: 'crosshair' }}
+                          onClick={(e) => {
+                            const svg = e.currentTarget;
+                            const rect = svg.getBoundingClientRect();
+                            const clickX = ((e.clientX - rect.left) / rect.width) * mW;
+                            const clickY = ((e.clientY - rect.top) / rect.height) * mH;
+                            
+                            const xRatio = Math.max(0, Math.min(1, (clickX - pad) / (mW - pad * 2)));
+                            const yRatio = Math.max(0, Math.min(1, (mH - pad - clickY) / (mH - pad * 2)));
+                            const newLat = Number((minLat + yRatio * (maxLat - minLat)).toFixed(4));
+                            const newLng = Number((minLng + xRatio * (maxLng - minLng)).toFixed(4));
+                            
+                            handleUpdateDeliveryLocation({ lat: newLat, lng: newLng });
+                          }}
+                        >
+                          <defs>
+                            <pattern id="ckGrid" width="24" height="24" patternUnits="userSpaceOnUse">
+                              <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#EBE8DE" strokeWidth="0.8" />
+                            </pattern>
+                            <linearGradient id="ckRouteGrad" x1="0%" y1="0%" x2="100%" y2="100%">
+                              <stop offset="0%" stopColor={isDeliv ? 'var(--primary)' : '#2563EB'} />
+                              <stop offset="100%" stopColor={isDeliv ? '#2563EB' : 'var(--primary)'} />
+                            </linearGradient>
+                            <marker id="arrowDeliveryCheckout" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                              <path d="M 0 1 L 10 5 L 0 9 z" fill="#2563EB" />
+                            </marker>
+                            <marker id="arrowToBranchCheckout" viewBox="0 0 10 10" refX="7" refY="5" markerWidth="6" markerHeight="6" orient="auto-start-reverse">
+                              <path d="M 0 1 L 10 5 L 0 9 z" fill="var(--primary)" />
+                            </marker>
+                          </defs>
 
-                        {/* Background Road veins */}
-                        <path d="M 60 220 Q 140 180 230 140 T 360 80" fill="none" stroke="#E3DFD5" strokeWidth="6" strokeLinecap="round" />
-                        <text x="90" y="210" fill="#BFBBAE" fontSize="9" fontWeight="800">KARACHI</text>
-                        <text x="250" y="130" fill="#BFBBAE" fontSize="9" fontWeight="800">LAHORE</text>
-                        <text x="360" y="60" fill="#BFBBAE" fontSize="9" fontWeight="800">ISLAMABAD</text>
+                          <rect width={mW} height={mH} fill="#F7F6F1" />
+                          <rect width={mW} height={mH} fill="url(#ckGrid)" />
 
-                        {/* DIRECTIONAL ROUTE LINE */}
-                        {lStart && lEnd && (
-                          <g>
-                            <line
-                              x1={lStart.x}
-                              y1={lStart.y}
-                              x2={lEnd.x}
-                              y2={lEnd.y}
-                              stroke="rgba(0,0,0,0.06)"
-                              strokeWidth="5"
-                              strokeLinecap="round"
-                            />
-                            <line
-                              x1={lStart.x}
-                              y1={lStart.y}
-                              x2={lEnd.x}
-                              y2={lEnd.y}
-                              stroke="url(#ckRouteGrad)"
-                              strokeWidth="3"
-                              strokeDasharray="6 4"
-                              strokeLinecap="round"
-                              markerEnd={isDeliv ? 'url(#arrowDeliveryCheckout)' : 'url(#arrowToBranchCheckout)'}
-                            >
-                              <animate attributeName="stroke-dashoffset" from="20" to="0" dur="1.2s" repeatCount="indefinite" />
-                            </line>
+                          {/* Background Road veins */}
+                          <path d="M 60 220 Q 140 180 230 140 T 360 80" fill="none" stroke="#E3DFD5" strokeWidth="6" strokeLinecap="round" />
+                          <text x="90" y="210" fill="#BFBBAE" fontSize="9" fontWeight="800">KARACHI</text>
+                          <text x="250" y="130" fill="#BFBBAE" fontSize="9" fontWeight="800">LAHORE</text>
+                          <text x="360" y="60" fill="#BFBBAE" fontSize="9" fontWeight="800">ISLAMABAD</text>
 
-                            {/* Midpoint Directional Badge */}
-                            <g transform={`translate(${(lStart.x + lEnd.x) / 2}, ${(lStart.y + lEnd.y) / 2 - 8})`}>
-                              <rect x="-65" y="-10" width="130" height="20" rx="10" fill="#FFFFFF" stroke="var(--border-color)" strokeWidth="1" />
-                              <text x="0" y="4" textAnchor="middle" fill="var(--text-main)" fontSize="9" fontWeight="900">
-                                {isDeliv ? `Branch ➔ You (${activeB?.distanceKm} km)` : `You ➔ Branch (${activeB?.distanceKm} km)`}
+                          {/* DIRECTIONAL ROUTE LINE */}
+                          {lStart && lEnd && (
+                            <g>
+                              <line
+                                x1={lStart.x}
+                                y1={lStart.y}
+                                x2={lEnd.x}
+                                y2={lEnd.y}
+                                stroke="rgba(0,0,0,0.06)"
+                                strokeWidth="5"
+                                strokeLinecap="round"
+                              />
+                              <line
+                                x1={lStart.x}
+                                y1={lStart.y}
+                                x2={lEnd.x}
+                                y2={lEnd.y}
+                                stroke="url(#ckRouteGrad)"
+                                strokeWidth="3"
+                                strokeDasharray="6 4"
+                                strokeLinecap="round"
+                                markerEnd={isDeliv ? 'url(#arrowDeliveryCheckout)' : 'url(#arrowToBranchCheckout)'}
+                              >
+                                <animate attributeName="stroke-dashoffset" from="20" to="0" dur="1.2s" repeatCount="indefinite" />
+                              </line>
+
+                              {/* Midpoint Directional Badge */}
+                              <g transform={`translate(${(lStart.x + lEnd.x) / 2}, ${(lStart.y + lEnd.y) / 2 - 8})`}>
+                                <rect x="-65" y="-10" width="130" height="20" rx="10" fill="#FFFFFF" stroke="var(--border-color)" strokeWidth="1" />
+                                <text x="0" y="4" textAnchor="middle" fill="var(--text-main)" fontSize="9" fontWeight="900">
+                                  {isDeliv ? `Branch ➔ You (${activeB?.distanceKm} km)` : `You ➔ Branch (${activeB?.distanceKm} km)`}
+                                </text>
+                              </g>
+                            </g>
+                          )}
+
+                          {/* Other Branch Pins (Clickable to switch store) */}
+                          {branchesWithDist.map((b) => {
+                            if (b.id === currentBranchId) return null;
+                            const pt = proj(b.resolvedLat, b.resolvedLng);
+                            return (
+                              <g
+                                key={`branch-pin-${b.id}`}
+                                transform={`translate(${pt.x}, ${pt.y})`}
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  setCurrentBranchId(b.id);
+                                  if (typeof window !== 'undefined') {
+                                    localStorage.setItem('foodies_customer_branch', b.id);
+                                    localStorage.setItem('foodies_customer_selected_branch', b.id);
+                                  }
+                                  addToast({
+                                    type: 'success',
+                                    title: 'Store Selected! 🍽️',
+                                    message: `Now ordering food from ${b.name}.`,
+                                  });
+                                }}
+                                style={{ cursor: 'pointer' }}
+                              >
+                                <circle r="9" fill="#FFFFFF" stroke="var(--border-color)" strokeWidth="1.5" />
+                                <circle r="4" fill="var(--text-muted)" />
+                                <text x="0" y="16" textAnchor="middle" fill="var(--text-secondary)" fontSize="8" fontWeight="800">
+                                  {b.city}
+                                </text>
+                              </g>
+                            );
+                          })}
+
+                          {/* Customer Destination Pin (Blue Radar) */}
+                          <g transform={`translate(${uPt.x}, ${uPt.y})`}>
+                            <circle r="14" fill="rgba(37, 99, 235, 0.2)">
+                              <animate attributeName="r" from="8" to="18" dur="2s" repeatCount="indefinite" />
+                              <animate attributeName="opacity" from="0.7" to="0" dur="2s" repeatCount="indefinite" />
+                            </circle>
+                            <circle r="5" fill="#2563EB" stroke="#FFFFFF" strokeWidth="1.5" />
+                            <g transform="translate(0, -12)">
+                              <rect x="-35" y="-8" width="70" height="15" rx="7" fill="#2563EB" />
+                              <text x="0" y="2.5" textAnchor="middle" fill="#FFFFFF" fontSize="7.5" fontWeight="900">
+                                {isDeliv ? 'DELIVER HERE' : 'YOU (DEST)'}
                               </text>
                             </g>
                           </g>
-                        )}
 
-                        {/* Customer Pin (Blue Radar) */}
-                        <g transform={`translate(${uPt.x}, ${uPt.y})`}>
-                          <circle r="14" fill="rgba(37, 99, 235, 0.2)">
-                            <animate attributeName="r" from="8" to="18" dur="2s" repeatCount="indefinite" />
-                            <animate attributeName="opacity" from="0.7" to="0" dur="2s" repeatCount="indefinite" />
-                          </circle>
-                          <circle r="5" fill="#2563EB" stroke="#FFFFFF" strokeWidth="1.5" />
-                          <g transform="translate(0, -12)">
-                            <rect x="-30" y="-8" width="60" height="15" rx="7" fill="#2563EB" />
-                            <text x="0" y="2.5" textAnchor="middle" fill="#FFFFFF" fontSize="7.5" fontWeight="900">YOU (DEST)</text>
-                          </g>
-                        </g>
-
-                        {/* Selected Branch Pin (Orange) */}
-                        {bPt && activeB && (
-                          <g transform={`translate(${bPt.x}, ${bPt.y})`}>
-                            <path d="M 0 0 C -8 -10 -9 -20 0 -28 C 9 -20 8 -10 0 0 Z" fill="var(--primary)" stroke="#FFFFFF" strokeWidth="1.5" />
-                            <circle cx="0" cy="-18" r="5" fill="#FFFFFF" />
-                            <text x="0" y="-15" textAnchor="middle" fontSize="7">☕</text>
-                            <g transform="translate(0, 10)">
-                              <rect x="-42" y="0" width="84" height="16" rx="5" fill="#FFFFFF" stroke="var(--primary)" strokeWidth="1" />
-                              <text x="0" y="10.5" textAnchor="middle" fill="var(--text-main)" fontSize="8" fontWeight="900">
-                                {activeB.city} Branch
-                              </text>
+                          {/* Selected Branch Pin (Orange) */}
+                          {bPt && activeB && (
+                            <g transform={`translate(${bPt.x}, ${bPt.y})`}>
+                              <path d="M 0 0 C -8 -10 -9 -20 0 -28 C 9 -20 8 -10 0 0 Z" fill="var(--primary)" stroke="#FFFFFF" strokeWidth="1.5" />
+                              <circle cx="0" cy="-18" r="5" fill="#FFFFFF" />
+                              <text x="0" y="-15" textAnchor="middle" fontSize="7">☕</text>
+                              <g transform="translate(0, 10)">
+                                <rect x="-42" y="0" width="84" height="16" rx="5" fill="#FFFFFF" stroke="var(--primary)" strokeWidth="1" />
+                                <text x="0" y="10.5" textAnchor="middle" fill="var(--text-main)" fontSize="8" fontWeight="900">
+                                  {activeB.city} Branch
+                                </text>
+                              </g>
                             </g>
-                          </g>
-                        )}
-                      </svg>
+                          )}
+                        </svg>
+                      </div>
                     </div>
                   </div>
 
@@ -2151,15 +2446,7 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
                     <button
                       type="button"
                       onClick={() => {
-                        const maxAllowed = activeB?.maxOrderDistanceKm ?? 50;
-                        if (activeB && activeB.distanceKm > maxAllowed) {
-                          addToast({
-                            type: 'error',
-                            title: 'Cannot Accept Order',
-                            message: `${activeB.name} only accepts orders within ${maxAllowed} km. Your current distance is ${activeB.distanceKm} km.`,
-                          });
-                          return;
-                        }
+                        // Customer has freedom to order from ANY branch without distance blocking
                         goToStep('payment', 'forward');
                       }}
                       style={{

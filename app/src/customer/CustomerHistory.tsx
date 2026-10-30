@@ -22,14 +22,35 @@ export const OrderHistoryScreen: React.FC<{ onNavigate: (v: string) => void }> =
   const normalizePhone = (p?: string) => (p || '').replace(/\D/g, '').slice(-10);
   const userPhoneClean = normalizePhone(currentUser?.phone);
 
-  // STRICT PHONE FILTER: Never show all orders, never match by name
+  // Comprehensive customer orders matching with multi-source fallback
   const customerOrders = React.useMemo(() => {
-    if (!userPhoneClean && (!currentUser?.id || currentUser.id === 'user-guest')) {
-      return [];
+    let localPlacedIds: string[] = [];
+    let localCachedOrders: Order[] = [];
+    if (typeof window !== 'undefined') {
+      try {
+        localPlacedIds = JSON.parse(localStorage.getItem('foodies_customer_order_ids') || '[]');
+        localCachedOrders = JSON.parse(localStorage.getItem('foodies_customer_history_cache') || '[]');
+      } catch (e) {}
     }
-    return orders.filter((o) => {
+
+    const pool = [...orders];
+    localCachedOrders.forEach((co) => {
+      if (!pool.some((o) => o.id === co.id || o.orderNumber === co.orderNumber)) {
+        pool.push(co);
+      }
+    });
+
+    return pool.filter((o) => {
+      // 1. Placed on this device/browser
+      if (localPlacedIds.includes(o.id) || localPlacedIds.includes(o.orderNumber)) return true;
+      // 2. Phone match
       if (userPhoneClean && normalizePhone(o.customerPhone) === userPhoneClean) return true;
+      // 3. Customer ID match
       if (currentUser?.id && currentUser.id !== 'user-guest' && o.customerId === currentUser.id) return true;
+      // 4. Email match
+      if (currentUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === currentUser.email.toLowerCase()) return true;
+      // 5. Customer name match if authenticated
+      if (currentUser?.name && currentUser.name !== 'Guest Customer' && o.customerName === currentUser.name) return true;
       return false;
     });
   }, [orders, userPhoneClean, currentUser]);

@@ -1,17 +1,48 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
+let ordersColumnsMigrated = false;
+async function ensureOrdersColumns() {
+  if (ordersColumnsMigrated) return;
+  try {
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_email VARCHAR(255)`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS sent_to_kitchen BOOLEAN DEFAULT false`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS sent_to_kitchen_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS forward_to_kitchen_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS auto_forward_custom_min INT`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS cashier_id VARCHAR(64)`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(255)`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_walk_in BOOLEAN DEFAULT false`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS assigned_rider_id VARCHAR(64)`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS assigned_rider_name VARCHAR(255)`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS rider_status VARCHAR(30)`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_collected BOOLEAN DEFAULT false`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_coordinates JSONB`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS assigned_waiter_id VARCHAR(64)`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS assigned_waiter_name VARCHAR(255)`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_table_qr BOOLEAN DEFAULT false`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS waiter_notified BOOLEAN DEFAULT false`);
+    ordersColumnsMigrated = true;
+  } catch (e) {}
+}
+
 export async function GET(request: Request) {
   try {
+    await ensureOrdersColumns();
     const { searchParams } = new URL(request.url);
     const scope = searchParams.get('scope') || 'live'; // 'live' | 'full'
     const branchId = searchParams.get('branchId');
     const includeOlder = searchParams.get('older') === 'true';
+    const customerPhone = searchParams.get('customerPhone');
+    const customerId = searchParams.get('customerId');
+    const customerEmail = searchParams.get('customerEmail');
 
     // 1. ORDERS
     let orderSql = `
       SELECT id, order_number as "orderNumber", branch_id as "branchId",
              customer_id as "customerId", customer_name as "customerName", customer_phone as "customerPhone",
+             customer_email as "customerEmail",
              type, table_number as "tableNumber", table_pin as "tablePin", pickup_time as "pickupTime",
              status, payment_status as "paymentStatus", payment_method as "paymentMethod",
              items, original_subtotal as "originalSubtotal", add_on_subtotal as "addOnSubtotal",
@@ -46,8 +77,28 @@ export async function GET(request: Request) {
     ];
 
     if (branchId && branchId !== 'all') {
-      orderParams.push(branchId);
-      orderWhere.push(`branch_id = $${orderParams.length}`);
+      if (customerPhone || customerId || customerEmail) {
+        const orClauses: string[] = [];
+        orderParams.push(branchId);
+        orClauses.push(`branch_id = $${orderParams.length}`);
+
+        if (customerPhone) {
+          orderParams.push(customerPhone);
+          orClauses.push(`customer_phone = $${orderParams.length}`);
+        }
+        if (customerId) {
+          orderParams.push(customerId);
+          orClauses.push(`customer_id = $${orderParams.length}`);
+        }
+        if (customerEmail) {
+          orderParams.push(customerEmail.toLowerCase().trim());
+          orClauses.push(`LOWER(customer_email) = $${orderParams.length}`);
+        }
+        orderWhere.push(`(${orClauses.join(' OR ')})`);
+      } else {
+        orderParams.push(branchId);
+        orderWhere.push(`branch_id = $${orderParams.length}`);
+      }
     }
 
     if (!includeOlder) {
@@ -122,15 +173,40 @@ export async function GET(request: Request) {
       ORDER BY seated_at DESC LIMIT 30
     `;
 
+    // 7. BRANCHES (Only 3 rows - lightweight fetch ensures live payment options & status sync)
+    const branchSql = `
+      SELECT id, name, city, address, phone, opening_hours as "openingHours",
+             is_open as "isOpen", is_busy as "isBusy",
+             prep_time_estimate_min as "prepTimeEstimateMin",
+             full_edit_window_min as "fullEditWindowMin",
+             stop_add_ons_min_before_ready as "stopAddOnsMinBeforeReady",
+             delivery_enabled as "deliveryEnabled",
+             latitude, longitude,
+             COALESCE(max_order_distance_km, 50) as "maxOrderDistanceKm",
+             COALESCE(table_qr_max_distance_meters, 300) as "tableQrMaxDistanceMeters",
+             payment_settings as "paymentSettings"
+      FROM branches
+      ORDER BY city ASC, name ASC
+    `;
+
     // Run parallel live queries in a single database round-trip batch
-    const [ordersRes, tablesRes, shiftsRes, refundsRes, complaintsRes, sessionsRes] = await Promise.all([
-      query(orderSql, orderParams).catch(() => ({ rows: [] })),
+    const [ordersRes, tablesRes, shiftsRes, refundsRes, complaintsRes, sessionsRes, branchesRes] = await Promise.all([
+      query(orderSql, orderParams).catch((err) => {
+        console.error('[Sync Order Query Error]:', err);
+        return { rows: [] };
+      }),
       query(tableSql, tableParams).catch(() => ({ rows: [] })),
       query(shiftSql, shiftParams).catch(() => ({ rows: [] })),
       query(refundSql).catch(() => ({ rows: [] })),
       query(complaintSql).catch(() => ({ rows: [] })),
       query(sessionSql).catch(() => ({ rows: [] })),
+      query(branchSql).catch(() => ({ rows: [] })),
     ]);
+
+    const branches = branchesRes.rows.map((r: any) => ({
+      ...r,
+      paymentSettings: typeof r.paymentSettings === 'string' ? JSON.parse(r.paymentSettings) : r.paymentSettings,
+    }));
 
     // Parse items/messages JSON if needed
     const orders = ordersRes.rows.map((o: any) => ({
@@ -170,25 +246,12 @@ export async function GET(request: Request) {
       refunds,
       complaints,
       sessions: sessionsRes.rows,
+      branches,
     };
 
     // If 'full' scope requested (initial boot or manual refresh), also fetch static data
     if (scope === 'full') {
-      const [branchesRes, menuRes, catRes, mktRes, usersRes] = await Promise.all([
-        query(`
-          SELECT id, name, city, address, phone, opening_hours as "openingHours",
-                 is_open as "isOpen", is_busy as "isBusy",
-                 prep_time_estimate_min as "prepTimeEstimateMin",
-                 full_edit_window_min as "fullEditWindowMin",
-                 stop_add_ons_min_before_ready as "stopAddOnsMinBeforeReady",
-                 delivery_enabled as "deliveryEnabled",
-                 latitude, longitude,
-                 COALESCE(max_order_distance_km, 50) as "maxOrderDistanceKm",
-                 COALESCE(table_qr_max_distance_meters, 300) as "tableQrMaxDistanceMeters",
-                 payment_settings as "paymentSettings"
-          FROM branches
-          ORDER BY city ASC, name ASC
-        `).catch(() => ({ rows: [] })),
+      const [menuRes, catRes, mktRes, usersRes] = await Promise.all([
         query(`
           SELECT id, name, category, description, base_price as "basePrice",
                  image_url as "imageUrl", is_available as "isAvailable",
@@ -211,11 +274,6 @@ export async function GET(request: Request) {
           ORDER BY created_at ASC
         `).catch(() => ({ rows: [] })),
       ]);
-
-      responsePayload.branches = branchesRes.rows.map((r: any) => ({
-        ...r,
-        paymentSettings: typeof r.paymentSettings === 'string' ? JSON.parse(r.paymentSettings) : r.paymentSettings,
-      }));
 
       responsePayload.menuItems = menuRes.rows.map((r: any) => ({
         ...r,
