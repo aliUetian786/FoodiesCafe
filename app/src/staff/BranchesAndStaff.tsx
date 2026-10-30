@@ -260,6 +260,19 @@ export const BranchesStaffScreen: React.FC = () => {
     });
   };
 
+  // Branch dropdown priority order: F-7 Markaz, Clifton Block 4, Gulberg Branch (Flagship)
+  const branchOrderPriority = (nameOrId: string) => {
+    const s = (nameOrId || '').toLowerCase();
+    if (s.includes('f-7') || s.includes('f7')) return 1;
+    if (s.includes('clifton')) return 2;
+    if (s.includes('gulberg')) return 3;
+    return 4;
+  };
+
+  const sortedBranchesForDropdown = [...branches].sort(
+    (a, b) => branchOrderPriority(a.name || a.id) - branchOrderPriority(b.name || b.id)
+  );
+
   return (
     <div
       style={{
@@ -308,9 +321,6 @@ export const BranchesStaffScreen: React.FC = () => {
             <h1 style={{ fontSize: '22px', fontWeight: 800, margin: 0, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
               Multi-Branch Staff & Access Administration
             </h1>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: '2px 0 0' }}>
-              Central multi-branch visibility · Staff accounts grouped strictly by branch · Zero customer exposure
-            </p>
           </div>
         </div>
 
@@ -373,7 +383,7 @@ export const BranchesStaffScreen: React.FC = () => {
 
       {activeTab === 'staff' ? (
         <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          {/* BRANCH SEPARATION TABS (Never show all in one mixed place) */}
+          {/* BRANCH SELECTION DROPDOWN & VIEW MODE TOGGLE */}
           <div
             style={{
               backgroundColor: 'var(--bg-card)',
@@ -388,102 +398,79 @@ export const BranchesStaffScreen: React.FC = () => {
               boxShadow: 'var(--shadow-sm)',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginRight: '4px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '12.5px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
                 Select Branch:
               </span>
 
-              <button
-                onClick={() => setSelectedBranchTab('all')}
+              <select
+                id="branch-staff-select-branch"
+                value={selectedBranchTab}
+                onChange={(e) => setSelectedBranchTab(e.target.value)}
                 style={{
-                  padding: '6px 14px',
-                  borderRadius: '20px',
-                  backgroundColor: selectedBranchTab === 'all' ? 'var(--primary)' : 'var(--bg-card-subtle)',
-                  color: selectedBranchTab === 'all' ? '#FFFFFF' : 'var(--text-main)',
-                  fontWeight: 750,
-                  fontSize: '12.5px',
+                  padding: '7px 12px',
+                  borderRadius: 'var(--radius-md)',
                   border: '1px solid var(--border-color)',
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-main)',
+                  fontSize: '13px',
+                  fontWeight: 700,
                   cursor: 'pointer',
+                  minWidth: '240px',
+                  outline: 'none',
                 }}
               >
-                All Branches ({staffOnly.length})
-              </button>
-
-              {branches.map((b) => {
-                const bStaffCount = staffOnly.filter((u) => u.branchId === b.id).length;
-                const isSelected = selectedBranchTab === b.id;
-                return (
-                  <button
-                    key={b.id}
-                    onClick={() => setSelectedBranchTab(b.id)}
-                    style={{
-                      padding: '6px 14px',
-                      borderRadius: '20px',
-                      backgroundColor: isSelected ? 'var(--primary)' : 'var(--bg-card-subtle)',
-                      color: isSelected ? '#FFFFFF' : 'var(--text-main)',
-                      fontWeight: 750,
-                      fontSize: '12.5px',
-                      border: '1px solid var(--border-color)',
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '6px',
-                    }}
-                  >
-                    <MapPin size={13} color={isSelected ? '#FFFFFF' : 'var(--primary)'} />
-                    <span>{b.name}</span>
-                    <span
-                      style={{
-                        fontSize: '10.5px',
-                        fontWeight: 800,
-                        backgroundColor: isSelected ? 'rgba(255,255,255,0.25)' : 'var(--primary-light)',
-                        color: isSelected ? '#FFFFFF' : 'var(--primary)',
-                        padding: '1px 6px',
-                        borderRadius: '10px',
-                      }}
-                    >
-                      {bStaffCount}
-                    </span>
-                  </button>
-                );
-              })}
+                <option value="all">All Branches ({staffOnly.length})</option>
+                {sortedBranchesForDropdown.map((b) => {
+                  const bStaffCount = staffOnly.filter((u) => u.branchId === b.id).length;
+                  return (
+                    <option key={b.id} value={b.id}>
+                      {b.name} {bStaffCount}
+                    </option>
+                  );
+                })}
+              </select>
             </div>
 
-            {/* View Mode Toggle */}
-            <div style={{ display: 'flex', gap: '4px', backgroundColor: 'var(--bg-card-subtle)', padding: '2px', borderRadius: '6px' }}>
+            {/* View Mode Toggle: Cards | Table (In same line after dropdown) */}
+            <div style={{ display: 'flex', gap: '4px', backgroundColor: 'var(--bg-card-subtle)', padding: '3px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
               <button
+                id="branch-staff-view-cards"
                 onClick={() => setViewMode('cards')}
                 style={{
-                  padding: '5px 10px',
-                  borderRadius: '4px',
-                  backgroundColor: viewMode === 'cards' ? 'var(--bg-card)' : 'transparent',
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  backgroundColor: viewMode === 'cards' ? 'var(--primary)' : 'transparent',
                   border: 'none',
                   cursor: 'pointer',
-                  color: viewMode === 'cards' ? 'var(--primary)' : 'var(--text-muted)',
+                  color: viewMode === 'cards' ? '#FFFFFF' : 'var(--text-secondary)',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '4px',
-                  fontSize: '12px',
-                  fontWeight: 700,
+                  gap: '6px',
+                  fontSize: '12.5px',
+                  fontWeight: 750,
+                  transition: 'all 0.18s ease',
                 }}
               >
                 <LayoutGrid size={14} />
                 <span>Cards</span>
               </button>
               <button
+                id="branch-staff-view-table"
                 onClick={() => setViewMode('table')}
                 style={{
-                  padding: '5px 10px',
-                  borderRadius: '4px',
-                  backgroundColor: viewMode === 'table' ? 'var(--bg-card)' : 'transparent',
+                  padding: '6px 12px',
+                  borderRadius: '6px',
+                  backgroundColor: viewMode === 'table' ? 'var(--primary)' : 'transparent',
                   border: 'none',
                   cursor: 'pointer',
-                  color: viewMode === 'table' ? 'var(--primary)' : 'var(--text-muted)',
+                  color: viewMode === 'table' ? '#FFFFFF' : 'var(--text-secondary)',
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '4px',
-                  fontSize: '12px',
-                  fontWeight: 700,
+                  gap: '6px',
+                  fontSize: '12.5px',
+                  fontWeight: 750,
+                  transition: 'all 0.18s ease',
                 }}
               >
                 <List size={14} />
@@ -492,7 +479,7 @@ export const BranchesStaffScreen: React.FC = () => {
             </div>
           </div>
 
-          {/* Search & Role Filters Bar */}
+          {/* Search, Staff Roles & Statuses Bar (All 3 in one line) */}
           <div
             style={{
               backgroundColor: 'var(--bg-card)',
@@ -502,7 +489,6 @@ export const BranchesStaffScreen: React.FC = () => {
               display: 'flex',
               gap: '12px',
               alignItems: 'center',
-              flexWrap: 'wrap',
               boxShadow: 'var(--shadow-sm)',
             }}
           >
@@ -516,11 +502,12 @@ export const BranchesStaffScreen: React.FC = () => {
                 borderRadius: 'var(--radius-md)',
                 padding: '7px 12px',
                 flex: 1,
-                minWidth: '220px',
+                minWidth: 0,
               }}
             >
-              <Search size={15} color="var(--text-muted)" />
+              <Search size={15} color="var(--text-muted)" style={{ flexShrink: 0 }} />
               <input
+                id="branch-staff-search-input"
                 type="text"
                 value={searchQuery}
                 onChange={(e) => setSearchQuery(e.target.value)}
@@ -537,6 +524,7 @@ export const BranchesStaffScreen: React.FC = () => {
             </div>
 
             <select
+              id="branch-staff-role-filter"
               value={staffRoleFilter}
               onChange={(e) => setStaffRoleFilter(e.target.value as any)}
               style={{
@@ -547,6 +535,10 @@ export const BranchesStaffScreen: React.FC = () => {
                 color: 'var(--text-main)',
                 fontSize: '12.5px',
                 fontWeight: 600,
+                minWidth: '160px',
+                flexShrink: 0,
+                cursor: 'pointer',
+                outline: 'none',
               }}
             >
               <option value="all">All Staff Roles</option>
@@ -558,6 +550,7 @@ export const BranchesStaffScreen: React.FC = () => {
             </select>
 
             <select
+              id="branch-staff-status-filter"
               value={staffStatusFilter}
               onChange={(e) => setStaffStatusFilter(e.target.value as any)}
               style={{
@@ -568,6 +561,10 @@ export const BranchesStaffScreen: React.FC = () => {
                 color: 'var(--text-main)',
                 fontSize: '12.5px',
                 fontWeight: 600,
+                minWidth: '140px',
+                flexShrink: 0,
+                cursor: 'pointer',
+                outline: 'none',
               }}
             >
               <option value="all">All Statuses</option>

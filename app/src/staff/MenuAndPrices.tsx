@@ -281,9 +281,10 @@ export const MenuPricesScreen: React.FC = () => {
           flexShrink: 0,
         }}
       >
-        <div style={{ display: 'flex', gap: '8px', overflowX: 'auto', alignItems: 'center' }}>
+        <div className="menu-mgmt-tabs-container" style={{ display: 'flex', gap: '8px', overflowX: 'auto', alignItems: 'center' }}>
           <button
             onClick={() => setActiveTab('items')}
+            className="menu-mgmt-tab-btn"
             style={{
               padding: '10px 18px',
               borderRadius: 'var(--radius-md)',
@@ -304,6 +305,7 @@ export const MenuPricesScreen: React.FC = () => {
 
           <button
             onClick={() => setActiveTab('categories')}
+            className="menu-mgmt-tab-btn"
             style={{
               padding: '10px 18px',
               borderRadius: 'var(--radius-md)',
@@ -324,6 +326,7 @@ export const MenuPricesScreen: React.FC = () => {
 
           <button
             onClick={() => setActiveTab('banners')}
+            className="menu-mgmt-tab-btn"
             style={{
               padding: '10px 18px',
               borderRadius: 'var(--radius-md)',
@@ -359,6 +362,7 @@ export const MenuPricesScreen: React.FC = () => {
 
           <button
             onClick={() => setActiveTab('footer')}
+            className="menu-mgmt-tab-btn"
             style={{
               padding: '10px 18px',
               borderRadius: 'var(--radius-md)',
@@ -380,6 +384,7 @@ export const MenuPricesScreen: React.FC = () => {
           {(currentRole === 'branch_manager' || currentRole === 'platform_owner') && (
             <button
               onClick={() => setActiveTab('permissions')}
+              className="menu-mgmt-tab-btn"
               style={{
                 padding: '10px 18px',
                 borderRadius: 'var(--radius-md)',
@@ -400,10 +405,11 @@ export const MenuPricesScreen: React.FC = () => {
           )}
         </div>
 
-        {/* + Create New Item in line with Customer Services (Support) button */}
+        {/* Create New Item in line with tabs for desktop (single + sign) */}
         {canEdit && activeTab === 'items' && (
           <button
             onClick={openNewItemModal}
+            className="menu-create-btn-desktop"
             style={{
               padding: '10px 18px',
               borderRadius: 'var(--radius-md)',
@@ -421,7 +427,7 @@ export const MenuPricesScreen: React.FC = () => {
             }}
           >
             <Plus size={16} />
-            <span>+ Create New Menu Item</span>
+            <span>Create New Menu Item</span>
           </button>
         )}
       </div>
@@ -438,58 +444,103 @@ export const MenuPricesScreen: React.FC = () => {
             overflow: 'hidden',
           }}
         >
-          {/* Categories filter bar: static directly below the tabs/header */}
+          {/* Row 2: Categories filter bar (3/4 on small screens) + New Item action (1/4 on small screens) */}
           <div
+            className="menu-second-row"
             style={{
               display: 'flex',
               gap: '6px',
-              overflowX: 'auto',
-              paddingBottom: '2px',
+              alignItems: 'center',
+              width: '100%',
               flexShrink: 0,
             }}
           >
-            <button
-              onClick={() => setSelectedCategoryFilter('all')}
+            <div
+              className="menu-categories-scroll-3q"
               style={{
-                padding: '5px 12px',
-                borderRadius: 'var(--radius-full)',
-                backgroundColor: selectedCategoryFilter === 'all' ? 'var(--primary)' : 'var(--bg-card)',
-                color: selectedCategoryFilter === 'all' ? '#FFFFFF' : 'var(--text-secondary)',
-                border: '1px solid var(--border-color)',
-                fontSize: '12px',
-                fontWeight: 700,
-                cursor: 'pointer',
-                whiteSpace: 'nowrap',
+                display: 'flex',
+                gap: '6px',
+                overflowX: 'auto',
+                paddingBottom: '2px',
+                flexShrink: 0,
               }}
             >
-              All Items ({menuItems.length})
-            </button>
-            {categories.map((cat) => {
-              const count = menuItems.filter((i) => i.category === cat).length;
-              return (
+              <button
+                onClick={() => setSelectedCategoryFilter('all')}
+                className="menu-category-pill-btn"
+                style={{
+                  padding: '5px 12px',
+                  borderRadius: 'var(--radius-full)',
+                  backgroundColor: selectedCategoryFilter === 'all' ? 'var(--primary)' : 'var(--bg-card)',
+                  color: selectedCategoryFilter === 'all' ? '#FFFFFF' : 'var(--text-secondary)',
+                  border: '1px solid var(--border-color)',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  whiteSpace: 'nowrap',
+                }}
+              >
+                All Items ({menuItems.length})
+              </button>
+              {categories.map((cat) => {
+                const count = menuItems.filter((i) => i.category === cat).length;
+                return (
+                  <button
+                    key={cat}
+                    onClick={() => setSelectedCategoryFilter(cat)}
+                    className="menu-category-pill-btn"
+                    style={{
+                      padding: '5px 12px',
+                      borderRadius: 'var(--radius-full)',
+                      backgroundColor: selectedCategoryFilter === cat ? 'var(--primary)' : 'var(--bg-card)',
+                      color: selectedCategoryFilter === cat ? '#FFFFFF' : 'var(--text-secondary)',
+                      border: '1px solid var(--border-color)',
+                      fontSize: '12px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    {cat} ({count})
+                  </button>
+                );
+              })}
+            </div>
+
+            {canEdit && (
+              <div className="menu-new-item-1q">
                 <button
-                  key={cat}
-                  onClick={() => setSelectedCategoryFilter(cat)}
+                  type="button"
+                  onClick={openNewItemModal}
+                  className="menu-new-item-btn-compact"
                   style={{
-                    padding: '5px 12px',
-                    borderRadius: 'var(--radius-full)',
-                    backgroundColor: selectedCategoryFilter === cat ? 'var(--primary)' : 'var(--bg-card)',
-                    color: selectedCategoryFilter === cat ? '#FFFFFF' : 'var(--text-secondary)',
-                    border: '1px solid var(--border-color)',
-                    fontSize: '12px',
-                    fontWeight: 700,
+                    width: '100%',
+                    padding: '6px 8px',
+                    borderRadius: 'var(--radius-md)',
+                    backgroundColor: 'var(--primary)',
+                    color: '#FFFFFF',
+                    fontWeight: 800,
+                    fontSize: '11px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '4px',
                     cursor: 'pointer',
+                    boxShadow: '0 2px 8px var(--primary-glow)',
+                    border: 'none',
                     whiteSpace: 'nowrap',
                   }}
                 >
-                  {cat} ({count})
+                  <Plus size={13} />
+                  <span>+ New Item</span>
                 </button>
-              );
-            })}
+              </div>
+            )}
           </div>
 
-          {/* Static Table Container below categories with internal scroll */}
+          {/* Table Container: Unscrollable horizontally on small screens */}
           <div
+            className="menu-items-table-container"
             style={{
               flex: 1,
               minHeight: 0,
@@ -500,14 +551,14 @@ export const MenuPricesScreen: React.FC = () => {
               boxShadow: 'var(--shadow-sm)',
             }}
           >
-            <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13.5px' }}>
+            <table className="menu-items-table" style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13.5px', tableLayout: 'fixed' }}>
               <thead style={{ position: 'sticky', top: 0, zIndex: 10, backgroundColor: 'var(--bg-card-subtle)' }}>
                 <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '12px', textTransform: 'uppercase' }}>
-                  <th style={{ padding: '12px 18px', backgroundColor: 'var(--bg-card-subtle)' }}>Dish / Product</th>
-                  <th style={{ padding: '12px 18px', backgroundColor: 'var(--bg-card-subtle)' }}>Category</th>
-                  <th style={{ padding: '12px 18px', backgroundColor: 'var(--bg-card-subtle)' }}>Price</th>
-                  <th style={{ padding: '12px 18px', backgroundColor: 'var(--bg-card-subtle)' }}>Availability</th>
-                  <th style={{ padding: '12px 18px', textAlign: 'right', backgroundColor: 'var(--bg-card-subtle)' }}>Actions</th>
+                  <th className="menu-col-dish" style={{ padding: '12px 18px', backgroundColor: 'var(--bg-card-subtle)' }}>Dish / Product</th>
+                  <th className="menu-col-category" style={{ padding: '12px 18px', backgroundColor: 'var(--bg-card-subtle)', width: '130px' }}>Category</th>
+                  <th className="menu-col-price" style={{ padding: '12px 18px', backgroundColor: 'var(--bg-card-subtle)', width: '110px' }}>Price</th>
+                  <th className="menu-col-avail" style={{ padding: '12px 18px', backgroundColor: 'var(--bg-card-subtle)', width: '120px' }}>Availability</th>
+                  <th className="menu-col-actions" style={{ padding: '12px 18px', textAlign: 'right', backgroundColor: 'var(--bg-card-subtle)', width: '140px', minWidth: '130px', whiteSpace: 'nowrap' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -515,24 +566,40 @@ export const MenuPricesScreen: React.FC = () => {
                   .filter((item) => selectedCategoryFilter === 'all' || item.category === selectedCategoryFilter)
                   .map((item) => (
                   <tr key={item.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                    <td style={{ padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <img src={item.image} alt={item.name} style={{ width: '44px', height: '44px', borderRadius: '8px', objectFit: 'cover' }} />
-                      <div>
-                        <div style={{ fontWeight: 700, color: 'var(--text-main)' }}>{item.name}</div>
-                        <div style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '300px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                          {item.description}
+                    <td className="menu-col-dish" style={{ padding: '14px 18px', overflow: 'hidden' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, width: '100%', overflow: 'hidden' }}>
+                        <img src={item.image} alt={item.name} style={{ width: '42px', height: '42px', borderRadius: '8px', objectFit: 'cover', flexShrink: 0 }} />
+                        <div style={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
+                          <div
+                            title={item.name}
+                            style={{
+                              fontWeight: 700,
+                              color: 'var(--text-main)',
+                              fontSize: '13px',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                              whiteSpace: 'nowrap',
+                              display: 'block',
+                              maxWidth: '100%',
+                            }}
+                          >
+                            {item.name}
+                          </div>
+                          <div className="menu-dish-desc" style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                            {item.description}
+                          </div>
                         </div>
                       </div>
                     </td>
-                    <td style={{ padding: '14px 18px', color: 'var(--text-secondary)' }}>
+                    <td className="menu-col-category" style={{ padding: '14px 18px', color: 'var(--text-secondary)', width: '130px' }}>
                       <span style={{ padding: '3px 8px', borderRadius: '4px', backgroundColor: 'var(--bg-card-subtle)', fontWeight: 600 }}>
                         {item.category}
                       </span>
                     </td>
-                    <td style={{ padding: '14px 18px', fontWeight: 800, color: 'var(--primary)', fontSize: '15px' }}>
+                    <td className="menu-col-price" style={{ padding: '14px 18px', fontWeight: 800, color: 'var(--primary)', fontSize: '15px', width: '110px' }}>
                       Rs. {item.basePrice.toLocaleString()}
                     </td>
-                    <td style={{ padding: '14px 18px' }}>
+                    <td className="menu-col-avail" style={{ padding: '14px 18px', width: '120px' }}>
                       <span
                         style={{
                           fontSize: '11px',
@@ -546,13 +613,13 @@ export const MenuPricesScreen: React.FC = () => {
                         {item.isAvailable ? 'IN STOCK' : 'OUT OF STOCK'}
                       </span>
                     </td>
-                    <td style={{ padding: '14px 18px', textAlign: 'right' }}>
+                    <td className="menu-col-actions" style={{ padding: '14px 18px', textAlign: 'right', width: '140px', minWidth: '130px', whiteSpace: 'nowrap' }}>
                       {canEdit ? (
-                        <div style={{ display: 'inline-flex', gap: '6px' }}>
+                        <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px', whiteSpace: 'nowrap', flexShrink: 0 }}>
                           <button
                             onClick={() => openEditItemModal(item)}
                             style={{
-                              padding: '6px 12px',
+                              padding: '6px 11px',
                               borderRadius: 'var(--radius-md)',
                               backgroundColor: 'var(--bg-card-subtle)',
                               border: '1px solid var(--border-color)',
@@ -563,10 +630,12 @@ export const MenuPricesScreen: React.FC = () => {
                               display: 'inline-flex',
                               alignItems: 'center',
                               gap: '4px',
+                              whiteSpace: 'nowrap',
+                              flexShrink: 0,
                             }}
                           >
                             <Edit2 size={13} color="var(--primary)" />
-                            <span>Edit Item</span>
+                            <span>Edit</span>
                           </button>
                           <button
                             onClick={() => setDeleteItemTarget(item)}
@@ -579,6 +648,11 @@ export const MenuPricesScreen: React.FC = () => {
                               fontWeight: 700,
                               fontSize: '12.5px',
                               cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              whiteSpace: 'nowrap',
+                              flexShrink: 0,
                             }}
                           >
                             <Trash2 size={13} />
@@ -1398,9 +1472,9 @@ export const MenuPricesScreen: React.FC = () => {
                 e.preventDefault();
                 updateDealCard({
                   title: dealTitle.trim() || 'Royal Chicken Dum Biryani',
-                  subtitle: dealSubtitle.trim(),
+                  subtitle: '',
                   price: dealPrice.trim() || 'Rs. 650',
-                  tag: dealTag.trim() || "🌟 TODAY'S CHEF SPECIAL",
+                  tag: '',
                   imageUrl: dealImageUrl.trim() || '/food-biryani.jpg',
                   categoryLink: dealCategory,
                 });
@@ -1438,13 +1512,14 @@ export const MenuPricesScreen: React.FC = () => {
 
                 <div>
                   <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
-                    Deal Subtitle / Preparation Detail
+                    Price *
                   </label>
                   <input
                     type="text"
-                    value={dealSubtitle}
-                    onChange={(e) => setDealSubtitle(e.target.value)}
-                    placeholder="e.g. Slow-steamed in copper handi with saffron & house spices"
+                    value={dealPrice}
+                    onChange={(e) => setDealPrice(e.target.value)}
+                    placeholder="e.g. Rs. 650"
+                    required
                     style={{
                       width: '100%',
                       padding: '10px 14px',
@@ -1455,52 +1530,6 @@ export const MenuPricesScreen: React.FC = () => {
                       fontSize: '13.5px',
                     }}
                   />
-                </div>
-
-                <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                  <div>
-                    <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
-                      Price *
-                    </label>
-                    <input
-                      type="text"
-                      value={dealPrice}
-                      onChange={(e) => setDealPrice(e.target.value)}
-                      placeholder="e.g. Rs. 650"
-                      required
-                      style={{
-                        width: '100%',
-                        padding: '10px 14px',
-                        borderRadius: 'var(--radius-md)',
-                        border: '1px solid var(--border-color)',
-                        backgroundColor: 'var(--bg-input)',
-                        color: 'var(--text-main)',
-                        fontSize: '13.5px',
-                      }}
-                    />
-                  </div>
-
-                  <div>
-                    <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
-                      Badge / Tag *
-                    </label>
-                    <input
-                      type="text"
-                      value={dealTag}
-                      onChange={(e) => setDealTag(e.target.value)}
-                      placeholder="e.g. 🌟 TODAY'S CHEF SPECIAL"
-                      required
-                      style={{
-                        width: '100%',
-                        padding: '10px 14px',
-                        borderRadius: 'var(--radius-md)',
-                        border: '1px solid var(--border-color)',
-                        backgroundColor: 'var(--bg-input)',
-                        color: 'var(--text-main)',
-                        fontSize: '13.5px',
-                      }}
-                    />
-                  </div>
                 </div>
 
                 <div>
@@ -1610,7 +1639,7 @@ export const MenuPricesScreen: React.FC = () => {
                 </button>
               </div>
 
-              {/* Deal Card Live Preview */}
+              {/* Deal Card Live Preview (Subtitle and Badge removed) */}
               <div
                 style={{
                   display: 'flex',
@@ -1649,29 +1678,11 @@ export const MenuPricesScreen: React.FC = () => {
                         (e.target as HTMLImageElement).src = '/food-biryani.jpg';
                       }}
                     />
-                    <span
-                      style={{
-                        position: 'absolute',
-                        top: '10px',
-                        left: '10px',
-                        backgroundColor: 'var(--primary)',
-                        color: '#FFFFFF',
-                        fontSize: '10px',
-                        fontWeight: 800,
-                        padding: '4px 8px',
-                        borderRadius: 'var(--radius-full)',
-                      }}
-                    >
-                      {dealTag}
-                    </span>
                   </div>
                   <div style={{ padding: '14px' }}>
-                    <h4 style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-main)', margin: '0 0 4px' }}>
+                    <h4 style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-main)', margin: '0 0 10px' }}>
                       {dealTitle}
                     </h4>
-                    <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '0 0 10px', lineHeight: 1.35 }}>
-                      {dealSubtitle}
-                    </p>
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                       <span style={{ fontSize: '15px', fontWeight: 800, color: 'var(--primary)' }}>
                         {dealPrice}
@@ -1763,8 +1774,8 @@ export const MenuPricesScreen: React.FC = () => {
                   boxShadow: '0 2px 10px var(--primary-glow)',
                 }}
               >
-                <Plus size={16} />
-                <span>+ Add New Hero Banner Slide</span>
+                <Plus size={15} />
+                <span>New Slide</span>
               </button>
             </div>
 

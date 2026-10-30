@@ -173,9 +173,9 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({
               <Interactive3DCard
                 imageSrc="/food-biryani.jpg"
                 title="Royal Chicken Dum Biryani"
-                subtitle="Slow-steamed in copper handi with saffron & house spices"
+                subtitle=""
                 price="Rs. 650"
-                tag="🌟 TODAY'S CHEF SPECIAL"
+                tag=""
                 onClick={() => onNavigate('menu')}
               />
             </div>

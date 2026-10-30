@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { useApp } from '@/context/AppContext';
+import { useApp, useAppSelector, selectCartCount, selectCartSubtotal } from '@/context/AppContext';
 import { MenuItem } from '@/types/cafe';
 import {
   Search,
@@ -207,8 +207,9 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
     }
   }, [menuItems]);
 
-  const cartCount = cart.reduce((acc, i) => acc + i.quantity, 0);
-  const cartSubtotal = cart.reduce((acc, i) => acc + i.unitPrice * i.quantity, 0);
+  // Redux Toolkit memoized selectors for zero-lag calculations
+  const cartCount = useAppSelector(selectCartCount);
+  const cartSubtotal = useAppSelector(selectCartSubtotal);
 
   // Snappy flying piece animation from clicked order item to header cart button
   const triggerFlyToCart = (

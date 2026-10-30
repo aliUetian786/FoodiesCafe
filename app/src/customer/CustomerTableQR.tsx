@@ -326,16 +326,8 @@ export const TableSelectionScreen: React.FC<TableSelectionScreenProps> = ({ onNa
   const handleCompletePaymentAndFreeTable = () => {
     if (!activeOrderOnThisTable) return;
     recordCashPayment(activeOrderOnThisTable.id, activeOrderOnThisTable.total);
-    if (currentTable) {
-      markTableFree(currentTable.number);
-    }
     setPaymentCompletedSuccess(true);
     setShowPaymentCheckoutModal(false);
-    addToast({
-      type: 'success',
-      title: 'Payment Confirmed & Table Released! 🎉',
-      message: `Table #${currentTable?.number || ''} is now free and available for new guests.`,
-    });
   };
 
   // Filter available menu items

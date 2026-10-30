@@ -44,15 +44,15 @@ export const CashierScreen: React.FC = () => {
 
   // Shift Management Modals
   const [openShiftModal, setOpenShiftModal] = useState(false);
-  const [openingFloatInput, setOpeningFloatInput] = useState('5000');
+  const [openingFloatInput, setOpeningFloatInput] = useState('');
   const [closeShiftModal, setCloseShiftModal] = useState(false);
-  const [countedCashInput, setCountedCashInput] = useState('39200');
+  const [countedCashInput, setCountedCashInput] = useState('');
   const [differenceReason, setDifferenceReason] = useState('Exact count');
 
   // Refund request modal
   const [refundModalOpen, setRefundModalOpen] = useState(false);
-  const [refundAmount, setRefundAmount] = useState('650');
-  const [refundReason, setRefundReason] = useState('Customer food return');
+  const [refundAmount, setRefundAmount] = useState('');
+  const [refundReason, setRefundReason] = useState('');
 
   // Walk-in order drawer
   const [showWalkInModal, setShowWalkInModal] = useState(false);

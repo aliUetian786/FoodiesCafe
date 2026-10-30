@@ -44,10 +44,14 @@ function createMemoryPgPool() {
     const schemaPaths = [
       path.resolve(process.cwd(), 'database/schema.sql'),
       path.resolve(process.cwd(), '../database/schema.sql'),
+      path.resolve(__dirname, '../../../database/schema.sql'),
+      path.resolve(__dirname, '../../../../database/schema.sql'),
     ];
     const seedPaths = [
       path.resolve(process.cwd(), 'database/seed.sql'),
       path.resolve(process.cwd(), '../database/seed.sql'),
+      path.resolve(__dirname, '../../../database/seed.sql'),
+      path.resolve(__dirname, '../../../../database/seed.sql'),
     ];
 
     const schemaPath = schemaPaths.find((p) => fs.existsSync(p));
@@ -117,10 +121,27 @@ export async function query<T extends QueryResultRow = any>(
 
   if (!client.isMemory) {
     try {
+      if (!client.initialized) {
+        client.initialized = true;
+        try {
+          await client.pool.query(`
+            DELETE FROM refund_requests WHERE id LIKE 'ref-%' OR id LIKE 'ref-pending-%' OR id LIKE 'ref-approved-%';
+            DELETE FROM orders WHERE id LIKE 'ord-seed-%' OR order_number IN ('FC-6744', 'FC-7819', 'FC-8812', 'FC-9021');
+            DELETE FROM table_sessions WHERE id LIKE 'sess-%';
+            DELETE FROM cash_shifts WHERE id IN ('sh-yesterday-1', 'sh-yesterday-2');
+            UPDATE cash_shifts SET opening_float = 0, cash_collected = 0, expected_cash = 0 WHERE id = 'sh-today-1';
+          `);
+        } catch (initErr) {
+          // Ignore if tables don't exist yet
+        }
+      }
       return await client.pool.query(text, params);
     } catch (err: any) {
       const connectionErrors = ['ECONNREFUSED', 'ETIMEDOUT', 'ENOTFOUND', 'connection timeout'];
-      const isConnError = connectionErrors.some((code) => err?.message?.includes(code) || err?.code === code);
+      const isConnError =
+        connectionErrors.some((code) => err?.message?.includes(code) || err?.code === code) ||
+        (Array.isArray(err?.errors) && err.errors.some((subErr: any) => connectionErrors.some((c) => subErr?.code === c || subErr?.message?.includes(c)))) ||
+        err?.name === 'AggregateError';
 
       if (isConnError) {
         console.warn('PostgreSQL server not currently responding, switching seamlessly to embedded engine.');
@@ -171,10 +192,14 @@ export async function initDatabase(): Promise<{ success: boolean; message: strin
     const schemaPaths = [
       path.resolve(process.cwd(), 'database/schema.sql'),
       path.resolve(process.cwd(), '../database/schema.sql'),
+      path.resolve(__dirname, '../../../database/schema.sql'),
+      path.resolve(__dirname, '../../../../database/schema.sql'),
     ];
     const seedPaths = [
       path.resolve(process.cwd(), 'database/seed.sql'),
       path.resolve(process.cwd(), '../database/seed.sql'),
+      path.resolve(__dirname, '../../../database/seed.sql'),
+      path.resolve(__dirname, '../../../../database/seed.sql'),
     ];
 
     const schemaPath = schemaPaths.find((p) => fs.existsSync(p));

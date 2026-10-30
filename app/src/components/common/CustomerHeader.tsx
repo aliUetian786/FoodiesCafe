@@ -368,7 +368,7 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
                     lineHeight: 1.4,
                   }}
                 >
-                  ⏰ <strong>Order #FC-8492:</strong> Your food will be ready in about 10 minutes. You can start coming to the cafe!
+                  ✨ <strong>Welcome to Foodies Cafe:</strong> Explore chef specials and enjoy express dine-in, takeaway, and doorstep delivery!
                 </div>
                 <div
                   style={{

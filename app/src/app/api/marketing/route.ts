@@ -77,6 +77,18 @@ export async function GET() {
   }
 }
 
+let footerColumnsMigrated = false;
+
+async function ensureFooterColumns() {
+  if (footerColumnsMigrated) return;
+  try {
+    await query(`ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS order_routing_support_first BOOLEAN DEFAULT true`);
+    await query(`ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS auto_forward_kitchen_min INT DEFAULT 3`);
+    await query(`ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS auto_forward_mode VARCHAR(20) DEFAULT 'timed'`);
+    footerColumnsMigrated = true;
+  } catch (err) {}
+}
+
 export async function PATCH(request: Request) {
   try {
     const body = await request.json();
@@ -89,12 +101,8 @@ export async function PATCH(request: Request) {
       const values: any[] = [];
       let idx = 1;
 
-      // Auto-migrate schema columns if missing
-      try {
-        await query(`ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS order_routing_support_first BOOLEAN DEFAULT true`);
-        await query(`ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS auto_forward_kitchen_min INT DEFAULT 3`);
-        await query(`ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS auto_forward_mode VARCHAR(20) DEFAULT 'timed'`);
-      } catch (err) {}
+      // Auto-migrate schema columns if missing (cached once)
+      await ensureFooterColumns();
 
       if (settings.helpline !== undefined) {
         updates.push(`helpline = $${idx++}`);

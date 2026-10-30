@@ -36,16 +36,6 @@ export async function GET(request: Request) {
           INSERT INTO audit_logs (id, timestamp, actor_id, actor_name, actor_role, branch_id, action, details)
           VALUES
           (
-            'aud-init-1',
-            CURRENT_TIMESTAMP - INTERVAL '25 minutes',
-            'user-bm',
-            'Rashid Mehmood',
-            'branch_manager',
-            'gulberg-lahore',
-            'refund_approved',
-            'Branch Manager approved refund request of Rs. 1,648.50 on Order #FC-8812 (Customer rider delayed over 40m).'
-          ),
-          (
             'aud-init-2',
             CURRENT_TIMESTAMP - INTERVAL '1 hour 15 minutes',
             'user-bm',

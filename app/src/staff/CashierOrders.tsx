@@ -146,26 +146,103 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Receipt #${ord.orderNumber}</title>
+          <title>Order Paid Slip #${ord.orderNumber}</title>
+          <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
           <style>
-            body { font-family: sans-serif; padding: 20px; color: #0F172A; max-width: 320px; margin: 0 auto; }
-            .header { text-align: center; border-bottom: 2px dashed #94A3B8; padding-bottom: 12px; margin-bottom: 14px; }
-            .total { font-size: 16px; font-weight: 800; border-top: 2px dashed #94A3B8; padding-top: 10px; margin-top: 10px; }
+            @page {
+              size: 80mm auto;
+              margin: 0 !important;
+              padding: 0 !important;
+            }
+            * {
+              box-sizing: border-box !important;
+              margin: 0;
+              padding: 0;
+              font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            html, body {
+              width: 80mm !important;
+              max-width: 80mm !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              background: #FFFFFF !important;
+              color: #000000 !important;
+              height: auto !important;
+              min-height: 0 !important;
+              overflow: visible !important;
+            }
+            .receipt-container {
+              width: 80mm !important;
+              max-width: 80mm !important;
+              margin: 0 !important;
+              padding: 6px 8px 4px 8px !important;
+              border: none !important;
+              background: #FFFFFF !important;
+              position: relative !important;
+              overflow: hidden !important;
+              box-shadow: none !important;
+              height: auto !important;
+              min-height: 0 !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
           </style>
         </head>
         <body>
-          <div class="header">
-            <h2 style="margin: 0; font-size: 20px;">Foodies Cafe</h2>
-            <div style="font-size: 12px; color: #475569;">${currentBranch.name}</div>
-            <div style="font-size: 13px; font-weight: 800; margin-top: 6px;">Order #${ord.orderNumber} (${ord.type.toUpperCase()})</div>
-          </div>
-          <div>${itemsHtml}</div>
-          <div class="total" style="display: flex; justify-content: space-between;">
-            <span>TOTAL:</span>
-            <span>Rs. ${Number(ord.total).toLocaleString()}</span>
-          </div>
-          <div style="text-align: center; font-size: 11px; color: #64748B; margin-top: 16px;">
-            Payment: ${ord.paymentStatus.toUpperCase()} • Direct Kitchen Dispatch
+          <div class="receipt-container">
+            <!-- 135-degree rotated Cafe Logo Watermark -->
+            <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; pointer-events: none; z-index: 0;">
+              <img src="/logo.png" alt="Logo Watermark" style="width: 80%; height: 80%; object-fit: contain; transform: rotate(135deg); opacity: 0.15; display: block; -webkit-print-color-adjust: exact; print-color-adjust: exact;" />
+            </div>
+            
+            <div style="position: relative; z-index: 1;">
+              <div style="text-align: center; border-bottom: 1.5px dashed #000000; padding-bottom: 5px; margin-bottom: 6px;">
+                <h3 style="font-size: 19px; font-weight: 900; margin: 0; font-family: 'Outfit', sans-serif; letter-spacing: 0.5px;">FOODIES CAFE</h3>
+                <div style="font-size: 11px; font-weight: 600; color: #475569; margin-top: 1px;">${currentBranch.name} · Paid Slip</div>
+                <div style="display: inline-block; font-size: 12.5px; font-weight: 850; color: #EA580C; background: #FFF7ED; padding: 2px 8px; border-radius: 4px; margin-top: 3px; border: 1px solid #FFEDD5;">
+                  ${ord.type.toUpperCase()} ${ord.tableNumber ? `· TABLE ${ord.tableNumber}` : ''}
+                </div>
+              </div>
+
+              <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; color: #334155; font-weight: 600;">
+                <span>Slip: <strong>#${ord.orderNumber}</strong></span>
+                <span>${ord.createdAt}</span>
+              </div>
+              <div style="font-size: 11px; margin-bottom: 5px; color: #334155;">
+                Customer: <strong>${ord.customerName}</strong> (${ord.customerPhone})
+              </div>
+
+              <div style="border-top: 1px solid #CBD5E1; padding-top: 5px; margin-bottom: 6px;">
+                ${itemsHtml}
+              </div>
+
+              <div style="border-top: 1.5px dashed #000000; padding-top: 5px; margin-bottom: 5px; font-size: 12px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 2px; font-weight: 600; color: #475569;">
+                  <span>Subtotal:</span>
+                  <span>Rs. ${Number(ord.originalSubtotal).toLocaleString()}</span>
+                </div>
+                ${ord.addOnSubtotal > 0 ? `
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 2px; color: #EA580C; font-weight: 600;">
+                    <span>Add-ons:</span>
+                    <span>+ Rs. ${Number(ord.addOnSubtotal).toLocaleString()}</span>
+                  </div>
+                ` : ''}
+                <div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: 900; color: #000000; margin-top: 4px; padding-top: 3px; border-top: 1px solid #CBD5E1;">
+                  <span>TOTAL PAID:</span>
+                  <span style="color: #EA580C;">Rs. ${Number(ord.total).toLocaleString()}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; color: #16A34A; margin-top: 3px;">
+                  <span>PAYMENT STATUS:</span>
+                  <span>${ord.paymentStatus === 'paid' ? 'PAID IN FULL ✓' : ord.paymentStatus.toUpperCase()} (${ord.paymentMethod || 'Cash'})</span>
+                </div>
+              </div>
+
+              <div style="text-align: center; font-size: 10px; font-weight: 600; color: #64748B; border-top: 1px dashed #CBD5E1; padding-top: 4px; margin-top: 2px;">
+                Thank you for dining with FoodiesCafe!
+              </div>
+            </div>
           </div>
         </body>
       </html>
@@ -546,12 +623,6 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                           onClick={(e) => {
                             e.stopPropagation();
                             recordCashPayment(ord.id, ord.total);
-                            if (ord.tableNumber) markTableFree(ord.tableNumber);
-                            addToast({
-                              type: 'success',
-                              title: 'Payment Collected & Table Freed! 🎉',
-                              message: `Order #${ord.orderNumber} settled. Table #${ord.tableNumber || 'Seated'} is now free.`,
-                            });
                           }}
                           style={{
                             padding: '4px 8px',
@@ -820,7 +891,7 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                 }}
               >
                 <Printer size={15} />
-                <span>Print Bill</span>
+                <span>Print Order Paid Slip</span>
               </button>
 
               <div style={{ display: 'flex', gap: '8px' }}>
@@ -828,12 +899,6 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                   <button
                     onClick={() => {
                       recordCashPayment(selectedOrderDetail.id, selectedOrderDetail.total);
-                      if (selectedOrderDetail.tableNumber) markTableFree(selectedOrderDetail.tableNumber);
-                      addToast({
-                        type: 'success',
-                        title: 'Cash Payment Recorded & Table Freed! 🎉',
-                        message: `Order #${selectedOrderDetail.orderNumber} marked as PAID. Table #${selectedOrderDetail.tableNumber || 'Seated'} is now available.`,
-                      });
                       setSelectedOrderDetail(null);
                     }}
                     style={{

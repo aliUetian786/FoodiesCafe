@@ -48,10 +48,9 @@ export const ProfileScreen: React.FC<{ onNavigate: (v: string) => void }> = ({ o
   };
 
   const notificationsList = [
-    { id: '1', title: 'Food Ready in ~10 Mins', desc: 'Order #FC-8492 is in final cooking phase at Gulberg branch. You can start coming to the cafe.', time: '10 mins ago', type: 'ready_soon' },
-    { id: '2', title: 'Add-on Window Expiring in 5 Mins', desc: 'Last chance to add more naan, drinks or sides to Order #FC-8492.', time: '15 mins ago', type: 'addon' },
-    { id: '3', title: 'Order Confirmed by Kitchen', desc: 'Order #FC-8492 accepted by Chef Ustaad Aslam.', time: '20 mins ago', type: 'confirmed' },
-    { id: '4', title: 'Support Ticket Reply Received', desc: 'Rep Zara Noor replied to Ticket #TKT-1042.', time: '25 mins ago', type: 'support' },
+    { id: '1', title: 'Welcome to FoodiesCafe', desc: 'Explore our authentic clay oven dum biryani and organic desi ghee Shinwari karahi.', time: 'Just now', type: 'confirmed' },
+    { id: '2', title: 'Real-Time Order Tracking Active', desc: 'Track food live from kitchen preparation to table service or doorstep delivery.', time: 'Today', type: 'ready_soon' },
+    { id: '3', title: 'Support & Help Desk Available', desc: 'Our branch representatives are online to assist with any questions or requests.', time: 'Today', type: 'support' },
   ];
 
   return (

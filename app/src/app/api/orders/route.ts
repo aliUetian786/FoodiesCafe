@@ -1,6 +1,32 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
+let ordersColumnsMigrated = false;
+
+async function ensureOrdersColumns() {
+  if (ordersColumnsMigrated) return;
+  try {
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS sent_to_kitchen BOOLEAN DEFAULT false`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS sent_to_kitchen_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS forward_to_kitchen_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS auto_forward_custom_min INT`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS cashier_id VARCHAR(64)`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(255)`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_walk_in BOOLEAN DEFAULT false`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS assigned_rider_id VARCHAR(64)`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS assigned_rider_name VARCHAR(255)`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS rider_status VARCHAR(30)`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_collected BOOLEAN DEFAULT false`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_coordinates JSONB`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS assigned_waiter_id VARCHAR(64)`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS assigned_waiter_name VARCHAR(255)`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_table_qr BOOLEAN DEFAULT false`);
+    await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS waiter_notified BOOLEAN DEFAULT false`);
+    ordersColumnsMigrated = true;
+  } catch (e) {}
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
@@ -14,26 +40,8 @@ export async function GET(request: Request) {
 
     const fetchAllHistory = dateScope === 'all' || older === 'true' || Boolean(customerPhone);
 
-    // Auto-migrate orders columns if missing
-    try {
-      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS sent_to_kitchen BOOLEAN DEFAULT false`);
-      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS sent_to_kitchen_at TIMESTAMPTZ`);
-      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS forward_to_kitchen_at TIMESTAMPTZ`);
-      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS auto_forward_custom_min INT`);
-      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS cashier_id VARCHAR(64)`);
-      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS cashier_name VARCHAR(255)`);
-      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_walk_in BOOLEAN DEFAULT false`);
-      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS assigned_rider_id VARCHAR(64)`);
-      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS assigned_rider_name VARCHAR(255)`);
-      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS rider_status VARCHAR(30)`);
-      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS delivered_at TIMESTAMPTZ`);
-      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS payment_collected BOOLEAN DEFAULT false`);
-      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS customer_coordinates JSONB`);
-      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS assigned_waiter_id VARCHAR(64)`);
-      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS assigned_waiter_name VARCHAR(255)`);
-      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS is_table_qr BOOLEAN DEFAULT false`);
-      await query(`ALTER TABLE orders ADD COLUMN IF NOT EXISTS waiter_notified BOOLEAN DEFAULT false`);
-    } catch (e) {}
+    // Auto-migrate orders columns if missing (cached once)
+    await ensureOrdersColumns();
 
     let sql = `
       SELECT id, order_number as "orderNumber", branch_id as "branchId",
@@ -66,7 +74,10 @@ export async function GET(request: Request) {
       FROM orders
     `;
     const params: any[] = [];
-    const whereClauses: string[] = [];
+    const whereClauses: string[] = [
+      "id NOT LIKE 'ord-seed-%'",
+      "order_number NOT IN ('FC-6744', 'FC-7819', 'FC-8812', 'FC-9021')"
+    ];
 
     if (branchId && branchId !== 'all') {
       params.push(branchId);

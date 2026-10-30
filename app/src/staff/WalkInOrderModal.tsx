@@ -17,6 +17,8 @@ import {
   ChefHat,
   ArrowRight,
   RotateCcw,
+  ArrowLeft,
+  ShoppingCart,
 } from 'lucide-react';
 
 interface WalkInOrderModalProps {
@@ -261,9 +263,34 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
             flexShrink: 0,
           }}
         >
-          <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: 'var(--text-main)' }}>
-            {isFloorStaff ? 'Table Order' : 'Walk-in Order'}
-          </h3>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            {walkInStep === 'checkout' && (
+              <button
+                onClick={() => setWalkInStep('menu')}
+                style={{
+                  border: '1px solid var(--border-color)',
+                  background: 'var(--bg-card)',
+                  cursor: 'pointer',
+                  padding: '6px 8px',
+                  borderRadius: '6px',
+                  color: 'var(--text-main)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  transition: 'all 0.15s ease',
+                }}
+                title="Back to Menu"
+                aria-label="Back to Menu"
+              >
+                <ArrowLeft size={18} />
+              </button>
+            )}
+            <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: 'var(--text-main)' }}>
+              {walkInStep === 'checkout'
+                ? 'Order Checkout'
+                : isFloorStaff ? 'Table Order' : 'Walk-in Order'}
+            </h3>
+          </div>
 
           <button
             onClick={onClose}
@@ -369,9 +396,9 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
                 flex: 1,
                 minHeight: 0,
                 overflowY: 'auto',
-                padding: '16px 20px 80px',
+                padding: '16px 16px 95px',
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))',
                 gap: '16px',
                 alignContent: 'start',
               }}
@@ -383,6 +410,7 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
                 return (
                   <div
                     key={item.id}
+                    onClick={() => handleAddToCart(item)}
                     style={{
                       backgroundColor: 'var(--bg-card)',
                       borderRadius: 'var(--radius-lg)',
@@ -391,6 +419,8 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
                       display: 'flex',
                       flexDirection: 'column',
                       boxShadow: 'var(--shadow-sm)',
+                      cursor: 'pointer',
+                      transition: 'transform 0.12s ease',
                     }}
                   >
                     <div style={{ height: '110px', backgroundColor: 'var(--bg-card-subtle)', position: 'relative', overflow: 'hidden' }}>
@@ -426,34 +456,76 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
                         </div>
                       </div>
 
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px' }}>
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', gap: '8px', flexWrap: 'wrap' }}>
                         <span style={{ fontSize: '15px', fontWeight: 850, color: 'var(--primary)' }}>
                           Rs. {Number(item.basePrice).toLocaleString()}
                         </span>
 
                         {qty > 0 ? (
-                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', backgroundColor: 'var(--bg-card-subtle)', padding: '3px 6px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
+                          <div
+                            onClick={(e) => e.stopPropagation()}
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              backgroundColor: 'var(--bg-card-subtle)',
+                              padding: '3px 8px',
+                              borderRadius: 'var(--radius-md)',
+                              border: '1.5px solid var(--primary)',
+                            }}
+                          >
                             <button
-                              onClick={() => handleUpdateQty(item.id, -1)}
-                              style={{ width: '24px', height: '24px', borderRadius: '4px', border: 'none', backgroundColor: 'var(--primary)', color: '#FFFFFF', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleUpdateQty(item.id, -1);
+                              }}
+                              style={{
+                                width: '26px',
+                                height: '26px',
+                                borderRadius: '4px',
+                                border: 'none',
+                                backgroundColor: 'var(--primary)',
+                                color: '#FFFFFF',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
                             >
                               <Minus size={12} />
                             </button>
-                            <span style={{ fontWeight: 850, fontSize: '13px', minWidth: '18px', textAlign: 'center' }}>
+                            <span style={{ fontWeight: 850, fontSize: '13px', minWidth: '22px', textAlign: 'center', color: 'var(--primary)' }}>
                               {qty}
                             </span>
                             <button
-                              onClick={() => handleUpdateQty(item.id, 1)}
-                              style={{ width: '24px', height: '24px', borderRadius: '4px', border: 'none', backgroundColor: 'var(--primary)', color: '#FFFFFF', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleUpdateQty(item.id, 1);
+                              }}
+                              style={{
+                                width: '26px',
+                                height: '26px',
+                                borderRadius: '4px',
+                                border: 'none',
+                                backgroundColor: 'var(--primary)',
+                                color: '#FFFFFF',
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                              }}
                             >
                               <Plus size={12} />
                             </button>
                           </div>
                         ) : (
                           <button
-                            onClick={() => handleAddToCart(item)}
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              handleAddToCart(item);
+                            }}
                             style={{
-                              padding: '6px 14px',
+                              padding: '7px 16px',
                               borderRadius: 'var(--radius-md)',
                               backgroundColor: 'var(--primary)',
                               color: '#FFFFFF',
@@ -463,11 +535,14 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
                               cursor: 'pointer',
                               display: 'flex',
                               alignItems: 'center',
-                              gap: '4px',
+                              gap: '5px',
+                              boxShadow: '0 2px 8px var(--primary-glow)',
+                              whiteSpace: 'nowrap',
+                              transition: 'all 0.15s ease',
                             }}
                           >
-                            <Plus size={14} />
-                            <span>Add</span>
+                            <Plus size={14} strokeWidth={2.4} />
+                            <span>+ Add</span>
                           </button>
                         )}
                       </div>
@@ -478,99 +553,171 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
             </div>
 
             {/* Bottom floating cart bar */}
-            {cartCount > 0 && (
-              <div
-                style={{
-                  position: 'absolute',
-                  bottom: 0,
-                  left: 0,
-                  right: 0,
-                  padding: '14px 20px',
-                  backgroundColor: 'var(--bg-card)',
-                  borderTop: '1px solid var(--border-color)',
-                  boxShadow: '0 -4px 16px rgba(0,0,0,0.08)',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  zIndex: 20,
-                }}
-              >
-                <div>
-                  <div style={{ fontSize: '13px', fontWeight: 800, color: 'var(--text-main)' }}>
-                    {cartCount} {cartCount === 1 ? 'item' : 'items'} selected
-                  </div>
-                  <div style={{ fontSize: '18px', fontWeight: 900, color: 'var(--primary)' }}>
-                    Total: Rs. {cartTotal.toLocaleString()}
-                  </div>
+            <div
+              style={{
+                position: 'absolute',
+                bottom: 0,
+                left: 0,
+                right: 0,
+                padding: '12px 18px',
+                backgroundColor: 'var(--bg-card)',
+                borderTop: '1px solid var(--border-color)',
+                boxShadow: '0 -4px 16px rgba(0,0,0,0.12)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+                zIndex: 20,
+                flexWrap: 'wrap',
+                gap: '8px',
+              }}
+            >
+              <div>
+                <div style={{ fontSize: '13px', fontWeight: 800, color: cartCount > 0 ? 'var(--text-main)' : 'var(--text-muted)' }}>
+                  {cartCount} {cartCount === 1 ? 'item' : 'items'} selected
                 </div>
+                <div style={{ fontSize: '18px', fontWeight: 900, color: cartCount > 0 ? 'var(--primary)' : 'var(--text-muted)' }}>
+                  Total: Rs. {cartTotal.toLocaleString()}
+                </div>
+              </div>
 
-                <div style={{ display: 'flex', gap: '10px' }}>
+              <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
+                {cartCount > 0 && (
                   <button
                     onClick={() => setWalkInCart([])}
                     style={{
-                      padding: '10px 16px',
+                      padding: '8px 14px',
                       borderRadius: 'var(--radius-md)',
                       backgroundColor: 'var(--bg-card-subtle)',
                       border: '1px solid var(--border-color)',
                       color: 'var(--text-secondary)',
-                      fontSize: '13px',
+                      fontSize: '12.5px',
                       fontWeight: 700,
                       cursor: 'pointer',
                     }}
                   >
                     Clear All
                   </button>
+                )}
 
-                  <button
-                    onClick={() => setWalkInStep('checkout')}
-                    style={{
-                      padding: '10px 22px',
-                      borderRadius: 'var(--radius-md)',
-                      backgroundColor: 'var(--primary)',
-                      color: '#FFFFFF',
-                      border: 'none',
-                      fontSize: '14px',
-                      fontWeight: 850,
-                      cursor: 'pointer',
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '8px',
-                      boxShadow: '0 4px 12px var(--primary-glow)',
-                    }}
-                  >
-                    <span>Proceed to Walk-in Checkout</span>
-                    <ArrowRight size={16} />
-                  </button>
-                </div>
+                <button
+                  disabled={cartCount === 0}
+                  onClick={() => setWalkInStep('checkout')}
+                  style={{
+                    padding: '10px 22px',
+                    borderRadius: 'var(--radius-md)',
+                    backgroundColor: cartCount > 0 ? 'var(--primary)' : 'var(--bg-card-subtle)',
+                    color: cartCount > 0 ? '#FFFFFF' : 'var(--text-muted)',
+                    border: 'none',
+                    fontSize: '14px',
+                    fontWeight: 850,
+                    cursor: cartCount > 0 ? 'pointer' : 'not-allowed',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '8px',
+                    boxShadow: cartCount > 0 ? '0 4px 12px var(--primary-glow)' : 'none',
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  <span>Proceed to Checkout</span>
+                  <ArrowRight size={16} />
+                </button>
               </div>
-            )}
+            </div>
           </div>
         )}
 
         {/* STEP 2: FINALIZE WALK-IN CHECKOUT */}
         {walkInStep === 'checkout' && (
           <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '24px', display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {/* Back button */}
-            <button
-              onClick={() => setWalkInStep('menu')}
-              style={{
-                alignSelf: 'flex-start',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '6px 12px',
-                borderRadius: '6px',
-                backgroundColor: 'var(--bg-card-subtle)',
-                border: '1px solid var(--border-color)',
-                fontSize: '12px',
-                fontWeight: 700,
-                color: 'var(--text-main)',
-                cursor: 'pointer',
-              }}
-            >
-              <RotateCcw size={13} />
-              <span>Back to Menu</span>
-            </button>
+            {/* Selected Dishes Review */}
+            <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '10px' }}>
+                <h4 style={{ margin: 0, fontSize: '13px', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
+                  Selected Dishes ({cartCount} {cartCount === 1 ? 'item' : 'items'})
+                </h4>
+                <button
+                  onClick={() => setWalkInStep('menu')}
+                  style={{
+                    border: 'none',
+                    background: 'none',
+                    color: 'var(--primary)',
+                    fontSize: '12.5px',
+                    fontWeight: 750,
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '4px',
+                    padding: 0,
+                  }}
+                >
+                  <Plus size={13} />
+                  <span>+ Add More Items</span>
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {walkInCart.map((it) => (
+                  <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                      <span style={{ fontWeight: 800, color: 'var(--primary)', backgroundColor: 'var(--primary-light)', padding: '2px 7px', borderRadius: '4px', fontSize: '12px' }}>
+                        {it.quantity}x
+                      </span>
+                      <span style={{ fontWeight: 700, color: 'var(--text-main)' }}>{it.name}</span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                      <span style={{ fontWeight: 800, color: 'var(--text-main)' }}>
+                        Rs. {(it.unitPrice * it.quantity).toLocaleString()}
+                      </span>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                        <button
+                          onClick={() => handleUpdateQty(it.menuItemId, -1)}
+                          style={{
+                            width: '22px',
+                            height: '22px',
+                            borderRadius: '4px',
+                            border: '1px solid var(--border-color)',
+                            backgroundColor: 'var(--bg-card)',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                          }}
+                        >
+                          -
+                        </button>
+                        <button
+                          onClick={() => handleUpdateQty(it.menuItemId, 1)}
+                          style={{
+                            width: '22px',
+                            height: '22px',
+                            borderRadius: '4px',
+                            border: '1px solid var(--border-color)',
+                            backgroundColor: 'var(--bg-card)',
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            fontSize: '12px',
+                            fontWeight: 700,
+                          }}
+                        >
+                          +
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+
+              <div style={{ marginTop: '12px', paddingTop: '10px', borderTop: '1px dashed var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ fontSize: '14px', fontWeight: 800 }}>Total Order Bill:</span>
+                <span style={{ fontSize: '17px', fontWeight: 900, color: 'var(--primary)' }}>
+                  Rs. {cartTotal.toLocaleString()}
+                </span>
+              </div>
+            </div>
 
             {/* Dine-In Table Selection (Walk-in is strictly Dine-In by default) */}
             <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
@@ -579,35 +726,29 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
                   🍽️ Select Dine-In Table for Guest:
                 </label>
                 <span style={{ fontSize: '11px', color: 'var(--primary)', fontWeight: 750, backgroundColor: 'var(--primary-light)', padding: '2px 8px', borderRadius: '10px' }}>
-                  Dine-In Seating Only
+                  Dine-In Seating
                 </span>
               </div>
-              {availableTables.length > 0 ? (
-                <select
-                  value={walkInTable}
-                  onChange={(e) => setWalkInTable(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '10px 12px',
-                    borderRadius: '6px',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'var(--bg-card)',
-                    fontSize: '13.5px',
-                    color: 'var(--text-main)',
-                    fontWeight: 700,
-                  }}
-                >
-                  {availableTables.map((t) => (
-                    <option key={t.id} value={t.number}>
-                      Table #{t.number} — Capacity: {t.capacity} Seats ({t.status.toUpperCase()})
-                    </option>
-                  ))}
-                </select>
-              ) : (
-                <div style={{ color: '#DC2626', fontSize: '12.5px', fontWeight: 700 }}>
-                  ⚠️ No free tables currently available. Please free a table first.
-                </div>
-              )}
+              <select
+                value={walkInTable}
+                onChange={(e) => setWalkInTable(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '10px 12px',
+                  borderRadius: '6px',
+                  border: '1.5px solid var(--primary)',
+                  backgroundColor: 'var(--bg-card)',
+                  fontSize: '13.5px',
+                  color: 'var(--text-main)',
+                  fontWeight: 700,
+                }}
+              >
+                {branchTables.map((t) => (
+                  <option key={t.id} value={t.number}>
+                    Table #{t.number} — Capacity: {t.capacity} Guests ({t.status.toUpperCase()})
+                  </option>
+                ))}
+              </select>
             </div>
 
 
@@ -728,51 +869,29 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
               </div>
             </div>
 
-            {/* Direct Kitchen Notice */}
-            <div
-              style={{
-                padding: '12px',
-                backgroundColor: '#EFF6FF',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid #BFDBFE',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '10px',
-                fontSize: '12px',
-                color: '#1E40AF',
-                fontWeight: 600,
-              }}
-            >
-              <ChefHat size={20} color="#2563EB" style={{ flexShrink: 0 }} />
-              <span>
-                <strong>Direct Kitchen Dispatch:</strong> This walk-in order will dispatch directly to the kitchen queue without any wait timer.
-              </span>
-            </div>
-
             {/* Submit Button */}
             <button
               onClick={handleCreateWalkIn}
               style={{
                 padding: '14px',
                 borderRadius: 'var(--radius-md)',
-                backgroundColor: '#16A34A',
+                backgroundColor: 'var(--primary)',
                 color: '#FFFFFF',
                 fontSize: '15px',
-                fontWeight: 800,
+                fontWeight: 850,
                 cursor: 'pointer',
                 border: 'none',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '8px',
-                boxShadow: '0 4px 14px rgba(22, 163, 74, 0.35)',
+                boxShadow: '0 4px 14px var(--primary-glow)',
                 marginTop: '4px',
+                width: '100%',
+                transition: 'all 0.15s ease',
               }}
             >
-              <ChefHat size={18} />
-              <span>
-                Dispatch Directly to Kitchen 👨‍🍳 (Rs. {cartTotal.toLocaleString()})
-              </span>
+              <span>Proceed</span>
             </button>
           </div>
         )}

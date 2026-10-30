@@ -54,12 +54,12 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({
     onNavigate('menu');
   };
 
-  // Auto-transition hero banner every 2 seconds
+  // Auto-transition hero banner every 5 seconds
   useEffect(() => {
     if (!heroBanners || heroBanners.length <= 1) return;
     const interval = setInterval(() => {
       setCurrentSlide((prev) => (prev + 1) % heroBanners.length);
-    }, 2000);
+    }, 5000);
     return () => clearInterval(interval);
   }, [heroBanners]);
 
@@ -162,10 +162,6 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({
             >
               {activeBanner.title}
             </h1>
-
-            <p style={{ fontSize: '15.5px', lineHeight: 1.6, color: '#D6CEC7', margin: 0 }}>
-              {activeBanner.subtitle}
-            </p>
           </div>
 
           {/* Hero Right: 3D Interactive Deal Card Showcase (Changeable) */}
@@ -174,8 +170,9 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({
               <Interactive3DCard
                 imageSrc={dealCard.imageUrl}
                 title={dealCard.title}
-                subtitle={dealCard.subtitle}
-                tag={dealCard.tag}
+                subtitle=""
+                tag=""
+                price={dealCard.price}
                 onClick={handleDealClick}
               />
             </div>

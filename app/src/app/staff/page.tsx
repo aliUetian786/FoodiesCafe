@@ -25,12 +25,26 @@ import { RiderDashboardScreen } from '@/staff/RiderDashboard';
 export default function StaffPortalMainPage() {
   const { currentRole, setCurrentRole, currentUser, setCurrentUser } = useApp();
 
-  // Restore staff view from localStorage on refresh so data & screen do not go away
+  // Staff session max duration: 4-8 hours (8 hours = 8 * 60 * 60 * 1000 ms)
+  const STAFF_SESSION_MAX_AGE_MS = 8 * 60 * 60 * 1000;
+
+  // Restore staff view from localStorage on refresh so data & screen do not go away (unless expired)
   const [currentView, setCurrentView] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       const savedUser = localStorage.getItem('foodies_staff_user');
       const savedRole = localStorage.getItem('foodies_staff_role');
       const savedView = localStorage.getItem('foodies_staff_view');
+      const savedLoginTime = localStorage.getItem('foodies_staff_login_time');
+
+      // Check if session has expired (> 8 hours)
+      const isExpired = savedLoginTime ? (Date.now() - Number(savedLoginTime) > STAFF_SESSION_MAX_AGE_MS) : false;
+      if (isExpired) {
+        localStorage.removeItem('foodies_staff_view');
+        localStorage.removeItem('foodies_staff_user');
+        localStorage.removeItem('foodies_staff_role');
+        localStorage.removeItem('foodies_staff_login_time');
+        return 'staff-auth';
+      }
 
       // Only restore view if there is a valid authenticated staff session
       if (savedUser && savedRole && savedRole !== 'customer' && savedView && savedView !== 'staff-auth') {
@@ -45,6 +59,18 @@ export default function StaffPortalMainPage() {
     if (typeof window === 'undefined') return;
     const savedStaffUser = localStorage.getItem('foodies_staff_user');
     const savedStaffRole = localStorage.getItem('foodies_staff_role');
+    const savedLoginTime = localStorage.getItem('foodies_staff_login_time');
+
+    // Check if session has expired (> 8 hours)
+    const isExpired = savedLoginTime ? (Date.now() - Number(savedLoginTime) > STAFF_SESSION_MAX_AGE_MS) : false;
+    if (isExpired) {
+      localStorage.removeItem('foodies_staff_view');
+      localStorage.removeItem('foodies_staff_user');
+      localStorage.removeItem('foodies_staff_role');
+      localStorage.removeItem('foodies_staff_login_time');
+      handleNavigate('staff-auth');
+      return;
+    }
 
     if (savedStaffUser && savedStaffRole && savedStaffRole !== 'customer') {
       try {
@@ -74,6 +100,7 @@ export default function StaffPortalMainPage() {
         localStorage.removeItem('foodies_staff_view');
         localStorage.removeItem('foodies_staff_user');
         localStorage.removeItem('foodies_staff_role');
+        localStorage.removeItem('foodies_staff_login_time');
       } else {
         localStorage.setItem('foodies_staff_view', view);
       }
@@ -91,7 +118,9 @@ export default function StaffPortalMainPage() {
       case 'staff-cashier-orders':
         return <CashierOrdersScreen key={currentView} />;
       case 'staff-floor':
-        return <FloorTablesScreen key={currentView} />;
+        return <FloorTablesScreen key={currentView} initialView="tables" />;
+      case 'staff-floor-server':
+        return <FloorTablesScreen key={currentView} initialView="server_orders" />;
       case 'staff-floor-orders':
         return <CashierOrdersScreen key={currentView} isFloorStaff={true} />;
       case 'staff-rep':
@@ -104,6 +133,8 @@ export default function StaffPortalMainPage() {
         return <RepresentativeScreen key="staff-rep-delivery" initialTab="delivery" />;
       case 'staff-rider':
         return <RiderDashboardScreen key={currentView} initialTab="active" />;
+      case 'staff-rider-route':
+        return <RiderDashboardScreen key={currentView} initialTab="route" />;
       case 'staff-rider-history':
         return <RiderDashboardScreen key={currentView} initialTab="history" />;
       case 'staff-manager':

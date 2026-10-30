@@ -24,7 +24,7 @@ export const ToastContainer: React.FC = () => {
         pointerEvents: 'none',
       }}
     >
-      {toasts.map((toast) => {
+      {toasts.slice(0, 1).map((toast) => {
         const getIcon = () => {
           switch (toast.type) {
             case 'success':

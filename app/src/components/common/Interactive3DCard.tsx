@@ -118,25 +118,27 @@ export const Interactive3DCard: React.FC<Interactive3DCardProps> = ({
           />
 
           {/* Floating Badges */}
-          <div
-            style={{
-              position: 'absolute',
-              top: '16px',
-              left: '16px',
-              backgroundColor: 'var(--primary)',
-              color: '#FFFFFF',
-              fontSize: '11px',
-              fontWeight: 700,
-              textTransform: 'uppercase',
-              letterSpacing: '0.05em',
-              padding: '6px 12px',
-              borderRadius: 'var(--radius-full)',
-              boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
-              transform: 'translateZ(30px)',
-            }}
-          >
-            {tag}
-          </div>
+          {tag ? (
+            <div
+              style={{
+                position: 'absolute',
+                top: '16px',
+                left: '16px',
+                backgroundColor: 'var(--primary)',
+                color: '#FFFFFF',
+                fontSize: '11px',
+                fontWeight: 700,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                padding: '6px 12px',
+                borderRadius: 'var(--radius-full)',
+                boxShadow: '0 4px 12px rgba(0,0,0,0.3)',
+                transform: 'translateZ(30px)',
+              }}
+            >
+              {tag}
+            </div>
+          ) : null}
 
           <div
             style={{
@@ -171,7 +173,9 @@ export const Interactive3DCard: React.FC<Interactive3DCardProps> = ({
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', gap: '8px' }}>
               <div>
                 <h4 style={{ fontSize: '20px', fontWeight: 700, color: '#FFFFFF', margin: 0 }}>{title}</h4>
-                <p style={{ fontSize: '13px', color: '#E2E8F0', marginTop: '4px', lineHeight: 1.3 }}>{subtitle}</p>
+                {subtitle ? (
+                  <p style={{ fontSize: '13px', color: '#E2E8F0', marginTop: '4px', lineHeight: 1.3 }}>{subtitle}</p>
+                ) : null}
               </div>
               {price && (
                 <div

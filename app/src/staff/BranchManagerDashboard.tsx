@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '@/context/AppContext';
 import { ModalConfirmation } from '@/components/common/ModalConfirmation';
 import { Role } from '@/types/cafe';
@@ -129,12 +129,24 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
     );
   };
 
-  // Today's metrics (Fast mode defaults to today's data)
-  const branchOrders = orders.filter((o) => !o.branchId || o.branchId === currentBranch.id);
-  const branchOrdersToday = branchOrders.filter((o) => isToday(o.createdAt));
-  const totalOrdersToday = branchOrdersToday.length;
-  const pendingOrders = branchOrdersToday.filter((o) => o.status === 'placed' || o.status === 'accepted' || o.status === 'preparing').length;
-  const totalCashCollected = currentShift?.cashCollected || 34200;
+  // Today's metrics (Fast mode defaults to today's data, memoized for Redux performance)
+  const { branchOrders, branchOrdersToday, totalOrdersToday, pendingOrders } = useMemo(() => {
+    const bOrders = orders.filter((o) => !o.branchId || o.branchId === currentBranch.id);
+    const bOrdersToday = bOrders.filter((o) => isToday(o.createdAt));
+    const totalToday = bOrdersToday.length;
+    const pending = bOrdersToday.filter(
+      (o) => o.status === 'placed' || o.status === 'accepted' || o.status === 'preparing'
+    ).length;
+
+    return {
+      branchOrders: bOrders,
+      branchOrdersToday: bOrdersToday,
+      totalOrdersToday: totalToday,
+      pendingOrders: pending,
+    };
+  }, [orders, currentBranch.id]);
+
+  const totalCashCollected = Number(currentShift?.cashCollected || 0);
 
   // Branch Subordinates under this Manager (Cashier, Kitchen, Floor, Rep, Delivery)
   const subordinateRoles: Role[] = ['cashier', 'kitchen_staff', 'floor_staff', 'branch_representative', 'delivery_staff'];

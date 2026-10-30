@@ -114,38 +114,48 @@ export const OrderHistoryScreen: React.FC<{ onNavigate: (v: string) => void }> =
       <!DOCTYPE html>
       <html>
         <head>
-          <title></title>
-          <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+          <title>Order Paid Slip</title>
+          <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
           <style>
             @page {
               size: 80mm auto;
-              margin: 0;
+              margin: 0 !important;
+              padding: 0 !important;
             }
             * {
-              box-sizing: border-box;
+              box-sizing: border-box !important;
               margin: 0;
               padding: 0;
-              font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+              font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
               -webkit-print-color-adjust: exact !important;
               print-color-adjust: exact !important;
             }
             html, body {
-              width: 80mm;
-              margin: 0 auto;
-              padding: 4mm 2mm;
+              width: 80mm !important;
+              max-width: 80mm !important;
+              margin: 0 !important;
+              padding: 0 !important;
               background: #FFFFFF !important;
-              color: #1A1A1A !important;
+              color: #000000 !important;
+              height: auto !important;
+              min-height: 0 !important;
+              overflow: visible !important;
             }
             #printable-order-receipt {
-              width: 100% !important;
+              width: 80mm !important;
               max-width: 80mm !important;
-              border: 1px dashed #CBD5E1 !important;
-              border-radius: 6px !important;
-              padding: 16px 12px !important;
+              margin: 0 !important;
+              padding: 6px 8px 4px 8px !important;
+              border: none !important;
+              border-radius: 0 !important;
               background: #FFFFFF !important;
               position: relative !important;
               overflow: hidden !important;
               box-shadow: none !important;
+              height: auto !important;
+              min-height: 0 !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
             }
             .no-print { display: none !important; }
             img {

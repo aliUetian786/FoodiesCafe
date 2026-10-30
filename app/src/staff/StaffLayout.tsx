@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useApp } from '@/context/AppContext';
 import { Role } from '@/types/cafe';
 import {
@@ -24,6 +24,7 @@ import {
   MapPin,
   ShoppingBag,
   Bike,
+  Navigation,
   User,
   Edit,
   X,
@@ -34,6 +35,7 @@ import {
   Send,
   ExternalLink,
   Sparkles,
+  Bell,
 } from 'lucide-react';
 import { StoreMapModal } from '../customer/StoreMapModal';
 
@@ -101,6 +103,17 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
 
   // Determine effective staff role, prioritizing currentRole, then currentUser.role, then foodies_staff_role
   const effectiveRole: Role = (() => {
+    if (typeof window !== 'undefined') {
+      const savedLoginTime = localStorage.getItem('foodies_staff_login_time');
+      // 8-hour shift max session duration
+      if (savedLoginTime && Date.now() - Number(savedLoginTime) > 8 * 60 * 60 * 1000) {
+        localStorage.removeItem('foodies_staff_user');
+        localStorage.removeItem('foodies_staff_role');
+        localStorage.removeItem('foodies_staff_view');
+        localStorage.removeItem('foodies_staff_login_time');
+        return 'customer' as Role;
+      }
+    }
     if (currentRole && currentRole !== 'customer') return currentRole;
     if (currentUser?.role && currentUser.role !== 'customer') return currentUser.role;
     if (typeof window !== 'undefined') {
@@ -142,6 +155,7 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
       localStorage.removeItem('foodies_staff_user');
       localStorage.removeItem('foodies_staff_role');
       localStorage.removeItem('foodies_staff_view');
+      localStorage.removeItem('foodies_staff_login_time');
     }
     setCurrentRole('customer');
     setCurrentUser({
@@ -199,45 +213,42 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
     (r) => r.status === 'pending'
   ).length;
 
-  // Compute live ready and active counts for branch
-  const activeDineInCount = orders.filter(
-    (o) =>
-      (!o.branchId || o.branchId === currentBranch.id) &&
-      o.type === 'dine_in' &&
-      o.status !== 'completed' &&
-      o.status !== 'cancelled'
-  ).length;
+  // Memoized live ready and active counts for branch (High-performance single pass)
+  const { activeDineInCount, activeTakeawayCount, readyTakeawayCount, activeDeliveryCount, readyDeliveryCount } = useMemo(() => {
+    let dineIn = 0;
+    let takeawayActive = 0;
+    let takeawayReady = 0;
+    let deliveryActive = 0;
+    let deliveryReady = 0;
+    const branchId = currentBranch.id;
 
-  const activeTakeawayCount = orders.filter(
-    (o) =>
-      (!o.branchId || o.branchId === currentBranch.id) &&
-      o.type === 'takeaway' &&
-      o.status !== 'completed' &&
-      o.status !== 'cancelled'
-  ).length;
+    for (let i = 0; i < orders.length; i++) {
+      const o = orders[i];
+      if (o.branchId && o.branchId !== branchId) continue;
+      const isNotFinished = o.status !== 'completed' && o.status !== 'cancelled';
 
-  const readyTakeawayCount = orders.filter(
-    (o) => (!o.branchId || o.branchId === currentBranch.id) && o.type === 'takeaway' && o.status === 'ready'
-  ).length;
+      if (o.type === 'dine_in' && isNotFinished) dineIn++;
+      else if (o.type === 'takeaway') {
+        if (isNotFinished) takeawayActive++;
+        if (o.status === 'ready') takeawayReady++;
+      } else if (o.type === 'delivery') {
+        if (isNotFinished) deliveryActive++;
+        if (o.status === 'ready' || o.status === 'out_for_delivery') deliveryReady++;
+      }
+    }
 
-  const activeDeliveryCount = orders.filter(
-    (o) =>
-      (!o.branchId || o.branchId === currentBranch.id) &&
-      o.type === 'delivery' &&
-      o.status !== 'completed' &&
-      o.status !== 'cancelled'
-  ).length;
-
-  const readyDeliveryCount = orders.filter(
-    (o) =>
-      (!o.branchId || o.branchId === currentBranch.id) &&
-      o.type === 'delivery' &&
-      (o.status === 'ready' || o.status === 'out_for_delivery')
-  ).length;
+    return {
+      activeDineInCount: dineIn,
+      activeTakeawayCount: takeawayActive,
+      readyTakeawayCount: takeawayReady,
+      activeDeliveryCount: deliveryActive,
+      readyDeliveryCount: deliveryReady,
+    };
+  }, [orders, currentBranch.id]);
 
 
-  // Define sidebar menu items based on current role
-  const getNavItems = () => {
+  // Define sidebar menu items based on current role (Memoized for zero-lag navigation)
+  const navItems = useMemo(() => {
     if (effectiveRole === 'platform_owner') {
       return [
         { id: 'mgmt-overview', label: 'Owner Overview', icon: BarChart3 },
@@ -288,7 +299,7 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
         },
         {
           id: 'staff-floor',
-          label: 'Floor & Table Seating',
+          label: 'Waiter & Floor',
           icon: LayoutGrid,
           canEdit: false,
         },
@@ -346,6 +357,12 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
           badge: myActiveDeliveries > 0 ? `${myActiveDeliveries} Active` : undefined,
         },
         {
+          id: 'staff-rider-route',
+          label: 'Multi-Stop Route',
+          icon: Navigation,
+          badge: myActiveDeliveries > 0 ? `${myActiveDeliveries} Stops` : undefined,
+        },
+        {
           id: 'staff-rider-history',
           label: 'Delivery History',
           icon: FileClock,
@@ -400,8 +417,20 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
         return isFloorOrder && o.status !== 'completed' && o.status !== 'cancelled';
       }).length;
 
+      const serverOrdersCount = orders.filter((o) => {
+        if (o.branchId && o.branchId !== currentBranch.id) return false;
+        if (o.type !== 'dine_in') return false;
+        return o.status === 'placed' || o.status === 'accepted' || o.status === 'preparing' || o.status === 'ready' || o.status === 'served';
+      }).length;
+
       return [
         { id: 'staff-floor', label: 'Floor Tables Grid', icon: LayoutGrid },
+        {
+          id: 'staff-floor-server',
+          label: 'Orders for Server / Waiter',
+          icon: Bell,
+          badge: serverOrdersCount > 0 ? `${serverOrdersCount}` : undefined,
+        },
         {
           id: 'staff-floor-orders',
           label: 'Orders Hub',
@@ -442,19 +471,27 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
     }
 
     return [{ id: 'staff-kitchen', label: 'Operations Dashboard', icon: ChefHat }];
-  };
-
-
-  const navItems = getNavItems();
+  }, [
+    effectiveRole,
+    orders,
+    currentBranch.id,
+    currentUser.id,
+    activeTakeawayCount,
+    readyTakeawayCount,
+    activeDeliveryCount,
+    readyDeliveryCount,
+    activeDineInCount,
+  ]);
 
   return (
     <div
+      className="staff-layout-root"
       style={{
         display: 'flex',
         minHeight: '100vh',
-        height: currentView === 'staff-rep' ? '100vh' : undefined,
-        maxHeight: currentView === 'staff-rep' ? '100vh' : undefined,
-        overflow: currentView === 'staff-rep' ? 'hidden' : undefined,
+        height: '100vh',
+        maxHeight: '100vh',
+        overflow: 'hidden',
         backgroundColor: 'var(--bg-main)',
       }}
     >
@@ -483,8 +520,8 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
           top: 0,
           left: 0,
           bottom: 0,
-          width: '300px',
-          maxWidth: '85vw',
+          width: '230px',
+          maxWidth: '65vw',
           backgroundColor: 'var(--bg-card)',
           zIndex: 10001,
           transform: mobileSidebarOpen ? 'translateX(0)' : 'translateX(-100%)',
@@ -498,24 +535,24 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
         {/* Drawer Header: Avatar / Staff info + Close Button X */}
         <div
           style={{
-            height: '70px',
+            height: '62px',
             boxSizing: 'border-box',
             borderBottom: '1px solid var(--border-color)',
-            padding: '0 16px',
+            padding: '0 12px',
             background: 'linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%)',
             color: '#FFFFFF',
             position: 'relative',
             display: 'flex',
             alignItems: 'center',
-            gap: '12px',
+            gap: '10px',
             flexShrink: 0,
           }}
         >
           {/* Avatar Picture */}
           <div
             style={{
-              width: '40px',
-              height: '40px',
+              width: '34px',
+              height: '34px',
               borderRadius: '50%',
               backgroundColor: 'rgba(255, 255, 255, 0.25)',
               display: 'flex',
@@ -525,15 +562,15 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
               flexShrink: 0,
             }}
           >
-            <User size={22} color="#FFFFFF" />
+            <User size={18} color="#FFFFFF" />
           </div>
 
           {/* Account Details: Staff Name and Role */}
-          <div style={{ flex: 1, minWidth: 0, paddingRight: '36px' }}>
+          <div style={{ flex: 1, minWidth: 0, paddingRight: '24px' }}>
             <div
               style={{
                 fontWeight: 900,
-                fontSize: '15px',
+                fontSize: '13.5px',
                 letterSpacing: '-0.01em',
                 lineHeight: 1.2,
                 overflow: 'hidden',
@@ -545,7 +582,7 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
             </div>
             <div
               style={{
-                fontSize: '11px',
+                fontSize: '10px',
                 fontWeight: 700,
                 opacity: 0.9,
                 marginTop: '2px',
@@ -566,11 +603,11 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
             onClick={() => setMobileSidebarOpen(false)}
             style={{
               position: 'absolute',
-              right: '12px',
+              right: '8px',
               top: '50%',
               transform: 'translateY(-50%)',
-              width: '32px',
-              height: '32px',
+              width: '28px',
+              height: '28px',
               borderRadius: '50%',
               backgroundColor: 'rgba(255, 255, 255, 0.2)',
               border: 'none',
@@ -582,7 +619,7 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
             }}
             aria-label="Close menu"
           >
-            <X size={17} />
+            <X size={15} />
           </button>
         </div>
 
@@ -597,10 +634,10 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
         <nav
           style={{
             flex: 1,
-            padding: '4px 12px 14px',
+            padding: '4px 8px 12px',
             display: 'flex',
             flexDirection: 'column',
-            gap: '6px',
+            gap: '4px',
             overflowY: 'auto',
           }}
         >
@@ -619,13 +656,13 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
                 style={{
                   display: 'flex',
                   alignItems: 'center',
-                  gap: '12px',
-                  padding: '11px 14px',
+                  gap: '9px',
+                  padding: '9px 11px',
                   borderRadius: 'var(--radius-md)',
                   backgroundColor: active ? 'var(--primary)' : item.actionRequired ? 'rgba(234, 88, 12, 0.08)' : 'var(--bg-card-subtle)',
                   color: active ? '#FFFFFF' : item.actionRequired ? 'var(--text-main)' : 'var(--text-main)',
                   fontWeight: active ? 800 : 650,
-                  fontSize: '13.5px',
+                  fontSize: '12.5px',
                   cursor: 'pointer',
                   border: active
                     ? '1px solid var(--primary)'
@@ -639,7 +676,7 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
                 }}
               >
                 <div style={{ position: 'relative', display: 'flex', alignItems: 'center' }}>
-                  <Icon size={19} color={active ? '#FFFFFF' : item.actionRequired ? '#EA580C' : 'var(--text-main)'} />
+                  <Icon size={17} color={active ? '#FFFFFF' : item.actionRequired ? '#EA580C' : 'var(--text-main)'} />
                   {item.hasDot && (
                     <span
                       style={{
@@ -702,27 +739,27 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
         </nav>
 
         {/* Drawer Footer: Staff Sign Out */}
-        <div style={{ padding: '12px 14px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card)' }}>
+        <div style={{ padding: '8px 10px', borderTop: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card)' }}>
           <button
             type="button"
             onClick={handleStaffSignOut}
             style={{
               display: 'flex',
               alignItems: 'center',
-              gap: '10px',
+              gap: '8px',
               width: '100%',
-              padding: '11px 14px',
+              padding: '8px 10px',
               borderRadius: 'var(--radius-md)',
               backgroundColor: 'var(--bg-card-subtle)',
               border: '1px solid var(--border-color)',
               color: 'var(--text-main)',
-              fontSize: '13px',
+              fontSize: '12px',
               fontWeight: 700,
               cursor: 'pointer',
               justifyContent: 'flex-start',
             }}
           >
-            <LogOut size={16} color="var(--primary)" />
+            <LogOut size={15} color="var(--primary)" />
             <span>Staff Sign Out</span>
           </button>
         </div>
@@ -958,6 +995,7 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
 
       {/* Main Staff Container */}
       <div
+        className="staff-layout-main-wrapper"
         style={{
           flex: 1,
           display: 'flex',
@@ -1276,149 +1314,6 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
                 </div>
               )}
             </div>
-
-            {/* MANAGER & OWNER BRANCH LOCATION ACTION IN PROFILE */}
-            {isManagerOrOwner && (
-              <div
-                style={{
-                  padding: '12px 14px',
-                  borderRadius: '14px',
-                  backgroundColor: 'rgba(124, 58, 237, 0.07)',
-                  border: '1.5px solid rgba(124, 58, 237, 0.25)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '8px',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <div
-                    style={{
-                      width: '30px',
-                      height: '30px',
-                      borderRadius: '8px',
-                      backgroundColor: 'rgba(124, 58, 237, 0.15)',
-                      color: '#7C3AED',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0,
-                    }}
-                  >
-                    <MapPin size={16} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '12.5px', fontWeight: 850, color: '#7C3AED' }}>
-                      Branch Location Management
-                    </div>
-                    <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', fontWeight: 600 }}>
-                      {currentRole === 'platform_owner' || currentUser?.role === 'platform_owner'
-                        ? 'Edit GPS coordinates & addresses for all branches'
-                        : `Edit ${currentBranch.name} GPS location & contact`}
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStaffProfileModalOpen(false);
-                    setStaffStoreMapInEdit(true);
-                    setStaffStoreMapModalOpen(true);
-                  }}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    borderRadius: '8px',
-                    backgroundColor: '#7C3AED',
-                    color: '#FFFFFF',
-                    border: 'none',
-                    fontWeight: 800,
-                    fontSize: '12px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '6px',
-                    boxShadow: '0 3px 10px rgba(124, 58, 237, 0.28)',
-                    transition: 'transform 0.15s ease',
-                  }}
-                >
-                  <Edit size={13} />
-                  <span>Edit Branch Location 📍</span>
-                </button>
-              </div>
-            )}
-
-            {/* MANAGER & OWNER AUTOMATED EMAIL DISPATCHER */}
-            {isManagerOrOwner && (
-              <div
-                style={{
-                  padding: '12px 14px',
-                  borderRadius: '14px',
-                  backgroundColor: 'rgba(234, 88, 12, 0.07)',
-                  border: '1.5px solid rgba(234, 88, 12, 0.25)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '8px',
-                }}
-              >
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <div
-                    style={{
-                      width: '30px',
-                      height: '30px',
-                      borderRadius: '8px',
-                      backgroundColor: 'rgba(234, 88, 12, 0.15)',
-                      color: '#EA580C',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      flexShrink: 0,
-                    }}
-                  >
-                    <Mail size={16} />
-                  </div>
-                  <div>
-                    <div style={{ fontSize: '12.5px', fontWeight: 850, color: '#EA580C' }}>
-                      Automated Customer Mailer
-                    </div>
-                    <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', fontWeight: 600 }}>
-                      {mailServerConfig?.isConfigured
-                        ? `✓ Live Sender: ${mailServerConfig.accountPreview || 'Configured'}`
-                        : 'Not configured (customers get preview codes)'}
-                    </div>
-                  </div>
-                </div>
-
-                <button
-                  type="button"
-                  onClick={() => {
-                    setStaffProfileModalOpen(false);
-                    setStaffMailConfigOpen(true);
-                  }}
-                  style={{
-                    width: '100%',
-                    padding: '8px 12px',
-                    borderRadius: '8px',
-                    backgroundColor: '#EA580C',
-                    color: '#FFFFFF',
-                    border: 'none',
-                    fontWeight: 800,
-                    fontSize: '12px',
-                    cursor: 'pointer',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '6px',
-                    boxShadow: '0 3px 10px rgba(234, 88, 12, 0.28)',
-                    transition: 'transform 0.15s ease',
-                  }}
-                >
-                  <KeyRound size={13} />
-                  <span>Configure Automated Sender ✉️</span>
-                </button>
-              </div>
-            )}
 
             {/* Close Button */}
             <button

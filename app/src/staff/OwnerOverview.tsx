@@ -1,6 +1,6 @@
 'use client';
 
-import React from 'react';
+import React, { useMemo } from 'react';
 import { useApp } from '@/context/AppContext';
 import {
   TrendingUp,
@@ -46,34 +46,45 @@ export const OwnerOverviewScreen: React.FC<{ onNavigate: (v: string) => void }> 
     );
   };
 
-  // 1. ROW 1: TRUE ACTUAL DATA COMPUTED FROM DATABASE
-  const todayOrders = orders.filter(
-    (o) => isToday(o.createdAt) || (o.status !== 'completed' && o.status !== 'cancelled')
-  );
+  // 1. ROW 1: TRUE ACTUAL DATA COMPUTED FROM DATABASE (Memoized for Redux performance)
+  const { todayOrders, totalSalesToday, totalOrdersTodayCount, totalCashCollectedToday, openComplaintsCount } = useMemo(() => {
+    const tOrders = orders.filter(
+      (o) => isToday(o.createdAt) || (o.status !== 'completed' && o.status !== 'cancelled')
+    );
+    const sales = tOrders.reduce(
+      (sum, o) => sum + (o.paymentStatus === 'paid' ? Number(o.total || 0) : 0),
+      0
+    );
+    const cash = shifts
+      .filter((s) => isToday(s.openedAt) || s.status === 'open')
+      .reduce((sum, s) => sum + Number(s.cashCollected || 0), 0);
+    const complaintsCount = complaints.filter(
+      (c) => c.status !== 'closed' && c.status !== 'resolved'
+    ).length;
 
-  const totalSalesToday = todayOrders.reduce(
-    (sum, o) => sum + (o.paymentStatus === 'paid' ? Number(o.total || 0) : 0),
-    0
-  );
-
-  const totalOrdersTodayCount = todayOrders.length;
-
-  const totalCashCollectedToday = shifts
-    .filter((s) => isToday(s.openedAt) || s.status === 'open')
-    .reduce((sum, s) => sum + Number(s.cashCollected || 0), 0);
-
-  const openComplaintsCount = complaints.filter(
-    (c) => c.status !== 'closed' && c.status !== 'resolved'
-  ).length;
+    return {
+      todayOrders: tOrders,
+      totalSalesToday: sales,
+      totalOrdersTodayCount: tOrders.length,
+      totalCashCollectedToday: cash,
+      openComplaintsCount: complaintsCount,
+    };
+  }, [orders, shifts, complaints]);
 
   // 2. ROW 2: TRUE ACTUAL MANAGEMENT AUDIT & ANOMALY ALERTS FROM DATABASE
-  const pendingRefunds = refundRequests.filter((r) => r.status === 'requested');
-  const shiftVariances = shifts.filter((s) => typeof s.difference === 'number' && s.difference !== 0);
-  const busyBranches = branches.filter((b) => b.isBusy);
-  const unassignedComplaints = complaints.filter((c) => c.status === 'new');
-
-  const totalAnomaliesCount =
-    pendingRefunds.length + shiftVariances.length + busyBranches.length + unassignedComplaints.length;
+  const { pendingRefunds, shiftVariances, busyBranches, unassignedComplaints, totalAnomaliesCount } = useMemo(() => {
+    const refunds = refundRequests.filter((r) => r.status === 'requested');
+    const variances = shifts.filter((s) => typeof s.difference === 'number' && s.difference !== 0);
+    const busy = branches.filter((b) => b.isBusy);
+    const unassigned = complaints.filter((c) => c.status === 'new');
+    return {
+      pendingRefunds: refunds,
+      shiftVariances: variances,
+      busyBranches: busy,
+      unassignedComplaints: unassigned,
+      totalAnomaliesCount: refunds.length + variances.length + busy.length + unassigned.length,
+    };
+  }, [refundRequests, shifts, branches, complaints]);
 
   return (
     <div

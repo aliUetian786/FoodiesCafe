@@ -14,6 +14,7 @@ import {
   CornerUpRight,
   ShieldAlert,
   ArrowRight,
+  ArrowLeft,
   ShoppingBag,
   Bike,
   MapPin,
@@ -21,6 +22,7 @@ import {
   Sparkles,
   Search,
   Receipt,
+  Printer,
   Utensils,
   ChevronRight,
   ExternalLink,
@@ -58,6 +60,39 @@ const getNormalizedDate = (timestamp?: string): Date => {
   }
   return new Date();
 };
+
+// Haversine distance calculator in kilometers
+function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371; // Earth's radius in km
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) *
+      Math.cos((lat2 * Math.PI) / 180) *
+      Math.sin(dLon / 2) *
+      Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c * 10) / 10;
+}
+
+function getOrderCoords(order: Order, branchLat: number, branchLng: number): { lat: number; lng: number } {
+  if (order.customerCoordinates?.lat && order.customerCoordinates?.lng) {
+    return { lat: order.customerCoordinates.lat, lng: order.customerCoordinates.lng };
+  }
+  let hash = 0;
+  const str = order.deliveryAddress || order.id || order.orderNumber || '';
+  for (let i = 0; i < str.length; i++) {
+    hash = (hash << 5) - hash + str.charCodeAt(i);
+    hash |= 0;
+  }
+  const latOffset = ((Math.abs(hash) % 40) - 20) * 0.0012;
+  const lngOffset = ((Math.abs(hash >> 3) % 40) - 20) * 0.0012;
+  return {
+    lat: (branchLat || 31.5126) + latOffset,
+    lng: (branchLng || 74.3436) + lngOffset,
+  };
+}
 
 const getDayKey = (timestamp?: string): string => {
   const d = getNormalizedDate(timestamp);
@@ -163,6 +198,17 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
     );
   }, [users, currentBranch.id]);
 
+  const freeRiders = useMemo(() => {
+    return branchRiders.filter((r) => {
+      const isOffline = r.riderAvailability === 'offline';
+      const isBusy = r.riderAvailability === 'busy';
+      const activeCount = orders.filter(
+        (o) => o.assignedRiderId === r.id && o.status !== 'completed' && o.status !== 'cancelled'
+      ).length;
+      return (!r.status || r.status === 'active') && !isOffline && !isBusy && activeCount === 0;
+    });
+  }, [branchRiders, orders]);
+
   const [activeTab, setActiveTab] = useState<'support' | 'takeaway' | 'delivery' | 'dine_in'>(initialTab);
   const [customTimeModalOrderId, setCustomTimeModalOrderId] = useState<string | null>(null);
   const [customMinutesInput, setCustomMinutesInput] = useState<number>(3);
@@ -184,6 +230,156 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
     setCancelModalOrder(null);
   };
 
+  const handlePrintReceipt = (ord: Order) => {
+    const existingIframe = document.getElementById('foodies-print-iframe');
+    if (existingIframe) existingIframe.remove();
+
+    const iframe = document.createElement('iframe');
+    iframe.id = 'foodies-print-iframe';
+    iframe.style.position = 'fixed';
+    iframe.style.right = '0';
+    iframe.style.bottom = '0';
+    iframe.style.width = '0';
+    iframe.style.height = '0';
+    iframe.style.border = '0';
+    iframe.style.visibility = 'hidden';
+    document.body.appendChild(iframe);
+
+    const doc = iframe.contentWindow?.document;
+    if (!doc) {
+      window.print();
+      return;
+    }
+
+    const itemsHtml = ord.items
+      .map(
+        (item) => `
+        <div style="display: flex; justify-content: space-between; font-size: 12.5px; font-weight: 700; margin-bottom: 4px; border-bottom: 1px dotted #CBD5E1; padding-bottom: 3px;">
+          <span>${item.quantity} × ${item.name}${item.size ? ` (${item.size})` : ''}</span>
+          <span>Rs. ${(item.unitPrice * item.quantity).toLocaleString()}</span>
+        </div>
+      `
+      )
+      .join('');
+
+    doc.open();
+    doc.write(`
+      <!DOCTYPE html>
+      <html>
+        <head>
+          <title>Order Paid Slip #${ord.orderNumber}</title>
+          <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+          <style>
+            @page {
+              size: 80mm auto;
+              margin: 0 !important;
+              padding: 0 !important;
+            }
+            * {
+              box-sizing: border-box !important;
+              margin: 0;
+              padding: 0;
+              font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
+              -webkit-print-color-adjust: exact !important;
+              print-color-adjust: exact !important;
+            }
+            html, body {
+              width: 80mm !important;
+              max-width: 80mm !important;
+              margin: 0 !important;
+              padding: 0 !important;
+              background: #FFFFFF !important;
+              color: #000000 !important;
+              height: auto !important;
+              min-height: 0 !important;
+              overflow: visible !important;
+            }
+            .receipt-container {
+              width: 80mm !important;
+              max-width: 80mm !important;
+              margin: 0 !important;
+              padding: 6px 8px 4px 8px !important;
+              border: none !important;
+              border-radius: 0 !important;
+              background: #FFFFFF !important;
+              position: relative !important;
+              overflow: hidden !important;
+              box-shadow: none !important;
+              height: auto !important;
+              min-height: 0 !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
+            }
+          </style>
+        </head>
+        <body>
+          <div class="receipt-container">
+            <!-- 135-degree rotated Cafe Logo Watermark -->
+            <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; pointer-events: none; z-index: 0;">
+              <img src="/logo.png" alt="Logo Watermark" style="width: 80%; height: 80%; object-fit: contain; transform: rotate(135deg); opacity: 0.15; display: block; -webkit-print-color-adjust: exact; print-color-adjust: exact;" />
+            </div>
+            
+            <div style="position: relative; z-index: 1;">
+              <div style="text-align: center; border-bottom: 1.5px dashed #000000; padding-bottom: 5px; margin-bottom: 6px;">
+                <h3 style="font-size: 19px; font-weight: 900; margin: 0; font-family: 'Outfit', sans-serif; letter-spacing: 0.5px;">FOODIES CAFE</h3>
+                <div style="font-size: 11px; font-weight: 600; color: #475569; margin-top: 1px;">${currentBranch.name} · Paid Slip</div>
+                <div style="display: inline-block; font-size: 12.5px; font-weight: 850; color: #EA580C; background: #FFF7ED; padding: 2px 8px; border-radius: 4px; margin-top: 3px; border: 1px solid #FFEDD5;">
+                  ${ord.type.toUpperCase()} ${ord.tableNumber ? `· TABLE ${ord.tableNumber}` : ''}
+                </div>
+              </div>
+
+              <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; color: #334155; font-weight: 600;">
+                <span>Slip: <strong>#${ord.orderNumber}</strong></span>
+                <span>${ord.createdAt}</span>
+              </div>
+              <div style="font-size: 11px; margin-bottom: 5px; color: #334155;">
+                Customer: <strong>${ord.customerName}</strong> (${ord.customerPhone})
+              </div>
+
+              <div style="border-top: 1px solid #CBD5E1; padding-top: 5px; margin-bottom: 6px;">
+                ${itemsHtml}
+              </div>
+
+              <div style="border-top: 1.5px dashed #000000; padding-top: 5px; margin-bottom: 5px; font-size: 12px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 2px; font-weight: 600; color: #475569;">
+                  <span>Subtotal:</span>
+                  <span>Rs. ${Number(ord.originalSubtotal).toLocaleString()}</span>
+                </div>
+                ${ord.addOnSubtotal > 0 ? `
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 2px; color: #EA580C; font-weight: 600;">
+                    <span>Add-ons:</span>
+                    <span>+ Rs. ${Number(ord.addOnSubtotal).toLocaleString()}</span>
+                  </div>
+                ` : ''}
+                <div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: 900; color: #000000; margin-top: 4px; padding-top: 3px; border-top: 1px solid #CBD5E1;">
+                  <span>TOTAL PAID:</span>
+                  <span style="color: #EA580C;">Rs. ${Number(ord.total).toLocaleString()}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; color: #16A34A; margin-top: 3px;">
+                  <span>PAYMENT STATUS:</span>
+                  <span>${ord.paymentStatus === 'paid' ? 'PAID IN FULL ✓' : ord.paymentStatus.toUpperCase()} (${ord.paymentMethod || 'Cash'})</span>
+                </div>
+              </div>
+
+              <div style="text-align: center; font-size: 10px; font-weight: 600; color: #64748B; border-top: 1px dashed #CBD5E1; padding-top: 4px; margin-top: 2px;">
+                Thank you for dining with FoodiesCafe!
+              </div>
+            </div>
+          </div>
+        </body>
+      </html>
+    `);
+    doc.close();
+
+    iframe.contentWindow?.focus();
+    setTimeout(() => {
+      iframe.contentWindow?.print();
+      setTimeout(() => {
+        iframe.remove();
+      }, 2000);
+    }, 300);
+  };
+
   useEffect(() => {
     if (initialTab) {
       setActiveTab(initialTab);
@@ -194,6 +390,61 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
   const branchOrders = useMemo(() => {
     return orders.filter((o) => !o.branchId || o.branchId === currentBranch.id);
   }, [orders, currentBranch.id]);
+
+  // Track delivery orders that Customer Support has explicitly unassigned so auto-selection does not re-force
+  const manuallyUnassignedOrdersRef = useRef<Set<string>>(new Set());
+
+  // Automatically select and assign the nearest available rider for any active delivery order without a rider
+  useEffect(() => {
+    const bLat = currentBranch.latitude || 31.5126;
+    const bLng = currentBranch.longitude || 74.3436;
+
+    const unassignedDeliveryOrders = branchOrders.filter(
+      (o) =>
+        o.type === 'delivery' &&
+        !o.assignedRiderId &&
+        o.status !== 'completed' &&
+        o.status !== 'cancelled' &&
+        !manuallyUnassignedOrdersRef.current.has(o.id)
+    );
+
+    if (unassignedDeliveryOrders.length === 0) return;
+
+    unassignedDeliveryOrders.forEach((ord) => {
+      const targetCoords = getOrderCoords(ord, bLat, bLng);
+      const candidates = branchRiders
+        .filter((r) => (!r.status || r.status === 'active') && r.riderAvailability !== 'busy' && r.riderAvailability !== 'offline')
+        .map((r) => {
+          const riderActiveOrders = orders.filter(
+            (o) => o.assignedRiderId === r.id && o.id !== ord.id && o.status !== 'completed' && o.status !== 'cancelled'
+          );
+          let minDist = calculateDistanceKm(bLat, bLng, targetCoords.lat, targetCoords.lng);
+          riderActiveOrders.forEach((actOrd) => {
+            const actCoords = getOrderCoords(actOrd, bLat, bLng);
+            const d = calculateDistanceKm(actCoords.lat, actCoords.lng, targetCoords.lat, targetCoords.lng);
+            if (d < minDist) {
+              minDist = d;
+            }
+          });
+          return {
+            rider: r,
+            distanceKm: minDist,
+            activeCount: riderActiveOrders.length,
+          };
+        })
+        .sort((a, b) => {
+          if (Math.abs(a.distanceKm - b.distanceKm) > 0.05) {
+            return a.distanceKm - b.distanceKm;
+          }
+          return a.activeCount - b.activeCount;
+        });
+
+      const best = candidates[0];
+      if (best) {
+        assignRiderToOrder(ord.id, best.rider.id, true);
+      }
+    });
+  }, [branchOrders, branchRiders, currentBranch.latitude, currentBranch.longitude, orders, assignRiderToOrder]);
 
   // Orders routed directly to Customer Services awaiting kitchen dispatch (excluding cancelled)
   const ordersAwaitingKitchen = useMemo(() => {
@@ -277,11 +528,45 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
   // ORDER LOOKUP & FILTER SEARCH STATES
   // ==========================================
   const [takeawayStatusTab, setTakeawayStatusTab] = useState<'all' | 'arrived' | 'preparing' | 'ready' | 'completed'>('all');
+  const [takeawayFilterOption, setTakeawayFilterOption] = useState<string>('all');
   const [takeawaySearch, setTakeawaySearch] = useState('');
+
+  const handleTakeawayFilterChange = (val: string) => {
+    setTakeawayFilterOption(val);
+    if (val === 'ready_pickup' || val === 'ready') {
+      setTakeawayStatusTab('ready');
+    } else if (val === 'arrived_badge' || val === 'arrived') {
+      setTakeawayStatusTab('arrived');
+    } else if (val === 'preparing') {
+      setTakeawayStatusTab('preparing');
+    } else if (val === 'completed') {
+      setTakeawayStatusTab('completed');
+    } else {
+      setTakeawayStatusTab('all');
+    }
+  };
   const [deliveryStatusTab, setDeliveryStatusTab] = useState<'all' | 'arrived' | 'preparing' | 'ready' | 'out' | 'completed'>('all');
   const [deliverySearch, setDeliverySearch] = useState('');
+  const [shippingFilterOption, setShippingFilterOption] = useState<'ready_ship' | 'arrived'>('ready_ship');
+  const [selectedFreeRiderId, setSelectedFreeRiderId] = useState<string>('');
   const [dineInStatusTab, setDineInStatusTab] = useState<'all' | 'arrived' | 'preparing' | 'ready' | 'completed'>('all');
+  const [dineInFilterOption, setDineInFilterOption] = useState<string>('all');
   const [dineInSearch, setDineInSearch] = useState('');
+
+  const handleDineInFilterChange = (val: string) => {
+    setDineInFilterOption(val);
+    if (val === 'ready_served' || val === 'ready') {
+      setDineInStatusTab('ready');
+    } else if (val === 'arrived_badge' || val === 'arrived') {
+      setDineInStatusTab('arrived');
+    } else if (val === 'preparing') {
+      setDineInStatusTab('preparing');
+    } else if (val === 'completed') {
+      setDineInStatusTab('completed');
+    } else {
+      setDineInStatusTab('all');
+    }
+  };
 
   const getOrderStatusBadge = (status: string, type: string) => {
     switch (status) {
@@ -317,6 +602,8 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
   const [readCustomerKeys, setReadCustomerKeys] = useState<Set<string>>(new Set());
   const [readCustomerTimestamps, setReadCustomerTimestamps] = useState<Record<string, number>>({});
   const [targetScrollMessageId, setTargetScrollMessageId] = useState<string | null>(null);
+  const [mobileSupportView, setMobileSupportView] = useState<'list' | 'chat'>('list');
+  const [showOrderHistoryModal, setShowOrderHistoryModal] = useState<boolean>(false);
 
   // Build a distinct, unified customer list from complaints, orders, and registered customers
   interface UnifiedCustomer {
@@ -601,6 +888,7 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
   // Handle clicking customer from list
   const handleSelectCustomer = (cust: UnifiedCustomer) => {
     setSelectedCustomerKey(cust.key);
+    setMobileSupportView('chat');
 
     const isMarkedRead =
       readCustomerKeys.has(cust.key) ||
@@ -703,6 +991,58 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
   const renderOrderCard = (ord: Order) => {
     const statusInfo = getOrderStatusBadge(ord.status, ord.type);
     const isAwaitingKitchen = !ord.sentToKitchen && (ord.status === 'placed' || ord.status === 'accepted');
+
+    const bLat = currentBranch.latitude || 31.5126;
+    const bLng = currentBranch.longitude || 74.3436;
+    const targetCoords = ord.type === 'delivery' ? getOrderCoords(ord, bLat, bLng) : null;
+
+    // Find nearest available candidate rider for this delivery order
+    const availableRidersWithDist =
+      ord.type === 'delivery' && targetCoords
+        ? branchRiders
+            .filter(
+              (r) =>
+                (!r.status || r.status === 'active') &&
+                r.riderAvailability !== 'busy' &&
+                r.riderAvailability !== 'offline'
+            )
+            .map((r) => {
+              const riderActiveOrders = orders.filter(
+                (o) =>
+                  o.assignedRiderId === r.id &&
+                  o.id !== ord.id &&
+                  o.status !== 'completed' &&
+                  o.status !== 'cancelled'
+              );
+              let minDist = calculateDistanceKm(bLat, bLng, targetCoords.lat, targetCoords.lng);
+              let nearestStopRef = 'Branch';
+              riderActiveOrders.forEach((actOrd) => {
+                const actCoords = getOrderCoords(actOrd, bLat, bLng);
+                const d = calculateDistanceKm(actCoords.lat, actCoords.lng, targetCoords.lat, targetCoords.lng);
+                if (d < minDist) {
+                  minDist = d;
+                  nearestStopRef = `Order #${actOrd.orderNumber}`;
+                }
+              });
+              return {
+                rider: r,
+                distanceKm: minDist,
+                activeCount: riderActiveOrders.length,
+                nearestStopRef,
+              };
+            })
+            .sort((a, b) => {
+              if (Math.abs(a.distanceKm - b.distanceKm) > 0.05) {
+                return a.distanceKm - b.distanceKm;
+              }
+              return a.activeCount - b.activeCount;
+            })
+        : [];
+
+    const nearestCandidate = availableRidersWithDist[0] || null;
+    const isManuallyUnassigned = manuallyUnassignedOrdersRef.current.has(ord.id);
+    const effectiveRiderId =
+      ord.assignedRiderId || (!isManuallyUnassigned && nearestCandidate ? nearestCandidate.rider.id : '');
 
     return (
       <div
@@ -817,35 +1157,52 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '4px', fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary)', flexShrink: 0 }}>
-              <Bike size={13} color={ord.assignedRiderId ? '#EA580C' : '#2563EB'} />
+              <Bike size={13} color={effectiveRiderId ? '#EA580C' : '#94A3B8'} />
               <span>Rider:</span>
             </div>
 
-            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', maxWidth: '235px', minWidth: 0, width: '100%' }}>
+            <div style={{ position: 'relative', display: 'inline-flex', alignItems: 'center', maxWidth: '280px', minWidth: 0, width: '100%' }}>
               <select
-                value={ord.assignedRiderId || ''}
+                value={effectiveRiderId}
                 onChange={(e) => {
                   const rId = e.target.value;
                   if (rId) {
                     const chosen = users.find((u) => u.id === rId);
-                    if (chosen?.riderAvailability === 'busy' && rId !== ord.assignedRiderId) {
+                    if (chosen?.riderAvailability === 'busy' && rId !== effectiveRiderId) {
                       addToast({
                         type: 'warning',
                         title: 'Rider is Busy',
-                        message: `${chosen.name} has already departed on delivery and cannot be assigned more orders until return.`,
+                        message: `${chosen.name} has already departed on delivery and cannot accept more orders until return.`,
                       });
                       return;
                     }
+                    if (chosen?.riderAvailability === 'offline' && rId !== effectiveRiderId) {
+                      addToast({
+                        type: 'warning',
+                        title: 'Rider is Offline',
+                        message: `${chosen.name} is currently off duty / shift offline.`,
+                      });
+                      return;
+                    }
+                    manuallyUnassignedOrdersRef.current.delete(ord.id);
                     assignRiderToOrder(ord.id, rId);
                   } else {
+                    manuallyUnassignedOrdersRef.current.add(ord.id);
                     unassignRiderFromOrder(ord.id);
+                    addToast({
+                      type: 'info',
+                      title: 'Rider Unassigned',
+                      message: `Rider unassigned from Order #${ord.orderNumber}. Select a rider before dispatching.`,
+                    });
                   }
                 }}
                 disabled={ord.status === 'out_for_delivery' && Boolean(ord.assignedRiderId)}
                 title={
                   ord.status === 'out_for_delivery' && ord.assignedRiderId
                     ? `${ord.assignedRiderName || 'Rider'} has already departed on this delivery.`
-                    : 'Assign rider to order'
+                    : effectiveRiderId
+                    ? 'Rider assigned (nearest available auto-selected; click to reassign)'
+                    : 'Assign nearest rider to order'
                 }
                 style={{
                   width: '100%',
@@ -853,9 +1210,9 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
                   fontWeight: 800,
                   padding: '4px 8px 4px 22px',
                   borderRadius: '7px',
-                  backgroundColor: ord.assignedRiderId ? '#FFF7ED' : '#EFF6FF',
-                  color: ord.assignedRiderId ? '#C2410C' : '#1D4ED8',
-                  border: `1px solid ${ord.assignedRiderId ? '#FFEDD5' : '#BFDBFE'}`,
+                  backgroundColor: effectiveRiderId ? '#FFF7ED' : '#F8FAFC',
+                  color: effectiveRiderId ? '#C2410C' : '#64748B',
+                  border: `1px solid ${effectiveRiderId ? '#FFEDD5' : '#CBD5E1'}`,
                   cursor: ord.status === 'out_for_delivery' && ord.assignedRiderId ? 'not-allowed' : 'pointer',
                   outline: 'none',
                   textOverflow: 'ellipsis',
@@ -865,37 +1222,90 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
                 }}
               >
                 <option value="">
-                  {ord.assignedRiderId ? '✕ Unassign Rider' : '+ Assign Rider'}
+                  {effectiveRiderId
+                    ? '✕ Unassign Rider'
+                    : branchRiders.length === 0
+                    ? 'No Riders in Branch'
+                    : '+ Select / Assign Rider'}
                 </option>
                 {(() => {
                   const options = [...branchRiders];
-                  if (ord.assignedRiderId && !options.some((r) => r.id === ord.assignedRiderId)) {
-                    const ex = users.find((u) => u.id === ord.assignedRiderId);
+                  if (effectiveRiderId && !options.some((r) => r.id === effectiveRiderId)) {
+                    const ex = users.find((u) => u.id === effectiveRiderId);
                     if (ex) options.push(ex);
                     else if (ord.assignedRiderName) {
-                      options.push({ id: ord.assignedRiderId, name: ord.assignedRiderName } as any);
+                      options.push({ id: effectiveRiderId, name: ord.assignedRiderName } as any);
                     }
                   }
-                  return options.map((r) => {
-                    const isAvail = r.riderAvailability !== 'busy' && r.riderAvailability !== 'offline';
-                    const isCurrent = r.id === ord.assignedRiderId;
+
+                  // Calculate approximate distance for each rider to this order
+                  const ridersWithDist = options.map((r) => {
+                    const isCurrent = r.id === effectiveRiderId;
+                    const isNearest = nearestCandidate?.rider.id === r.id;
                     const isBusy = r.riderAvailability === 'busy';
                     const isOffline = r.riderAvailability === 'offline';
 
-                    // Count how many active orders this rider has assigned
+                    // All active orders of this rider (excluding this specific order)
+                    const riderActiveOrders = orders.filter(
+                      (o) => o.assignedRiderId === r.id && o.id !== ord.id && o.status !== 'completed' && o.status !== 'cancelled'
+                    );
                     const riderActiveCount = orders.filter(
                       (o) => o.assignedRiderId === r.id && o.status !== 'completed' && o.status !== 'cancelled'
                     ).length;
 
-                    let label = r.name;
+                    // Compute minimum distance to this order's destination
+                    let minDist = calculateDistanceKm(bLat, bLng, targetCoords ? targetCoords.lat : bLat, targetCoords ? targetCoords.lng : bLng);
+                    let nearestStopRef = 'Branch';
+
+                    if (targetCoords) {
+                      riderActiveOrders.forEach((actOrd) => {
+                        const actCoords = getOrderCoords(actOrd, bLat, bLng);
+                        const d = calculateDistanceKm(actCoords.lat, actCoords.lng, targetCoords.lat, targetCoords.lng);
+                        if (d < minDist) {
+                          minDist = d;
+                          nearestStopRef = `Order #${actOrd.orderNumber}`;
+                        }
+                      });
+                    }
+
+                    return {
+                      rider: r,
+                      isCurrent,
+                      isNearest,
+                      isBusy,
+                      isOffline,
+                      riderActiveCount,
+                      distanceKm: minDist,
+                      nearestStopRef,
+                    };
+                  });
+
+                  // SORT: Current/selected rider first, then sort by distanceKm ASCENDING (nearest appears first!)
+                  ridersWithDist.sort((a, b) => {
+                    if (a.isCurrent) return -1;
+                    if (b.isCurrent) return 1;
+                    return a.distanceKm - b.distanceKm;
+                  });
+
+                  return ridersWithDist.map(({ rider: r, isCurrent, isNearest, isBusy, isOffline, riderActiveCount, distanceKm, nearestStopRef }) => {
+                    let distText = `~${distanceKm} km`;
+                    if (nearestStopRef !== 'Branch') {
+                      distText += ` near ${nearestStopRef}`;
+                    }
+
+                    let label = `${r.name} • ${distText}`;
                     if (isCurrent) {
-                      label += isBusy ? ' (Assigned • En Route)' : ` (Assigned • ${riderActiveCount} Total)`;
+                      label += isBusy ? ' (Assigned • Busy)' : ` (Selected • ${riderActiveCount} Total)`;
                     } else if (isBusy) {
                       label += ' (Busy - On Delivery)';
                     } else if (isOffline) {
                       label += ' (Offline)';
                     } else {
-                      label += riderActiveCount > 0 ? ` (Ready • ${riderActiveCount} Orders)` : ' (Ready)';
+                      label += riderActiveCount > 0 ? ` (Free • ${riderActiveCount} Active)` : ' (Free • Ready)';
+                    }
+
+                    if (isNearest && !isBusy && !isOffline) {
+                      label += ' 📍 (Nearest)';
                     }
 
                     return (
@@ -912,7 +1322,7 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
               </select>
               <Bike
                 size={11}
-                color={ord.assignedRiderId ? '#EA580C' : '#2563EB'}
+                color={effectiveRiderId ? '#EA580C' : '#94A3B8'}
                 style={{ position: 'absolute', left: '6px', pointerEvents: 'none' }}
               />
             </div>
@@ -1060,10 +1470,9 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      updateOrderStatus(ord.id, 'completed');
-                      addToast({
+                      updateOrderStatus(ord.id, 'completed', undefined, {
                         type: 'success',
-                        title: 'Takeaway Handed Over',
+                        title: 'Takeaway Handed Over ✓',
                         message: `Order #${ord.orderNumber} handed to ${ord.customerName}.`,
                       });
                     }}
@@ -1085,30 +1494,49 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
                 {ord.type === 'delivery' && ord.status === 'ready' && (
                   <button
                     type="button"
+                    disabled={!effectiveRiderId}
                     onClick={() => {
-                      updateOrderStatus(ord.id, 'out_for_delivery');
-                      addToast({
+                      if (!effectiveRiderId) {
+                        addToast({
+                          type: 'warning',
+                          title: 'Rider Required',
+                          message: 'Please assign an available rider before dispatching this delivery.',
+                        });
+                        return;
+                      }
+                      if (!ord.assignedRiderId && effectiveRiderId) {
+                        assignRiderToOrder(ord.id, effectiveRiderId, true);
+                      }
+                      const rObj = users.find((u) => u.id === effectiveRiderId);
+                      updateOrderStatus(ord.id, 'out_for_delivery', undefined, {
                         type: 'info',
-                        title: 'Order Dispatched',
-                        message: `Order #${ord.orderNumber} is now out for delivery with rider.`,
+                        title: 'Order Dispatched 🛵',
+                        message: `Order #${ord.orderNumber} is now out for delivery with ${rObj?.name || ord.assignedRiderName || 'rider'}.`,
                       });
                     }}
+                    title={
+                      !effectiveRiderId
+                        ? 'Cannot dispatch: Please select an available rider first'
+                        : `Dispatch Order #${ord.orderNumber} with ${ord.assignedRiderName || users.find((u) => u.id === effectiveRiderId)?.name || 'rider'}`
+                    }
                     style={{
                       padding: '5px 10px',
                       borderRadius: 'var(--radius-md)',
-                      backgroundColor: '#EA580C',
-                      color: '#FFFFFF',
+                      backgroundColor: effectiveRiderId ? '#EA580C' : '#E2E8F0',
+                      color: effectiveRiderId ? '#FFFFFF' : '#94A3B8',
                       fontWeight: 800,
                       fontSize: '11px',
-                      cursor: 'pointer',
-                      border: 'none',
+                      cursor: effectiveRiderId ? 'pointer' : 'not-allowed',
+                      border: effectiveRiderId ? 'none' : '1px solid #CBD5E1',
                       display: 'flex',
                       alignItems: 'center',
                       gap: '4px',
+                      opacity: effectiveRiderId ? 1 : 0.65,
+                      transition: 'all 0.15s ease',
                     }}
                   >
-                    <Send size={11} />
-                    <span>Dispatch Rider →</span>
+                    <Send size={11} color={effectiveRiderId ? '#FFFFFF' : '#94A3B8'} />
+                    <span style={{ color: effectiveRiderId ? '#FFFFFF' : '#94A3B8' }}>Dispatch Rider →</span>
                   </button>
                 )}
 
@@ -1116,10 +1544,9 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      updateOrderStatus(ord.id, 'completed');
-                      addToast({
+                      updateOrderStatus(ord.id, 'completed', undefined, {
                         type: 'success',
-                        title: 'Delivered',
+                        title: 'Delivered ✓',
                         message: `Order #${ord.orderNumber} marked as delivered.`,
                       });
                     }}
@@ -1142,10 +1569,9 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
                   <button
                     type="button"
                     onClick={() => {
-                      updateOrderStatus(ord.id, 'completed');
-                      addToast({
+                      updateOrderStatus(ord.id, 'completed', undefined, {
                         type: 'success',
-                        title: 'Table Completed',
+                        title: 'Table Completed ✓',
                         message: `Table ${ord.tableNumber || ''} Order #${ord.orderNumber} marked completed.`,
                       });
                     }}
@@ -1200,6 +1626,7 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
       {/* ========================================================================= */}
       {activeTab === 'support' && (
         <div
+          className="rep-support-workspace"
           style={{
             flex: 1,
             height: '100%',
@@ -1220,6 +1647,7 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
           {/* CARD 1 (LEFT): CUSTOMERS LIST                                         */}
           {/* ===================================================================== */}
           <div
+            className={`rep-card-customers ${mobileSupportView === 'list' ? 'rep-mobile-show' : 'rep-mobile-hide'}`}
             style={{
               display: 'flex',
               flexDirection: 'column',
@@ -1568,6 +1996,7 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
           {/* CATEGORY 2 (CENTER): DIRECT 1-ON-1 LIVE CHAT                           */}
           {/* ===================================================================== */}
           <div
+            className={`rep-card-chat ${mobileSupportView === 'chat' ? 'rep-mobile-show' : 'rep-mobile-hide'}`}
             style={{
               display: 'flex',
               flexDirection: 'column',
@@ -1585,16 +2014,42 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
                 <div
                   style={{
                     flexShrink: 0,
-                    padding: '14px 20px',
+                    padding: '12px 16px',
                     borderBottom: '1px solid var(--border-color)',
                     backgroundColor: '#FFFFFF',
                     display: 'flex',
                     justifyContent: 'space-between',
                     alignItems: 'center',
-                    gap: '12px',
+                    gap: '10px',
+                    flexWrap: 'wrap',
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', minWidth: 0 }}>
+                    {/* Mobile Back Button to return to Customer List */}
+                    <button
+                      type="button"
+                      className="rep-mobile-back-btn"
+                      onClick={() => setMobileSupportView('list')}
+                      title="Back to Customers List"
+                      aria-label="Back to Customers List"
+                      style={{
+                        padding: '6px 10px',
+                        borderRadius: '6px',
+                        backgroundColor: 'var(--bg-card-subtle)',
+                        border: '1px solid var(--border-color)',
+                        color: 'var(--text-main)',
+                        fontWeight: 700,
+                        fontSize: '12px',
+                        cursor: 'pointer',
+                        alignItems: 'center',
+                        gap: '4px',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <ArrowLeft size={14} />
+                      <span>Back</span>
+                    </button>
+
                     <div
                       style={{
                         width: '36px',
@@ -1607,13 +2062,14 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
                         justifyContent: 'center',
                         fontWeight: 800,
                         fontSize: '13px',
+                        flexShrink: 0,
                       }}
                     >
                       <User size={18} />
                     </div>
-                    <div>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                        <span style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-main)' }}>
+                    <div style={{ minWidth: 0 }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        <span style={{ fontSize: '14.5px', fontWeight: 800, color: 'var(--text-main)' }}>
                           {activeCustomer.name}
                         </span>
                         <a
@@ -1632,7 +2088,7 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
                           {activeCustomer.phone}
                         </a>
                       </div>
-                      <span style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
+                      <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', display: 'block', textOverflow: 'ellipsis', overflow: 'hidden', whiteSpace: 'nowrap' }}>
                         {activeTicket
                           ? `Inquiry #${activeTicket.ticketNumber} · ${activeTicket.subject}`
                           : 'Direct Customer Channel · Ready for inquiries'}
@@ -1640,8 +2096,32 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
                     </div>
                   </div>
 
-                  {/* Actions */}
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  {/* Actions (Top Line: Order History, Escalate, Resolve) */}
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                    {/* Order History Option in Top Line */}
+                    <button
+                      type="button"
+                      onClick={() => setShowOrderHistoryModal(true)}
+                      style={{
+                        padding: '6px 11px',
+                        borderRadius: '6px',
+                        backgroundColor: 'var(--primary-light)',
+                        border: '1px solid var(--primary-subtle)',
+                        fontSize: '11.5px',
+                        fontWeight: 700,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        color: 'var(--primary)',
+                        transition: 'all 0.15s ease',
+                      }}
+                      title="View Customer Order History in Pop-up"
+                    >
+                      <Receipt size={13} />
+                      <span>Order History ({customerOrders.length})</span>
+                    </button>
+
                     {activeTicket && (
                       <>
                         <button
@@ -2087,6 +2567,7 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
           {/* CATEGORY 3 (RIGHT): DIRECT ORDER HISTORY OF THIS SPECIFIC USER         */}
           {/* ===================================================================== */}
           <div
+            className="rep-card-orders rep-desktop-only"
             style={{
               display: 'flex',
               flexDirection: 'column',
@@ -2353,121 +2834,91 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
             overflow: 'hidden',
           }}
         >
-          {/* Static Top Header & Filters */}
+          {/* Static Top Header & Filters (Single Row) */}
           <div
             style={{
-              flexShrink: 0,
-              padding: '16px 20px 12px',
+              padding: '12px 20px',
               borderBottom: '1px solid var(--border-color)',
               backgroundColor: '#FFFFFF',
               display: 'flex',
-              flexDirection: 'column',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
               gap: '12px',
+              flexShrink: 0,
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {/* Left group: Icon, Takeaway Orders title & Dropdown */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div
                   style={{
-                    width: '40px',
-                    height: '40px',
+                    width: '38px',
+                    height: '38px',
                     borderRadius: '10px',
                     backgroundColor: 'var(--primary-light)',
                     color: 'var(--primary)',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
+                    flexShrink: 0,
                   }}
                 >
-                  <ShoppingBag size={22} />
+                  <ShoppingBag size={20} />
                 </div>
-                <div>
-                  <h2 style={{ fontSize: '17px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-                    Takeaway Orders — Counter Handover Hub
-                  </h2>
-                  <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '2px 0 0' }}>
-                    Incoming takeaway requests: click order to view details or dispatch to kitchen
-                  </p>
-                </div>
+                <h2 style={{ fontSize: '17px', fontWeight: 800, margin: 0, color: 'var(--text-main)', whiteSpace: 'nowrap' }}>
+                  Takeaway Orders
+                </h2>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span
-                  style={{
-                    fontSize: '11.5px',
-                    fontWeight: 800,
-                    padding: '5px 12px',
-                    borderRadius: 'var(--radius-full)',
-                    backgroundColor: readyTakeawayOrders.length > 0 ? '#16A34A' : 'var(--bg-card-subtle)',
-                    color: readyTakeawayOrders.length > 0 ? '#FFFFFF' : 'var(--text-muted)',
-                  }}
-                >
-                  {readyTakeawayOrders.length} Ready for Pickup
-                </span>
-                <span
-                  style={{
-                    fontSize: '11.5px',
-                    fontWeight: 800,
-                    padding: '5px 12px',
-                    borderRadius: 'var(--radius-full)',
-                    backgroundColor: arrivedTakeawayOrders.length > 0 ? '#FEF3C7' : 'var(--bg-card-subtle)',
-                    color: arrivedTakeawayOrders.length > 0 ? '#92400E' : 'var(--text-muted)',
-                  }}
-                >
-                  {arrivedTakeawayOrders.length} Arrived
-                </span>
-              </div>
+              {/* Status / Filter Dropdown with all features */}
+              <select
+                id="takeaway-orders-filter-dropdown"
+                value={takeawayFilterOption}
+                onChange={(e) => handleTakeawayFilterChange(e.target.value)}
+                style={{
+                  padding: '7px 12px',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-color)',
+                  backgroundColor: 'var(--bg-card-subtle)',
+                  color: 'var(--text-main)',
+                  fontSize: '12.5px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  outline: 'none',
+                  boxShadow: 'var(--shadow-xs)',
+                  minWidth: '160px',
+                }}
+              >
+                <option value="ready_pickup">{readyTakeawayOrders.length} Ready for Pickup</option>
+                <option value="arrived_badge">{arrivedTakeawayOrders.length} Arrived</option>
+                <option value="all">All ({allTakeawayOrders.length})</option>
+                <option value="arrived">Arrived ({arrivedTakeawayOrders.length})</option>
+                <option value="preparing">In Kitchen ({preparingTakeawayOrders.length})</option>
+                <option value="ready">Ready ({readyTakeawayOrders.length})</option>
+                <option value="completed">Completed ({completedTakeawayOrders.length})</option>
+              </select>
             </div>
 
-            {/* Filter Pills & Search */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                {[
-                  { id: 'all', label: `All (${allTakeawayOrders.length})` },
-                  { id: 'arrived', label: `Arrived (${arrivedTakeawayOrders.length})` },
-                  { id: 'preparing', label: `In Kitchen (${preparingTakeawayOrders.length})` },
-                  { id: 'ready', label: `Ready (${readyTakeawayOrders.length})` },
-                  { id: 'completed', label: `Completed (${completedTakeawayOrders.length})` },
-                ].map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setTakeawayStatusTab(tab.id as any)}
-                    style={{
-                      padding: '5px 12px',
-                      borderRadius: 'var(--radius-full)',
-                      backgroundColor: takeawayStatusTab === tab.id ? 'var(--primary)' : 'var(--bg-card-subtle)',
-                      color: takeawayStatusTab === tab.id ? '#FFFFFF' : 'var(--text-secondary)',
-                      border: '1px solid var(--border-color)',
-                      fontSize: '12px',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-
-              <div style={{ position: 'relative', width: '260px' }}>
-                <Search size={14} color="var(--text-muted)" style={{ position: 'absolute', left: '10px', top: '9px' }} />
-                <input
-                  type="text"
-                  value={takeawaySearch}
-                  onChange={(e) => setTakeawaySearch(e.target.value)}
-                  placeholder="Search order #, customer..."
-                  style={{
-                    width: '100%',
-                    padding: '6px 12px 6px 30px',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'var(--bg-input)',
-                    color: 'var(--text-main)',
-                    fontSize: '12px',
-                    outline: 'none',
-                  }}
-                />
-              </div>
+            {/* Right side: Fixed to Right Wall Search Option */}
+            <div style={{ position: 'relative', width: '260px', marginLeft: 'auto' }}>
+              <Search size={14} color="var(--text-muted)" style={{ position: 'absolute', left: '10px', top: '9px' }} />
+              <input
+                type="text"
+                value={takeawaySearch}
+                onChange={(e) => setTakeawaySearch(e.target.value)}
+                placeholder="Search order #, customer..."
+                style={{
+                  width: '100%',
+                  padding: '6px 12px 6px 30px',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-color)',
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-main)',
+                  fontSize: '12px',
+                  outline: 'none',
+                }}
+              />
             </div>
           </div>
 
@@ -2613,187 +3064,158 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
             overflow: 'hidden',
           }}
         >
-          {/* Header */}
+          {/* Header: Clean Single Row with Title, 3 Dropdowns, and Right-Wall Fixed Search */}
           <div
             style={{
-              padding: '16px 20px 14px',
+              padding: '12px 20px',
               borderBottom: '1px solid var(--border-color)',
               display: 'flex',
-              flexDirection: 'column',
-              gap: '12px',
+              alignItems: 'center',
+              flexWrap: 'wrap',
+              gap: '10px',
               backgroundColor: '#FFFFFF',
               flexShrink: 0,
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-                <div
-                  style={{
-                    width: '38px',
-                    height: '38px',
-                    borderRadius: '10px',
-                    backgroundColor: '#FFEDD5',
-                    color: '#EA580C',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                  }}
-                >
-                  <Bike size={22} />
-                </div>
-                <div>
-                  <h2 style={{ fontSize: '17px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-                    Delivery Orders — Rider Shipping & Dispatch
-                  </h2>
-                  <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '2px 0 0' }}>
-                    Incoming delivery requests: click order to view details or dispatch to kitchen / rider
-                  </p>
-                </div>
+            {/* Left group: Icon and Title */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexShrink: 0 }}>
+              <div
+                style={{
+                  width: '36px',
+                  height: '36px',
+                  borderRadius: '10px',
+                  backgroundColor: '#FFEDD5',
+                  color: '#EA580C',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  flexShrink: 0,
+                }}
+              >
+                <Bike size={20} />
               </div>
-
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span
-                  style={{
-                    fontSize: '11.5px',
-                    fontWeight: 800,
-                    padding: '5px 12px',
-                    borderRadius: 'var(--radius-full)',
-                    backgroundColor: readyDeliveryOrders.length > 0 ? '#16A34A' : 'var(--bg-card-subtle)',
-                    color: readyDeliveryOrders.length > 0 ? '#FFFFFF' : 'var(--text-muted)',
-                  }}
-                >
-                  {readyDeliveryOrders.length} Ready to Ship
-                </span>
-                <span
-                  style={{
-                    fontSize: '11.5px',
-                    fontWeight: 800,
-                    padding: '5px 12px',
-                    borderRadius: 'var(--radius-full)',
-                    backgroundColor: arrivedDeliveryOrders.length > 0 ? '#FEF3C7' : 'var(--bg-card-subtle)',
-                    color: arrivedDeliveryOrders.length > 0 ? '#92400E' : 'var(--text-muted)',
-                  }}
-                >
-                  {arrivedDeliveryOrders.length} Arrived
-                </span>
-              </div>
+              <h2 style={{ fontSize: '17px', fontWeight: 800, margin: 0, color: 'var(--text-main)', whiteSpace: 'nowrap' }}>
+                Delivery Orders
+              </h2>
             </div>
 
-            {/* AVAILABLE DELIVERY RIDERS FLEET OVERVIEW */}
-            <div
+            {/* Dropdown 1: All, Arrived, In Kitchen, Ready, Out with Rider, Delivered */}
+            <select
+              id="delivery-orders-filter-dropdown"
+              value={deliveryStatusTab}
+              onChange={(e) => setDeliveryStatusTab(e.target.value as any)}
               style={{
-                backgroundColor: 'var(--bg-card-subtle)',
-                borderRadius: '12px',
+                padding: '7px 12px',
+                borderRadius: 'var(--radius-md)',
                 border: '1px solid var(--border-color)',
-                padding: '8px 12px',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                flexWrap: 'wrap',
-                gap: '8px',
+                backgroundColor: 'var(--bg-card-subtle)',
+                color: 'var(--text-main)',
+                fontSize: '12.5px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                outline: 'none',
+                boxShadow: 'var(--shadow-xs)',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                <Bike size={15} color="#EA580C" />
-                <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-main)' }}>
-                  Available Delivery Fleet ({branchRiders.length} Riders):
-                </span>
-              </div>
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                {branchRiders.map((r) => {
-                  const isAvailable = r.riderAvailability !== 'busy' && r.riderAvailability !== 'offline';
-                  const activeCount = orders.filter(
-                    (o) => o.assignedRiderId === r.id && o.status !== 'completed' && o.status !== 'cancelled'
-                  ).length;
-                  const statusText = isAvailable
-                    ? activeCount > 0
-                      ? `Ready • ${activeCount} Orders`
-                      : 'Ready'
-                    : r.riderAvailability === 'busy'
-                    ? `Busy • On Delivery (${activeCount})`
-                    : 'Offline';
+              <option value="all">All ({allDeliveryOrders.length})</option>
+              <option value="arrived">Arrived ({arrivedDeliveryOrders.length})</option>
+              <option value="preparing">In Kitchen ({preparingDeliveryOrders.length})</option>
+              <option value="ready">Ready ({readyDeliveryOrders.length})</option>
+              <option value="out">Out with Rider ({outDeliveryOrders.length})</option>
+              <option value="completed">Delivered ({completedDeliveryOrders.length})</option>
+            </select>
 
-                  return (
-                    <span
-                      key={r.id}
-                      style={{
-                        padding: '2px 8px',
-                        borderRadius: '16px',
-                        fontSize: '11px',
-                        fontWeight: 750,
-                        backgroundColor: isAvailable ? '#DCFCE7' : r.riderAvailability === 'busy' ? '#FEF3C7' : '#F1F5F9',
-                        color: isAvailable ? '#15803D' : r.riderAvailability === 'busy' ? '#B45309' : '#64748B',
-                        border: `1px solid ${isAvailable ? '#BBF7D0' : r.riderAvailability === 'busy' ? '#FDE68A' : '#CBD5E1'}`,
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '4px',
-                      }}
-                    >
-                      <span
-                        style={{
-                          width: '5px',
-                          height: '5px',
-                          borderRadius: '50%',
-                          backgroundColor: isAvailable ? '#16A34A' : r.riderAvailability === 'busy' ? '#D97706' : '#94A3B8',
-                        }}
-                      />
-                      {r.name} ({statusText})
-                    </span>
-                  );
-                })}
-              </div>
-            </div>
+            {/* Dropdown 2: Ready to Ship, Arrived */}
+            <select
+              id="delivery-shipping-filter-dropdown"
+              value={deliveryStatusTab === 'ready' ? 'ready_ship' : deliveryStatusTab === 'arrived' ? 'arrived' : shippingFilterOption}
+              onChange={(e) => {
+                const val = e.target.value as 'ready_ship' | 'arrived';
+                setShippingFilterOption(val);
+                if (val === 'ready_ship') {
+                  setDeliveryStatusTab('ready');
+                } else if (val === 'arrived') {
+                  setDeliveryStatusTab('arrived');
+                }
+              }}
+              style={{
+                padding: '7px 12px',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'var(--bg-card-subtle)',
+                color: 'var(--text-main)',
+                fontSize: '12.5px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                outline: 'none',
+                boxShadow: 'var(--shadow-xs)',
+              }}
+            >
+              <option value="ready_ship">{readyDeliveryOrders.length} Ready to Ship</option>
+              <option value="arrived">{arrivedDeliveryOrders.length} Arrived</option>
+            </select>
 
-            {/* Filter Pills & Search */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                {[
-                  { id: 'all', label: `All (${allDeliveryOrders.length})` },
-                  { id: 'arrived', label: `Arrived (${arrivedDeliveryOrders.length})` },
-                  { id: 'preparing', label: `In Kitchen (${preparingDeliveryOrders.length})` },
-                  { id: 'ready', label: `Ready (${readyDeliveryOrders.length})` },
-                  { id: 'out', label: `Out with Rider (${outDeliveryOrders.length})` },
-                  { id: 'completed', label: `Delivered (${completedDeliveryOrders.length})` },
-                ].map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setDeliveryStatusTab(tab.id as any)}
-                    style={{
-                      padding: '5px 12px',
-                      borderRadius: 'var(--radius-full)',
-                      backgroundColor: deliveryStatusTab === tab.id ? 'var(--primary)' : 'var(--bg-card-subtle)',
-                      color: deliveryStatusTab === tab.id ? '#FFFFFF' : 'var(--text-secondary)',
-                      border: '1px solid var(--border-color)',
-                      fontSize: '12px',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
+            {/* Dropdown 3: Free Rider Name (only shows name of free riders) */}
+            <select
+              id="delivery-free-riders-dropdown"
+              value={selectedFreeRiderId || (freeRiders[0]?.id || '')}
+              onChange={(e) => {
+                const val = e.target.value;
+                setSelectedFreeRiderId(val);
+                if (val) {
+                  const r = freeRiders.find((rider) => rider.id === val);
+                  if (r) {
+                    addToast({
+                      type: 'info',
+                      title: 'Free Rider',
+                      message: `${r.name} is available for order dispatch.`,
+                    });
+                  }
+                }
+              }}
+              style={{
+                padding: '7px 12px',
+                borderRadius: 'var(--radius-md)',
+                border: '1px solid var(--border-color)',
+                backgroundColor: 'var(--bg-card-subtle)',
+                color: 'var(--text-main)',
+                fontSize: '12.5px',
+                fontWeight: 700,
+                cursor: 'pointer',
+                outline: 'none',
+                boxShadow: 'var(--shadow-xs)',
+              }}
+            >
+              {freeRiders.length === 0 ? (
+                <option value="">No Free Riders</option>
+              ) : (
+                freeRiders.map((r) => (
+                  <option key={r.id} value={r.id}>
+                    {r.name}
+                  </option>
+                ))
+              )}
+            </select>
 
-              <div style={{ position: 'relative', width: '260px' }}>
-                <Search size={14} color="var(--text-muted)" style={{ position: 'absolute', left: '10px', top: '9px' }} />
-                <input
-                  type="text"
-                  value={deliverySearch}
-                  onChange={(e) => setDeliverySearch(e.target.value)}
-                  placeholder="Search order #, address, name..."
-                  style={{
-                    width: '100%',
-                    padding: '6px 12px 6px 30px',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'var(--bg-input)',
-                    color: 'var(--text-main)',
-                    fontSize: '12px',
-                    outline: 'none',
-                  }}
-                />
-              </div>
+            {/* Right side: Fixed to Right Wall Search Option */}
+            <div style={{ position: 'relative', width: '250px', marginLeft: 'auto' }}>
+              <Search size={14} color="var(--text-muted)" style={{ position: 'absolute', left: '10px', top: '9px' }} />
+              <input
+                type="text"
+                value={deliverySearch}
+                onChange={(e) => setDeliverySearch(e.target.value)}
+                placeholder="Search order #, address, name..."
+                style={{
+                  width: '100%',
+                  padding: '6px 12px 6px 30px',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-color)',
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-main)',
+                  fontSize: '12px',
+                  outline: 'none',
+                }}
+              />
             </div>
           </div>
 
@@ -2944,16 +3366,19 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
           {/* Header */}
           <div
             style={{
-              padding: '16px 20px 14px',
+              padding: '12px 20px',
               borderBottom: '1px solid var(--border-color)',
               display: 'flex',
-              flexDirection: 'column',
+              justifyContent: 'space-between',
+              alignItems: 'center',
+              flexWrap: 'wrap',
               gap: '12px',
               backgroundColor: '#FFFFFF',
               flexShrink: 0,
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
+            {/* Left group: Icon, Dine-In Orders title & Dropdown */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexWrap: 'wrap' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
                 <div
                   style={{
@@ -2965,97 +3390,64 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
+                    flexShrink: 0,
                   }}
                 >
                   <Utensils size={22} />
                 </div>
-                <div>
-                  <h2 style={{ fontSize: '17px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-                    Dine-In Orders — Table Service & Seating
-                  </h2>
-                  <p style={{ fontSize: '12px', color: 'var(--text-secondary)', margin: '2px 0 0' }}>
-                    Incoming table orders: click order to view details or dispatch to kitchen / table
-                  </p>
-                </div>
+                <h2 style={{ fontSize: '17px', fontWeight: 800, margin: 0, color: 'var(--text-main)', whiteSpace: 'nowrap' }}>
+                  Dine-In Orders
+                </h2>
               </div>
 
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span
-                  style={{
-                    fontSize: '11.5px',
-                    fontWeight: 800,
-                    padding: '5px 12px',
-                    borderRadius: 'var(--radius-full)',
-                    backgroundColor: readyDineInOrders.length > 0 ? '#16A34A' : 'var(--bg-card-subtle)',
-                    color: readyDineInOrders.length > 0 ? '#FFFFFF' : 'var(--text-muted)',
-                  }}
-                >
-                  {readyDineInOrders.length} Ready / Served
-                </span>
-                <span
-                  style={{
-                    fontSize: '11.5px',
-                    fontWeight: 800,
-                    padding: '5px 12px',
-                    borderRadius: 'var(--radius-full)',
-                    backgroundColor: arrivedDineInOrders.length > 0 ? '#FEF3C7' : 'var(--bg-card-subtle)',
-                    color: arrivedDineInOrders.length > 0 ? '#92400E' : 'var(--text-muted)',
-                  }}
-                >
-                  {arrivedDineInOrders.length} Arrived
-                </span>
-              </div>
+              {/* Status / Filter Dropdown with all features */}
+              <select
+                id="dinein-orders-filter-dropdown"
+                value={dineInFilterOption}
+                onChange={(e) => handleDineInFilterChange(e.target.value)}
+                style={{
+                  padding: '7px 12px',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-color)',
+                  backgroundColor: 'var(--bg-card-subtle)',
+                  color: 'var(--text-main)',
+                  fontSize: '12.5px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                  outline: 'none',
+                  boxShadow: 'var(--shadow-xs)',
+                  minWidth: '160px',
+                }}
+              >
+                <option value="ready_served">{readyDineInOrders.length} Ready / Served</option>
+                <option value="arrived_badge">{arrivedDineInOrders.length} Arrived</option>
+                <option value="all">All ({allDineInOrders.length})</option>
+                <option value="arrived">Arrived ({arrivedDineInOrders.length})</option>
+                <option value="preparing">In Kitchen ({preparingDineInOrders.length})</option>
+                <option value="ready">Ready ({readyDineInOrders.length})</option>
+                <option value="completed">Completed ({completedDineInOrders.length})</option>
+              </select>
             </div>
 
-            {/* Filter Pills & Search */}
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px' }}>
-              <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
-                {[
-                  { id: 'all', label: `All (${allDineInOrders.length})` },
-                  { id: 'arrived', label: `Arrived (${arrivedDineInOrders.length})` },
-                  { id: 'preparing', label: `In Kitchen (${preparingDineInOrders.length})` },
-                  { id: 'ready', label: `Ready (${readyDineInOrders.length})` },
-                  { id: 'completed', label: `Completed (${completedDineInOrders.length})` },
-                ].map((tab) => (
-                  <button
-                    key={tab.id}
-                    type="button"
-                    onClick={() => setDineInStatusTab(tab.id as any)}
-                    style={{
-                      padding: '5px 12px',
-                      borderRadius: 'var(--radius-full)',
-                      backgroundColor: dineInStatusTab === tab.id ? 'var(--primary)' : 'var(--bg-card-subtle)',
-                      color: dineInStatusTab === tab.id ? '#FFFFFF' : 'var(--text-secondary)',
-                      border: '1px solid var(--border-color)',
-                      fontSize: '12px',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    {tab.label}
-                  </button>
-                ))}
-              </div>
-
-              <div style={{ position: 'relative', width: '260px' }}>
-                <Search size={14} color="var(--text-muted)" style={{ position: 'absolute', left: '10px', top: '9px' }} />
-                <input
-                  type="text"
-                  value={dineInSearch}
-                  onChange={(e) => setDineInSearch(e.target.value)}
-                  placeholder="Search order #, table, customer..."
-                  style={{
-                    width: '100%',
-                    padding: '6px 12px 6px 30px',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'var(--bg-input)',
-                    color: 'var(--text-main)',
-                    fontSize: '12px',
-                    outline: 'none',
-                  }}
-                />
-              </div>
+            {/* Right side: Fixed to Right Wall Search Option */}
+            <div style={{ position: 'relative', width: '260px', marginLeft: 'auto' }}>
+              <Search size={14} color="var(--text-muted)" style={{ position: 'absolute', left: '10px', top: '9px' }} />
+              <input
+                type="text"
+                value={dineInSearch}
+                onChange={(e) => setDineInSearch(e.target.value)}
+                placeholder="Search order #, table, customer..."
+                style={{
+                  width: '100%',
+                  padding: '6px 12px 6px 30px',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-color)',
+                  backgroundColor: 'var(--bg-input)',
+                  color: 'var(--text-main)',
+                  fontSize: '12px',
+                  outline: 'none',
+                }}
+              />
             </div>
           </div>
 
@@ -3707,6 +4099,27 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
               </button>
 
               <div style={{ display: 'flex', gap: '8px' }}>
+                <button
+                  type="button"
+                  onClick={() => handlePrintReceipt(selectedOrderDetail)}
+                  style={{
+                    padding: '8px 14px',
+                    borderRadius: 'var(--radius-md)',
+                    backgroundColor: 'var(--bg-card-subtle)',
+                    border: '1px solid var(--border-color)',
+                    color: 'var(--text-main)',
+                    fontWeight: 750,
+                    fontSize: '12.5px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                  }}
+                >
+                  <Printer size={14} color="var(--primary)" />
+                  <span>Print Order Paid Slip</span>
+                </button>
+
                 {!selectedOrderDetail.sentToKitchen && (selectedOrderDetail.status === 'placed' || selectedOrderDetail.status === 'accepted') && (
                   <>
                     <button
@@ -4266,6 +4679,313 @@ export const RepresentativeScreen: React.FC<RepresentativeScreenProps> = ({
                   color: 'var(--text-main)',
                   fontWeight: 700,
                   fontSize: '12px',
+                  cursor: 'pointer',
+                  border: '1px solid var(--border-color)',
+                }}
+              >
+                Close
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Customer Order History Pop-up Card Modal */}
+      {showOrderHistoryModal && activeCustomer && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          onClick={() => setShowOrderHistoryModal(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.55)',
+            backdropFilter: 'blur(3px)',
+            zIndex: 9998,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderRadius: 'var(--radius-lg)',
+              width: '100%',
+              maxWidth: '560px',
+              maxHeight: '90vh',
+              display: 'flex',
+              flexDirection: 'column',
+              boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.15), 0 10px 10px -5px rgba(0, 0, 0, 0.08)',
+              border: '1px solid var(--border-color)',
+              overflow: 'hidden',
+            }}
+          >
+            {/* Modal Top Header */}
+            <div
+              style={{
+                padding: '16px 20px',
+                borderBottom: '1px solid var(--border-color)',
+                backgroundColor: 'var(--bg-card-subtle)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  style={{
+                    width: '36px',
+                    height: '36px',
+                    borderRadius: '8px',
+                    backgroundColor: 'var(--primary-light)',
+                    color: 'var(--primary)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Receipt size={18} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '15.5px', fontWeight: 800, color: 'var(--text-main)' }}>
+                    Order History · {activeCustomer.name}
+                  </h3>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: '2px', fontSize: '12px', color: 'var(--text-secondary)' }}>
+                    {activeCustomer.phone && (
+                      <span style={{ fontWeight: 600 }}>{activeCustomer.phone}</span>
+                    )}
+                    <span>·</span>
+                    <span style={{ fontWeight: 700, color: 'var(--primary)' }}>
+                      {customerOrders.length} {customerOrders.length === 1 ? 'Order' : 'Orders'} Total
+                    </span>
+                  </div>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowOrderHistoryModal(false)}
+                aria-label="Close modal"
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  padding: '6px',
+                  borderRadius: '6px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Quick Stats Summary */}
+            <div style={{ padding: '12px 20px', borderBottom: '1px solid var(--border-color)', backgroundColor: '#FFFFFF' }}>
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '8px', textAlign: 'center' }}>
+                <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Total Orders</div>
+                  <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-main)', marginTop: '2px' }}>
+                    {customerOrders.length}
+                  </div>
+                </div>
+                <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Total Spend</div>
+                  <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--primary)', marginTop: '2px' }}>
+                    Rs. {customerTotalSpend.toLocaleString()}
+                  </div>
+                </div>
+                <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '8px 10px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
+                  <div style={{ fontSize: '10px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Active Now</div>
+                  <div style={{ fontSize: '15px', fontWeight: 800, color: '#16A34A', marginTop: '2px' }}>
+                    {activeCustomerLiveOrders.length}
+                  </div>
+                </div>
+              </div>
+
+              {/* Filter Pills */}
+              <div style={{ display: 'flex', gap: '6px', marginTop: '10px' }}>
+                {(['all', 'active', 'completed'] as const).map((mode) => (
+                  <button
+                    key={mode}
+                    type="button"
+                    onClick={() => setOrderHistoryFilter(mode)}
+                    style={{
+                      flex: 1,
+                      padding: '6px 8px',
+                      borderRadius: '6px',
+                      fontSize: '11.5px',
+                      fontWeight: 700,
+                      cursor: 'pointer',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: orderHistoryFilter === mode ? 'var(--primary)' : 'var(--bg-card-subtle)',
+                      color: orderHistoryFilter === mode ? '#FFFFFF' : 'var(--text-secondary)',
+                      textTransform: 'capitalize',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {mode === 'all'
+                      ? `All (${customerOrders.length})`
+                      : mode === 'active'
+                      ? `Active (${activeCustomerLiveOrders.length})`
+                      : `Past (${pastCustomerOrders.length})`}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Scrollable Order List Inside Pop-up Card */}
+            <div
+              style={{
+                flex: 1,
+                minHeight: 0,
+                maxHeight: '420px',
+                padding: '14px 20px',
+                overflowY: 'auto',
+                overscrollBehavior: 'contain',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px',
+                backgroundColor: 'var(--bg-card-subtle)',
+              }}
+            >
+              {filteredCustomerOrders.length === 0 ? (
+                <div
+                  style={{
+                    padding: '36px 16px',
+                    textAlign: 'center',
+                    backgroundColor: '#FFFFFF',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px dashed var(--border-color)',
+                    color: 'var(--text-muted)',
+                    fontSize: '13px',
+                    margin: 'auto 0',
+                  }}
+                >
+                  No orders found for this category.
+                </div>
+              ) : (
+                filteredCustomerOrders.map((ord) => {
+                  const isActive = ord.status !== 'completed' && ord.status !== 'cancelled' && ord.status !== 'served';
+                  const statusInfo = getOrderStatusBadge(ord.status, ord.type);
+                  const itemCount = ord.items.reduce((sum, item) => sum + (item.quantity || 1), 0);
+
+                  return (
+                    <div
+                      key={ord.id}
+                      onClick={() => {
+                        setSelectedOrderForMenu(ord);
+                      }}
+                      title="Click to view full ordered menu details and bill"
+                      style={{
+                        backgroundColor: '#FFFFFF',
+                        borderRadius: 'var(--radius-md)',
+                        border: isActive ? '1px solid #FCD34D' : '1px solid var(--border-color)',
+                        borderLeft: isActive ? '4px solid #F59E0B' : '4px solid #CBD5E1',
+                        padding: '12px 14px',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                        boxShadow: '0 1px 2px rgba(0,0,0,0.03)',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '8px',
+                      }}
+                    >
+                      {/* Row 1: Order #, Badge, Date */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <span style={{ fontWeight: 800, fontSize: '13.5px', color: 'var(--text-main)' }}>
+                            #{ord.orderNumber}
+                          </span>
+                          <span
+                            style={{
+                              fontSize: '10px',
+                              fontWeight: 800,
+                              textTransform: 'uppercase',
+                              padding: '2px 7px',
+                              borderRadius: '4px',
+                              backgroundColor: statusInfo.bg,
+                              color: statusInfo.color,
+                            }}
+                          >
+                            {statusInfo.label}
+                          </span>
+                        </div>
+                        <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                          {ord.createdAt || 'Recent'}
+                        </span>
+                      </div>
+
+                      {/* Row 2: Type, Location, Item Count, Total */}
+                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '12px' }}>
+                        <span style={{ color: 'var(--text-secondary)', textTransform: 'capitalize', fontWeight: 600 }}>
+                          {ord.type.replace('_', ' ')} {ord.tableNumber ? `· Table ${ord.tableNumber}` : ''} · {itemCount} {itemCount === 1 ? 'item' : 'items'}
+                        </span>
+                        <span style={{ fontWeight: 800, color: 'var(--primary)', fontSize: '13.5px' }}>
+                          Rs. {Number(ord.total).toLocaleString()}
+                        </span>
+                      </div>
+
+                      {/* Items Brief Preview */}
+                      <div
+                        style={{
+                          fontSize: '11.5px',
+                          color: 'var(--text-secondary)',
+                          backgroundColor: 'var(--bg-card-subtle)',
+                          padding: '6px 10px',
+                          borderRadius: '6px',
+                          display: 'flex',
+                          justifyContent: 'space-between',
+                          alignItems: 'center',
+                        }}
+                      >
+                        <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '80%' }}>
+                          {ord.items.map((i) => `${i.quantity || 1}x ${i.name || 'Item'}`).join(', ')}
+                        </span>
+                        <span
+                          style={{
+                            fontSize: '10.5px',
+                            fontWeight: 700,
+                            color: 'var(--primary)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                            flexShrink: 0,
+                          }}
+                        >
+                          Bill Details <ChevronRight size={12} />
+                        </span>
+                      </div>
+                    </div>
+                  );
+                })
+              )}
+            </div>
+
+            {/* Modal Footer */}
+            <div
+              style={{
+                padding: '12px 20px',
+                borderTop: '1px solid var(--border-color)',
+                backgroundColor: '#FFFFFF',
+                display: 'flex',
+                justifyContent: 'flex-end',
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setShowOrderHistoryModal(false)}
+                style={{
+                  padding: '8px 18px',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: 'var(--bg-card-subtle)',
+                  color: 'var(--text-main)',
+                  fontWeight: 700,
+                  fontSize: '12.5px',
                   cursor: 'pointer',
                   border: '1px solid var(--border-color)',
                 }}

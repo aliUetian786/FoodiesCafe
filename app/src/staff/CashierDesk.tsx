@@ -74,12 +74,12 @@ export const CashierScreen: React.FC = () => {
   const isManager = currentRole === 'branch_manager';
 
   // Manager Cash Desk Monitor State
-  const [managerTab, setManagerTab] = useState<'reports' | 'shifts' | 'orders'>('reports');
+  const [managerTab, setManagerTab] = useState<'reports' | 'orders'>('reports');
   const [timeFilter, setTimeFilter] = useState<'today' | 'yesterday' | 'last7days' | 'all' | 'custom'>('today');
   const [customStart, setCustomStart] = useState<string>('');
   const [customEnd, setCustomEnd] = useState<string>('');
   const [managerTypeFilter, setManagerTypeFilter] = useState<'all' | 'dine_in' | 'takeaway' | 'delivery'>('all');
-  const [cashierFilter, setCashierFilter] = useState<string>('all');
+  const [shiftCashierFilter, setShiftCashierFilter] = useState<string>('all');
   const [managerSearch, setManagerSearch] = useState<string>('');
   const [selectedMonitorOrderId, setSelectedMonitorOrderId] = useState<string>(orders[0]?.id || '');
 
@@ -93,15 +93,15 @@ export const CashierScreen: React.FC = () => {
 
   // Shift Management Modals
   const [openShiftModal, setOpenShiftModal] = useState(false);
-  const [openingFloatInput, setOpeningFloatInput] = useState('5000');
+  const [openingFloatInput, setOpeningFloatInput] = useState('');
   const [closeShiftModal, setCloseShiftModal] = useState(false);
-  const [countedCashInput, setCountedCashInput] = useState('39200');
+  const [countedCashInput, setCountedCashInput] = useState('');
   const [differenceReason, setDifferenceReason] = useState('Exact count');
 
   // Refund request modal
   const [refundModalOpen, setRefundModalOpen] = useState(false);
-  const [refundAmount, setRefundAmount] = useState('650');
-  const [refundReason, setRefundReason] = useState('Customer food return');
+  const [refundAmount, setRefundAmount] = useState('');
+  const [refundReason, setRefundReason] = useState('');
 
   // Table QR Code Management
   const [showTableQrModal, setShowTableQrModal] = useState(false);
@@ -176,14 +176,6 @@ export const CashierScreen: React.FC = () => {
       return;
     }
     const res = recordCashPayment(selectedOrder.id, tendered);
-    if (selectedOrder.tableNumber) {
-      markTableFree(selectedOrder.tableNumber);
-    }
-    addToast({
-      type: 'success',
-      title: 'Payment Settled & Table Freed! 🎉',
-      message: `Cash collected: Rs. ${selectedOrder.total.toLocaleString()}. Table #${selectedOrder.tableNumber || 'Seated'} is now free for new guests.`,
-    });
     setCalculatedChange(res.change);
     setPaymentConfirmOpen(false);
   };
@@ -228,38 +220,48 @@ export const CashierScreen: React.FC = () => {
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Receipt #${ord.orderNumber}</title>
-          <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+          <title>Order Paid Slip #${ord.orderNumber}</title>
+          <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
           <style>
             @page {
               size: 80mm auto;
-              margin: 0;
+              margin: 0 !important;
+              padding: 0 !important;
             }
             * {
-              box-sizing: border-box;
+              box-sizing: border-box !important;
               margin: 0;
               padding: 0;
-              font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+              font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
               -webkit-print-color-adjust: exact !important;
               print-color-adjust: exact !important;
             }
             html, body {
-              width: 80mm;
-              margin: 0 auto;
-              padding: 4mm 2mm;
+              width: 80mm !important;
+              max-width: 80mm !important;
+              margin: 0 !important;
+              padding: 0 !important;
               background: #FFFFFF !important;
-              color: #1A1A1A !important;
+              color: #000000 !important;
+              height: auto !important;
+              min-height: 0 !important;
+              overflow: visible !important;
             }
             .receipt-container {
-              width: 100% !important;
+              width: 80mm !important;
               max-width: 80mm !important;
-              border: 1px dashed #CBD5E1 !important;
-              border-radius: 6px !important;
-              padding: 16px 12px !important;
+              margin: 0 !important;
+              padding: 6px 8px 4px 8px !important;
+              border: none !important;
+              border-radius: 0 !important;
               background: #FFFFFF !important;
               position: relative !important;
               overflow: hidden !important;
               box-shadow: none !important;
+              height: auto !important;
+              min-height: 0 !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
             }
           </style>
         </head>
@@ -267,49 +269,53 @@ export const CashierScreen: React.FC = () => {
           <div class="receipt-container">
             <!-- 135-degree rotated Cafe Logo Watermark -->
             <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; pointer-events: none; z-index: 0;">
-              <img src="/logo.png" alt="Logo Watermark" style="width: 85%; height: 85%; object-fit: contain; transform: rotate(135deg); opacity: 0.16; display: block; -webkit-print-color-adjust: exact; print-color-adjust: exact;" />
+              <img src="/logo.png" alt="Logo Watermark" style="width: 80%; height: 80%; object-fit: contain; transform: rotate(135deg); opacity: 0.15; display: block; -webkit-print-color-adjust: exact; print-color-adjust: exact;" />
             </div>
             
             <div style="position: relative; z-index: 1;">
-              <div style="text-align: center; border-bottom: 1px dashed #000000; padding-bottom: 8px; margin-bottom: 10px;">
-                <h3 style="font-size: 19px; font-weight: 900; margin: 0; font-family: 'Outfit', sans-serif;">FOODIES CAFE</h3>
-                <div style="font-size: 11px; color: #475569; margin-top: 2px;">${currentBranch.name} · Official POS Receipt</div>
-                <div style="font-size: 13px; font-weight: 850; color: #EA580C; margin-top: 4px;">
-                  ${ord.type.toUpperCase()} ${ord.tableNumber ? `· Table ${ord.tableNumber}` : ''}
+              <div style="text-align: center; border-bottom: 1.5px dashed #000000; padding-bottom: 5px; margin-bottom: 6px;">
+                <h3 style="font-size: 19px; font-weight: 900; margin: 0; font-family: 'Outfit', sans-serif; letter-spacing: 0.5px;">FOODIES CAFE</h3>
+                <div style="font-size: 11px; font-weight: 600; color: #475569; margin-top: 1px;">${currentBranch.name} · Paid Slip</div>
+                <div style="display: inline-block; font-size: 12.5px; font-weight: 850; color: #EA580C; background: #FFF7ED; padding: 2px 8px; border-radius: 4px; margin-top: 3px; border: 1px solid #FFEDD5;">
+                  ${ord.type.toUpperCase()} ${ord.tableNumber ? `· TABLE ${ord.tableNumber}` : ''}
                 </div>
               </div>
 
-              <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px; color: #64748B;">
-                <span>Order: <strong>#${ord.orderNumber}</strong></span>
-                <span>Time: ${ord.createdAt}</span>
+              <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; color: #334155; font-weight: 600;">
+                <span>Slip: <strong>#${ord.orderNumber}</strong></span>
+                <span>${ord.createdAt}</span>
               </div>
-              <div style="font-size: 11px; margin-bottom: 8px; color: #64748B;">
+              <div style="font-size: 11px; margin-bottom: 5px; color: #334155;">
                 Customer: <strong>${ord.customerName}</strong> (${ord.customerPhone})
               </div>
 
-              <div style="border-top: 1px solid #E2E8F0; padding-top: 8px; margin-bottom: 8px;">
+              <div style="border-top: 1px solid #CBD5E1; padding-top: 5px; margin-bottom: 6px;">
                 ${itemsHtml}
               </div>
 
-              <div style="border-top: 1px dashed #CBD5E1; padding-top: 8px; margin-bottom: 8px; font-size: 12px;">
-                <div style="display: flex; justify-content: space-between; margin-bottom: 3px;">
+              <div style="border-top: 1.5px dashed #000000; padding-top: 5px; margin-bottom: 5px; font-size: 12px;">
+                <div style="display: flex; justify-content: space-between; margin-bottom: 2px; font-weight: 600; color: #475569;">
                   <span>Subtotal:</span>
-                  <span>Rs. ${ord.originalSubtotal.toLocaleString()}</span>
+                  <span>Rs. ${Number(ord.originalSubtotal).toLocaleString()}</span>
                 </div>
                 ${ord.addOnSubtotal > 0 ? `
-                  <div style="display: flex; justify-content: space-between; margin-bottom: 3px; color: #EA580C;">
+                  <div style="display: flex; justify-content: space-between; margin-bottom: 2px; color: #EA580C; font-weight: 600;">
                     <span>Add-ons:</span>
-                    <span>+ Rs. ${ord.addOnSubtotal.toLocaleString()}</span>
+                    <span>+ Rs. ${Number(ord.addOnSubtotal).toLocaleString()}</span>
                   </div>
                 ` : ''}
-                <div style="display: flex; justify-content: space-between; font-size: 15px; font-weight: 900; color: #EA580C; margin-top: 4px;">
-                  <span>Total Paid:</span>
-                  <span>Rs. ${ord.total.toLocaleString()}</span>
+                <div style="display: flex; justify-content: space-between; font-size: 16px; font-weight: 900; color: #000000; margin-top: 4px; padding-top: 3px; border-top: 1px solid #CBD5E1;">
+                  <span>TOTAL PAID:</span>
+                  <span style="color: #EA580C;">Rs. ${Number(ord.total).toLocaleString()}</span>
+                </div>
+                <div style="display: flex; justify-content: space-between; font-size: 11px; font-weight: 700; color: #16A34A; margin-top: 3px;">
+                  <span>PAYMENT STATUS:</span>
+                  <span>${ord.paymentStatus === 'paid' ? 'PAID IN FULL ✓' : ord.paymentStatus.toUpperCase()} (${ord.paymentMethod || 'Cash'})</span>
                 </div>
               </div>
 
-              <div style="text-align: center; font-size: 10px; color: #64748B; border-top: 1px dashed #CBD5E1; padding-top: 6px;">
-                Status: ${ord.paymentStatus.toUpperCase()} · Thank you for dining with FoodiesCafe!
+              <div style="text-align: center; font-size: 10px; font-weight: 600; color: #64748B; border-top: 1px dashed #CBD5E1; padding-top: 4px; margin-top: 2px;">
+                Thank you for dining with FoodiesCafe!
               </div>
             </div>
           </div>
@@ -429,6 +435,12 @@ export const CashierScreen: React.FC = () => {
   if (isManager) {
     const isWithinDateRange = (dateStr?: string) => {
       if (!dateStr) return true;
+      if (dateStr.toLowerCase().includes('today') || dateStr.toLowerCase().includes('just now')) {
+        return timeFilter === 'today' || timeFilter === 'all';
+      }
+      if (dateStr.toLowerCase().includes('yesterday')) {
+        return timeFilter === 'yesterday' || timeFilter === 'all';
+      }
       const orderDate = new Date(dateStr);
       const now = new Date();
       if (isNaN(orderDate.getTime())) return true;
@@ -462,11 +474,35 @@ export const CashierScreen: React.FC = () => {
       return true; // 'all'
     };
 
+    const selectedShift = shiftCashierFilter.startsWith('shift:')
+      ? shifts.find((s) => s.id === shiftCashierFilter.replace('shift:', ''))
+      : null;
+
     const managerFilteredOrders = orders.filter((o) => {
       if (managerTypeFilter !== 'all' && o.type !== managerTypeFilter) return false;
-      if (cashierFilter !== 'all' && o.customerName !== cashierFilter) {
-        // filter by cashier if specified
+      
+      // Shift / Cashier filter
+      if (shiftCashierFilter !== 'all') {
+        if (selectedShift) {
+          const matchCashier =
+            (o.cashierId && o.cashierId === selectedShift.cashierId) ||
+            (o.cashierName && selectedShift.cashierName && o.cashierName.toLowerCase().includes(selectedShift.cashierName.toLowerCase()));
+          const matchWindow =
+            selectedShift.openedAt &&
+            (selectedShift.openedAt.toLowerCase().includes('today')
+              ? o.createdAt?.toLowerCase().includes('today') || isWithinDateRange(o.createdAt)
+              : false);
+          if (!matchCashier && !matchWindow) return false;
+        } else if (shiftCashierFilter.startsWith('cashier:')) {
+          const targetCashierId = shiftCashierFilter.replace('cashier:', '');
+          const targetUser = users.find((u) => u.id === targetCashierId);
+          const matches =
+            o.cashierId === targetCashierId ||
+            (targetUser && o.cashierName && o.cashierName.toLowerCase() === targetUser.name.toLowerCase());
+          if (!matches) return false;
+        }
       }
+
       if (managerSearch.trim()) {
         const q = managerSearch.toLowerCase();
         const matchNum = o.orderNumber?.toLowerCase().includes(q);
@@ -506,10 +542,14 @@ export const CashierScreen: React.FC = () => {
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
           <div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <h1 style={{ fontSize: '26px', fontWeight: 800, margin: 0, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
+              <h1 className="cashier-title-desktop" style={{ fontSize: '26px', fontWeight: 800, margin: 0, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
                 Cash Desk Monitor & Financial Oversight
               </h1>
+              <h1 className="cashier-title-mobile" style={{ fontSize: '22px', fontWeight: 800, margin: 0, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
+                Cash Desk
+              </h1>
               <span
+                className="cashier-badge-desktop"
                 style={{
                   fontSize: '11px',
                   fontWeight: 800,
@@ -527,12 +567,12 @@ export const CashierScreen: React.FC = () => {
                 <span>OBSERVATION & APPROVAL MODE</span>
               </span>
             </div>
-            <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+            <p className="cashier-desc-desktop" style={{ fontSize: '13.5px', color: 'var(--text-secondary)', marginTop: '4px' }}>
               Branch: {currentBranch.name} · Till Reconciliation · Shift Audits · Multi-Channel Orders · Refund Authorizations
             </p>
           </div>
 
-          {/* Manager Tabs Switcher */}
+          {/* Manager Tabs Switcher: Reports and Orders (Per-Shift handled by Dropdown in Calculation Report) */}
           <div
             style={{
               display: 'flex',
@@ -563,25 +603,6 @@ export const CashierScreen: React.FC = () => {
               <span>Calculation Reports</span>
             </button>
             <button
-              onClick={() => setManagerTab('shifts')}
-              style={{
-                padding: '8px 16px',
-                borderRadius: '6px',
-                fontSize: '13px',
-                fontWeight: 750,
-                backgroundColor: managerTab === 'shifts' ? 'var(--primary)' : 'transparent',
-                color: managerTab === 'shifts' ? '#FFFFFF' : 'var(--text-secondary)',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                border: 'none',
-              }}
-            >
-              <Users size={15} />
-              <span>Per-Shift & Cashier History</span>
-            </button>
-            <button
               onClick={() => setManagerTab('orders')}
               style={{
                 padding: '8px 16px',
@@ -603,8 +624,9 @@ export const CashierScreen: React.FC = () => {
           </div>
         </div>
 
-        {/* FAST PERFORMANCE / ON-DEMAND DATA BANNER */}
+        {/* FAST PERFORMANCE / ON-DEMAND DATA BANNER (Hidden on Mobile) */}
         <div
+          className="cashier-fastmode-banner"
           style={{
             backgroundColor: 'var(--bg-card)',
             borderRadius: 'var(--radius-lg)',
@@ -763,11 +785,6 @@ export const CashierScreen: React.FC = () => {
                       <button
                         onClick={() => {
                           decideRefund(req.id, true);
-                          addToast({
-                            type: 'success',
-                            title: 'Refund Approved ✓',
-                            message: `Authorized refund of Rs. ${req.amount} for Order #${targetOrd?.orderNumber || req.orderId}.`,
-                          });
                         }}
                         style={{
                           flex: 1,
@@ -791,11 +808,6 @@ export const CashierScreen: React.FC = () => {
                       <button
                         onClick={() => {
                           decideRefund(req.id, false);
-                          addToast({
-                            type: 'info',
-                            title: 'Refund Rejected',
-                            message: `Refund request for Order #${targetOrd?.orderNumber || req.orderId} was declined.`,
-                          });
                         }}
                         style={{
                           flex: 1,
@@ -827,7 +839,7 @@ export const CashierScreen: React.FC = () => {
         {/* TAB 1: FINANCIAL CALCULATION REPORTS */}
         {managerTab === 'reports' && (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {/* Filter Bar */}
+            {/* 3 Filter Dropdowns: Time Period, Channel, Shift of Cashier */}
             <div
               style={{
                 backgroundColor: 'var(--bg-card)',
@@ -836,90 +848,219 @@ export const CashierScreen: React.FC = () => {
                 padding: '16px 20px',
                 display: 'flex',
                 flexWrap: 'wrap',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: '14px',
+                gap: '16px',
+                alignItems: 'flex-end',
                 boxShadow: 'var(--shadow-sm)',
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-                <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-secondary)' }}>
-                  Time Period:
-                </span>
-                <div style={{ display: 'flex', gap: '6px', backgroundColor: 'var(--bg-card-subtle)', padding: '4px', borderRadius: 'var(--radius-md)' }}>
-                  {(['today', 'yesterday', 'last7days', 'all', 'custom'] as const).map((t) => (
-                    <button
-                      key={t}
-                      onClick={async () => {
-                        setTimeFilter(t);
-                        if (t !== 'today' && !hasLoadedOlderOrders) {
-                          await fetchOlderOrders();
-                        }
-                      }}
+              {/* Dropdown 1: Time */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: '1 1 180px', minWidth: '150px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Calendar size={13} color="var(--primary)" />
+                  <span>Time Period</span>
+                </label>
+                <select
+                  value={timeFilter}
+                  onChange={async (e) => {
+                    const val = e.target.value as any;
+                    setTimeFilter(val);
+                    if (val !== 'today' && !hasLoadedOlderOrders) {
+                      await fetchOlderOrders();
+                    }
+                  }}
+                  style={{
+                    padding: '9px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: 'var(--text-main)',
+                    fontSize: '13px',
+                    fontWeight: 650,
+                    outline: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <option value="today">Today</option>
+                  <option value="yesterday">Yesterday</option>
+                  <option value="last7days">Last 7 Days</option>
+                  <option value="all">All Time</option>
+                  <option value="custom">Custom Range</option>
+                </select>
+              </div>
+
+              {/* Dropdown 2: Channel */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: '1 1 180px', minWidth: '150px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Filter size={13} color="var(--primary)" />
+                  <span>Channel</span>
+                </label>
+                <select
+                  value={managerTypeFilter}
+                  onChange={(e) => setManagerTypeFilter(e.target.value as any)}
+                  style={{
+                    padding: '9px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: 'var(--text-main)',
+                    fontSize: '13px',
+                    fontWeight: 650,
+                    outline: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <option value="all">All Channels</option>
+                  <option value="dine_in">Dine-In</option>
+                  <option value="takeaway">Takeaway</option>
+                  <option value="delivery">Delivery</option>
+                </select>
+              </div>
+
+              {/* Dropdown 3: Shift of Cashier */}
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: '1 1 240px', minWidth: '200px' }}>
+                <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-secondary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <Users size={13} color="var(--primary)" />
+                  <span>Shift of Cashier</span>
+                </label>
+                <select
+                  value={shiftCashierFilter}
+                  onChange={(e) => setShiftCashierFilter(e.target.value)}
+                  style={{
+                    padding: '9px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: 'var(--text-main)',
+                    fontSize: '13px',
+                    fontWeight: 650,
+                    outline: 'none',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <option value="all">All Shifts & Cashiers</option>
+                  {shifts.map((s) => (
+                    <option key={s.id} value={`shift:${s.id}`}>
+                      Shift #{s.id} · {s.cashierName} ({s.status.toUpperCase()})
+                    </option>
+                  ))}
+                  {users
+                    .filter((u) => u.role === 'cashier' || u.role === 'branch_manager')
+                    .map((u) => (
+                      <option key={u.id} value={`cashier:${u.id}`}>
+                        Cashier: {u.name} ({u.role === 'cashier' ? 'Cashier' : 'Manager'})
+                      </option>
+                    ))}
+                </select>
+              </div>
+
+              {/* Custom Date Inputs if custom is selected */}
+              {timeFilter === 'custom' && (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap', width: '100%', paddingTop: '6px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 650, color: 'var(--text-secondary)' }}>From:</span>
+                  <input
+                    type="date"
+                    value={customStart}
+                    onChange={(e) => setCustomStart(e.target.value)}
+                    style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '12px', backgroundColor: 'var(--bg-input)', color: 'var(--text-main)' }}
+                  />
+                  <span style={{ fontSize: '12px', fontWeight: 650, color: 'var(--text-secondary)' }}>To:</span>
+                  <input
+                    type="date"
+                    value={customEnd}
+                    onChange={(e) => setCustomEnd(e.target.value)}
+                    style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '12px', backgroundColor: 'var(--bg-input)', color: 'var(--text-main)' }}
+                  />
+                </div>
+              )}
+            </div>
+
+            {/* Selected Shift Reconciliation Card (When a shift is selected via dropdown) */}
+            {selectedShift && (
+              <div
+                style={{
+                  backgroundColor: 'var(--bg-card)',
+                  borderRadius: 'var(--radius-lg)',
+                  border: '1px solid var(--border-color)',
+                  padding: '18px 20px',
+                  boxShadow: 'var(--shadow-sm)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '12px',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 800, color: 'var(--text-main)' }}>
+                      Shift #{selectedShift.id} Audit · {selectedShift.cashierName}
+                    </h4>
+                    <span
                       style={{
-                        padding: '6px 12px',
-                        borderRadius: '6px',
-                        fontSize: '12px',
-                        fontWeight: 700,
-                        backgroundColor: timeFilter === t ? 'var(--bg-card)' : 'transparent',
-                        color: timeFilter === t ? 'var(--primary)' : 'var(--text-secondary)',
-                        boxShadow: timeFilter === t ? 'var(--shadow-sm)' : 'none',
-                        cursor: 'pointer',
-                        border: 'none',
+                        fontSize: '11px',
+                        fontWeight: 800,
+                        padding: '2px 8px',
+                        borderRadius: 'var(--radius-full)',
+                        backgroundColor: selectedShift.status === 'open' ? '#DCFCE7' : '#F3F4F6',
+                        color: selectedShift.status === 'open' ? '#16A34A' : '#4B5563',
                       }}
                     >
-                      {t === 'today' ? 'Today' : t === 'yesterday' ? 'Yesterday' : t === 'last7days' ? 'Last 7 Days' : t === 'all' ? 'All Time' : 'Custom'}
-                    </button>
-                  ))}
+                      {selectedShift.status.toUpperCase()}
+                    </span>
+                  </div>
+                  <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
+                    Opened: {selectedShift.openedAt} {selectedShift.closedAt ? `· Closed: ${selectedShift.closedAt}` : ''}
+                  </span>
                 </div>
 
-                {timeFilter === 'custom' && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <input
-                      type="date"
-                      value={customStart}
-                      onChange={(e) => setCustomStart(e.target.value)}
-                      style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '12px', backgroundColor: 'var(--bg-input)', color: 'var(--text-main)' }}
-                    />
-                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>to</span>
-                    <input
-                      type="date"
-                      value={customEnd}
-                      onChange={(e) => setCustomEnd(e.target.value)}
-                      style={{ padding: '6px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '12px', backgroundColor: 'var(--bg-input)', color: 'var(--text-main)' }}
-                    />
+                <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px' }}>
+                  <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '10px 12px', borderRadius: 'var(--radius-md)' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700 }}>OPENING FLOAT</div>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-main)', marginTop: '2px' }}>
+                      Rs. {Number(selectedShift.openingFloat || 0).toLocaleString()}
+                    </div>
+                  </div>
+                  <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '10px 12px', borderRadius: 'var(--radius-md)' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700 }}>CASH COLLECTED</div>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--primary)', marginTop: '2px' }}>
+                      Rs. {Number(selectedShift.cashCollected || 0).toLocaleString()}
+                    </div>
+                  </div>
+                  <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '10px 12px', borderRadius: 'var(--radius-md)' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700 }}>EXPECTED IN DRAWER</div>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-main)', marginTop: '2px' }}>
+                      Rs. {Number(selectedShift.expectedCash || 0).toLocaleString()}
+                    </div>
+                  </div>
+                  <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '10px 12px', borderRadius: 'var(--radius-md)' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700 }}>ACTUAL COUNTED</div>
+                    <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-main)', marginTop: '2px' }}>
+                      {selectedShift.countedCash !== undefined && selectedShift.countedCash !== null
+                        ? `Rs. ${Number(selectedShift.countedCash).toLocaleString()}`
+                        : '— (Active)'}
+                    </div>
+                  </div>
+                  <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '10px 12px', borderRadius: 'var(--radius-md)' }}>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700 }}>VARIANCE / DIFF</div>
+                    <div
+                      style={{
+                        fontSize: '16px',
+                        fontWeight: 800,
+                        color: (Number(selectedShift.difference) || 0) === 0 ? '#16A34A' : '#DC2626',
+                        marginTop: '2px',
+                      }}
+                    >
+                      {selectedShift.status === 'closed'
+                        ? `Rs. ${(Number(selectedShift.difference) || 0) > 0 ? '+' : ''}${(Number(selectedShift.difference) || 0).toLocaleString()}`
+                        : '—'}
+                    </div>
+                  </div>
+                </div>
+                {selectedShift.differenceReason && (
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', fontStyle: 'italic' }}>
+                    Reconciliation Note: {selectedShift.differenceReason}
                   </div>
                 )}
               </div>
-
-              {/* Channel filter */}
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <span style={{ fontSize: '13px', fontWeight: 700, color: 'var(--text-secondary)' }}>
-                  Channel:
-                </span>
-                <div style={{ display: 'flex', gap: '4px', backgroundColor: 'var(--bg-card-subtle)', padding: '4px', borderRadius: 'var(--radius-md)' }}>
-                  {(['all', 'dine_in', 'takeaway', 'delivery'] as const).map((ch) => (
-                    <button
-                      key={ch}
-                      onClick={() => setManagerTypeFilter(ch)}
-                      style={{
-                        padding: '6px 12px',
-                        borderRadius: '6px',
-                        fontSize: '12px',
-                        fontWeight: 700,
-                        backgroundColor: managerTypeFilter === ch ? 'var(--bg-card)' : 'transparent',
-                        color: managerTypeFilter === ch ? 'var(--primary)' : 'var(--text-secondary)',
-                        boxShadow: managerTypeFilter === ch ? 'var(--shadow-sm)' : 'none',
-                        cursor: 'pointer',
-                        border: 'none',
-                      }}
-                    >
-                      {ch === 'all' ? 'All Channels' : ch === 'dine_in' ? 'Dine-In' : ch === 'takeaway' ? 'Takeaway' : 'Delivery'}
-                    </button>
-                  ))}
-                </div>
-              </div>
-            </div>
+            )}
 
             {/* 8 Metric Calculation Cards */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
@@ -1114,150 +1255,15 @@ export const CashierScreen: React.FC = () => {
           </div>
         )}
 
-        {/* TAB 2: PER-SHIFT & PER-CASHIER HISTORY */}
-        {managerTab === 'shifts' && (
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            {/* Shifts Summary Stats */}
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
-              <div style={{ backgroundColor: 'var(--bg-card)', padding: '18px 20px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-sm)' }}>
-                <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>RECORDED SHIFTS</span>
-                <div style={{ fontSize: '24px', fontWeight: 900, color: 'var(--text-main)', marginTop: '4px' }}>
-                  {shifts.length} Shifts
-                </div>
-                <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', marginTop: '2px' }}>In PostgreSQL Database</div>
-              </div>
-
-              <div style={{ backgroundColor: 'var(--bg-card)', padding: '18px 20px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-sm)' }}>
-                <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>CURRENT ACTIVE SHIFT</span>
-                <div style={{ fontSize: '20px', fontWeight: 900, color: currentShift ? '#16A34A' : '#6B7280', marginTop: '4px' }}>
-                  {currentShift ? `🟢 OPEN (${currentShift.cashierName})` : '⚪ NO ACTIVE SHIFT'}
-                </div>
-                <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                  Till Float: Rs. {(currentShift?.openingFloat || 0).toLocaleString()}
-                </div>
-              </div>
-
-              <div style={{ backgroundColor: 'var(--bg-card)', padding: '18px 20px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-sm)' }}>
-                <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-muted)' }}>CASH IN ACTIVE TILL</span>
-                <div style={{ fontSize: '24px', fontWeight: 900, color: 'var(--primary)', marginTop: '4px' }}>
-                  Rs. {(currentShift?.expectedCash || 0).toLocaleString()}
-                </div>
-                <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                  Collected: Rs. {(currentShift?.cashCollected || 0).toLocaleString()}
-                </div>
-              </div>
-            </div>
-
-            {/* Per Shift and Per Cashier Data History Table */}
-            <div
-              style={{
-                backgroundColor: 'var(--bg-card)',
-                borderRadius: 'var(--radius-lg)',
-                border: '1px solid var(--border-color)',
-                padding: '24px',
-                boxShadow: 'var(--shadow-sm)',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '16px',
-              }}
-            >
-              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                <h3 style={{ fontSize: '17px', fontWeight: 800, margin: 0 }}>
-                  Per-Shift & Cashier Reconciliation Data History
-                </h3>
-                <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                  Total {shifts.length} shift logs across cashiers
-                </span>
-              </div>
-
-              <div style={{ overflowX: 'auto' }}>
-                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', textAlign: 'left' }}>
-                  <thead>
-                    <tr style={{ borderBottom: '2px solid var(--border-color)', color: 'var(--text-muted)' }}>
-                      <th style={{ padding: '10px 12px' }}>Shift ID & Date</th>
-                      <th style={{ padding: '10px 12px' }}>Cashier / Person</th>
-                      <th style={{ padding: '10px 12px' }}>Opening Float</th>
-                      <th style={{ padding: '10px 12px' }}>Cash Collected</th>
-                      <th style={{ padding: '10px 12px' }}>Expected Cash</th>
-                      <th style={{ padding: '10px 12px' }}>Counted Actual</th>
-                      <th style={{ padding: '10px 12px' }}>Variance / Difference</th>
-                      <th style={{ padding: '10px 12px' }}>Status</th>
-                      <th style={{ padding: '10px 12px' }}>Notes / Reason</th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {shifts.map((s) => {
-                      const diff = Number(s.difference) || 0;
-                      return (
-                        <tr key={s.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                          <td style={{ padding: '12px' }}>
-                            <div style={{ fontWeight: 800, color: 'var(--text-main)' }}>{s.id}</div>
-                            <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{s.openedAt}</div>
-                          </td>
-                          <td style={{ padding: '12px' }}>
-                            <div style={{ fontWeight: 750 }}>{s.cashierName}</div>
-                            <div style={{ fontSize: '11px', color: 'var(--text-secondary)' }}>Shift Cashier</div>
-                          </td>
-                          <td style={{ padding: '12px' }}>Rs. {Number(s.openingFloat).toLocaleString()}</td>
-                          <td style={{ padding: '12px', color: 'var(--primary)', fontWeight: 750 }}>
-                            Rs. {Number(s.cashCollected).toLocaleString()}
-                          </td>
-                          <td style={{ padding: '12px', fontWeight: 750 }}>
-                            Rs. {Number(s.expectedCash).toLocaleString()}
-                          </td>
-                          <td style={{ padding: '12px', fontWeight: 800 }}>
-                            {s.countedCash !== undefined && s.countedCash !== null ? `Rs. ${Number(s.countedCash).toLocaleString()}` : '—'}
-                          </td>
-                          <td style={{ padding: '12px' }}>
-                            {s.status === 'closed' ? (
-                              <span
-                                style={{
-                                  padding: '3px 8px',
-                                  borderRadius: '4px',
-                                  fontSize: '11.5px',
-                                  fontWeight: 800,
-                                  backgroundColor: diff === 0 ? '#DCFCE7' : '#FEE2E2',
-                                  color: diff === 0 ? '#15803D' : '#B91C1C',
-                                }}
-                              >
-                                {diff === 0 ? 'Rs. 0 (Balanced ✓)' : `Rs. ${diff > 0 ? '+' : ''}${diff.toLocaleString()}`}
-                              </span>
-                            ) : (
-                              <span style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>In progress</span>
-                            )}
-                          </td>
-                          <td style={{ padding: '12px' }}>
-                            <span
-                              style={{
-                                fontSize: '11px',
-                                fontWeight: 800,
-                                padding: '3px 8px',
-                                borderRadius: 'var(--radius-full)',
-                                backgroundColor: s.status === 'open' ? '#DCFCE7' : '#F3F4F6',
-                                color: s.status === 'open' ? '#16A34A' : '#4B5563',
-                              }}
-                            >
-                              {s.status.toUpperCase()}
-                            </span>
-                          </td>
-                          <td style={{ padding: '12px', fontSize: '12px', color: 'var(--text-secondary)' }}>
-                            {s.differenceReason || '—'}
-                          </td>
-                        </tr>
-                      );
-                    })}
-                  </tbody>
-                </table>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* TAB 3: FULL ORDERS HISTORY (DINE-IN, TAKEAWAY, DELIVERY) */}
+        {/* TAB 2: FULL ORDERS HISTORY (DINE-IN, TAKEAWAY, DELIVERY) */}
         {managerTab === 'orders' && (
-          <div style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 420px) 1fr', gap: '20px', alignItems: 'flex-start' }}>
+          <div
+            className="cashier-orders-grid"
+            style={{ display: 'grid', gridTemplateColumns: 'minmax(340px, 420px) 1fr', gap: '20px', alignItems: 'flex-start' }}
+          >
             {/* Left: Orders List with Search & Channel Filter */}
             <div
+              className="cashier-orders-list-pane"
               style={{
                 backgroundColor: 'var(--bg-card)',
                 borderRadius: 'var(--radius-lg)',
@@ -1270,7 +1276,10 @@ export const CashierScreen: React.FC = () => {
               }}
             >
               {!hasLoadedOlderOrders ? (
-                <div style={{ backgroundColor: 'var(--bg-card-subtle)', borderRadius: 'var(--radius-md)', padding: '10px 12px', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                <div
+                  className="cashier-orders-archive-banner"
+                  style={{ backgroundColor: 'var(--bg-card-subtle)', borderRadius: 'var(--radius-md)', padding: '10px 12px', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}
+                >
                   <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
                     <span>Showing <strong>Today's</strong> orders ({managerFilteredOrders.length}).</span>
                   </div>
@@ -1292,7 +1301,10 @@ export const CashierScreen: React.FC = () => {
                   </button>
                 </div>
               ) : (
-                <div style={{ backgroundColor: 'rgba(37, 99, 235, 0.06)', borderRadius: 'var(--radius-md)', padding: '8px 12px', border: '1px solid rgba(37, 99, 235, 0.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div
+                  className="cashier-orders-archive-banner"
+                  style={{ backgroundColor: 'rgba(37, 99, 235, 0.06)', borderRadius: 'var(--radius-md)', padding: '8px 12px', border: '1px solid rgba(37, 99, 235, 0.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
+                >
                   <span style={{ fontSize: '12px', color: '#2563EB', fontWeight: 700 }}>
                     📂 Full Archive: {managerFilteredOrders.length} orders
                   </span>
@@ -1359,7 +1371,10 @@ export const CashierScreen: React.FC = () => {
               </div>
 
               {/* Scrollable Orders List */}
-              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '680px', overflowY: 'auto', paddingRight: '4px' }}>
+              <div
+                className="cashier-orders-list-scroll"
+                style={{ display: 'flex', flexDirection: 'column', gap: '8px', maxHeight: '680px', overflowY: 'auto', paddingRight: '4px' }}
+              >
                 {managerFilteredOrders.length === 0 ? (
                   <div style={{ textAlign: 'center', padding: '32px 16px', color: 'var(--text-muted)', fontSize: '13px' }}>
                     No orders match your filter criteria.
@@ -1431,9 +1446,10 @@ export const CashierScreen: React.FC = () => {
               </div>
             </div>
 
-            {/* Right: Master-Detail Full Order Inspector */}
+            {/* Right: Master-Detail Full Order Inspector (Hidden on mobile) */}
             {activeMonitorOrder ? (
               <div
+                className="cashier-order-detail-pane"
                 style={{
                   backgroundColor: 'var(--bg-card)',
                   borderRadius: 'var(--radius-lg)',
@@ -1502,7 +1518,7 @@ export const CashierScreen: React.FC = () => {
                     }}
                   >
                     <Printer size={15} color="var(--primary)" />
-                    <span>Print 80mm Receipt (Watermarked)</span>
+                    <span>Print Order Paid Slip</span>
                   </button>
                 </div>
 
@@ -1612,11 +1628,6 @@ export const CashierScreen: React.FC = () => {
                           key={r.id}
                           onClick={() => {
                             decideRefund(r.id, true);
-                            addToast({
-                              type: 'success',
-                              title: 'Refund Approved ✓',
-                              message: `Authorized refund for Order #${activeMonitorOrder.orderNumber}.`,
-                            });
                           }}
                           style={{
                             padding: '6px 12px',
@@ -1637,7 +1648,7 @@ export const CashierScreen: React.FC = () => {
                 )}
               </div>
             ) : (
-              <div style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>
+              <div className="cashier-order-detail-pane" style={{ textAlign: 'center', padding: '48px', color: 'var(--text-muted)' }}>
                 Select an order from the list to view its complete details.
               </div>
             )}
@@ -2148,7 +2159,7 @@ export const CashierScreen: React.FC = () => {
                 }}
               >
                 <Printer size={15} />
-                <span>Print Receipt</span>
+                <span>Print Order Paid Slip</span>
               </button>
 
               <button
@@ -2706,50 +2717,28 @@ export const CashierScreen: React.FC = () => {
                   </div>
                 </div>
 
-                {/* DIRECT KITCHEN DISPATCH NOTICE & BUTTON */}
-                <div
-                  style={{
-                    padding: '12px',
-                    backgroundColor: '#EFF6FF',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid #BFDBFE',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '10px',
-                    fontSize: '12px',
-                    color: '#1E40AF',
-                    fontWeight: 600,
-                  }}
-                >
-                  <ChefHat size={20} color="#2563EB" style={{ flexShrink: 0 }} />
-                  <span>
-                    <strong>Direct Kitchen Dispatch:</strong> This order will NOT wait for any auto-forward timer. It will be immediately dispatched to the kitchen queue, and Customer Support will also monitor its live status.
-                  </span>
-                </div>
-
                 <button
                   onClick={handleCreateWalkIn}
                   style={{
                     padding: '14px',
                     borderRadius: 'var(--radius-md)',
-                    backgroundColor: '#16A34A',
+                    backgroundColor: 'var(--primary)',
                     color: '#FFFFFF',
                     fontSize: '15px',
-                    fontWeight: 800,
+                    fontWeight: 850,
                     cursor: 'pointer',
                     border: 'none',
                     display: 'flex',
                     alignItems: 'center',
                     justifyContent: 'center',
                     gap: '8px',
-                    boxShadow: '0 4px 14px rgba(22, 163, 74, 0.35)',
+                    boxShadow: '0 4px 14px var(--primary-glow)',
                     marginTop: '4px',
+                    width: '100%',
+                    transition: 'all 0.15s ease',
                   }}
                 >
-                  <ChefHat size={18} />
-                  <span>
-                    Dispatch Directly to Kitchen 👨‍🍳 (Rs. {walkInCart.reduce((acc, i) => acc + i.unitPrice * i.quantity, 0).toLocaleString()})
-                  </span>
+                  <span>Proceed</span>
                 </button>
               </div>
             )}

@@ -14,11 +14,13 @@ export async function GET(request: Request) {
              order_number as "orderNumber", waiter_name as "waiterName",
              total_amount as "totalAmount", status, created_at as "createdAt"
       FROM table_sessions
+      WHERE id NOT IN ('sess-1', 'sess-2', 'sess-3', 'sess-4', 'sess-5')
+        AND id NOT LIKE 'sess-seed-%'
     `;
     const params: any[] = [];
 
     if (branchId) {
-      sql += ` WHERE branch_id = $1`;
+      sql += ` AND branch_id = $1`;
       params.push(branchId);
     }
 

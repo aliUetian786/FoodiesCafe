@@ -46,7 +46,7 @@ export const BranchManagerScreen: React.FC = () => {
   const branchOrders = orders.filter((o) => o.branchId === currentBranch.id);
   const totalOrdersToday = branchOrders.length;
   const pendingOrders = branchOrders.filter((o) => o.status === 'placed' || o.status === 'accepted' || o.status === 'preparing').length;
-  const totalCashCollected = currentShift?.cashCollected || 34200;
+  const totalCashCollected = Number(currentShift?.cashCollected || 0);
 
   const branchStaff = users.filter((u) => u.branchId === currentBranch.id);
   const pendingRefunds = refundRequests.filter((r) => r.status === 'requested');

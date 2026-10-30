@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect, useRef } from 'react';
-import { useApp } from '@/context/AppContext';
+import { useApp, useAppSelector, selectCartCount } from '@/context/AppContext';
 import {
   ShoppingBag,
   Bell,
@@ -24,7 +24,6 @@ import {
   RefreshCw,
   MapPin,
   Edit,
-  QrCode,
 } from 'lucide-react';
 import { StoreMapModal } from './StoreMapModal';
 import { CustomerLoginModal } from './CustomerLoginModal';
@@ -144,8 +143,8 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
     }
   }, [branches, currentBranchId, setCurrentBranchId]);
 
-  // Cart popup notification — detect when new items added
-  const cartCount = cart.reduce((acc, i) => acc + i.quantity, 0);
+  // Redux Toolkit memoized selector for instant zero-lag cart count
+  const cartCount = useAppSelector(selectCartCount);
 
   useEffect(() => {
     if (cartCount > prevCartRef.current && cartCount > 0) {
@@ -448,8 +447,8 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
           top: 0,
           left: 0,
           bottom: 0,
-          width: '320px',
-          maxWidth: '85vw',
+          width: '240px',
+          maxWidth: '65vw',
           backgroundColor: 'var(--bg-card)',
           zIndex: 10001,
           transform: sidebarOpen ? 'translateX(0)' : 'translateX(-100%)',
@@ -471,25 +470,25 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
             }
           }}
           style={{
-            height: '72px',
+            height: '62px',
             boxSizing: 'border-box',
             borderBottom: '1px solid var(--border-color)',
-            padding: '0 16px',
+            padding: '0 12px',
             background: 'linear-gradient(135deg, var(--primary) 0%, var(--primary-hover) 100%)',
             color: '#FFFFFF',
             position: 'relative',
             cursor: 'pointer',
             display: 'flex',
             alignItems: 'center',
-            gap: '12px',
+            gap: '10px',
             flexShrink: 0,
           }}
         >
           {/* Avatar Picture (In line with Name) */}
           <div
             style={{
-              width: '42px',
-              height: '42px',
+              width: '36px',
+              height: '36px',
               borderRadius: '50%',
               backgroundColor: 'rgba(255, 255, 255, 0.25)',
               display: 'flex',
@@ -499,15 +498,15 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
               flexShrink: 0,
             }}
           >
-            <UserCircle size={28} color="#FFFFFF" />
+            <UserCircle size={24} color="#FFFFFF" />
           </div>
 
           {/* Account Details: Name with Phone/Email below name */}
-          <div style={{ flex: 1, minWidth: 0, paddingRight: '36px' }}>
+          <div style={{ flex: 1, minWidth: 0, paddingRight: '28px' }}>
             <div
               style={{
                 fontWeight: 900,
-                fontSize: '15px',
+                fontSize: '13.5px',
                 letterSpacing: '-0.01em',
                 lineHeight: 1.2,
                 overflow: 'hidden',
@@ -519,7 +518,7 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
             </div>
             <div
               style={{
-                fontSize: '11px',
+                fontSize: '10px',
                 fontWeight: 600,
                 opacity: 0.9,
                 marginTop: '2px',
@@ -534,7 +533,7 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
             </div>
           </div>
 
-          {/* Close Button vertically centered matching 72px line */}
+          {/* Close Button vertically centered matching header line */}
           <button
             onClick={(e) => {
               e.stopPropagation();
@@ -542,11 +541,11 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
             }}
             style={{
               position: 'absolute',
-              right: '12px',
+              right: '8px',
               top: '50%',
               transform: 'translateY(-50%)',
-              width: '32px',
-              height: '32px',
+              width: '28px',
+              height: '28px',
               borderRadius: '50%',
               backgroundColor: 'rgba(255, 255, 255, 0.2)',
               border: 'none',
@@ -558,7 +557,7 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
             }}
             aria-label="Close menu"
           >
-            <X size={17} />
+            <X size={15} />
           </button>
         </div>
 
@@ -577,14 +576,6 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
             label="Order Menu"
             isActive={currentView === 'menu'}
             onClick={() => handleSidebarNav('menu')}
-          />
-
-          {/* Table QR Ordering */}
-          <SidebarItem
-            icon={<QrCode size={19} />}
-            label="Table QR Ordering"
-            isActive={currentView === 'table-qr'}
-            onClick={() => handleSidebarNav('table-qr')}
           />
 
           {/* Active Orders / Tracking */}
@@ -1056,8 +1047,8 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
       width: '100%',
       display: 'flex',
       alignItems: 'center',
-      gap: '12px',
-      padding: '12px 20px',
+      gap: '10px',
+      padding: '9px 12px',
       backgroundColor: isActive ? 'var(--primary-light)' : 'transparent',
       border: 'none',
       color: destructive ? '#C5221F' : isActive ? 'var(--primary)' : 'var(--text-main)',
@@ -1068,9 +1059,9 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
   >
     <div
       style={{
-        width: '36px',
-        height: '36px',
-        borderRadius: '10px',
+        width: '32px',
+        height: '32px',
+        borderRadius: '8px',
         backgroundColor: destructive
           ? 'rgba(197,34,31,0.08)'
           : isActive
@@ -1087,7 +1078,7 @@ const SidebarItem: React.FC<SidebarItemProps> = ({
     </div>
 
     <div style={{ flex: 1, minWidth: 0 }}>
-      <div style={{ fontSize: '14px', fontWeight: 750, lineHeight: 1.2 }}>{label}</div>
+      <div style={{ fontSize: '13px', fontWeight: 750, lineHeight: 1.2 }}>{label}</div>
       {subtitle && (
         <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600, marginTop: '1px' }}>
           {subtitle}

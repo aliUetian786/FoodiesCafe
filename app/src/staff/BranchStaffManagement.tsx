@@ -236,9 +236,9 @@ export const BranchStaffManagementScreen: React.FC = () => {
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-      {/* Top Banner / Breadcrumb */}
+      {/* Top Banner / Breadcrumb (Desktop Only) */}
       <div
-        className="bm-staff-desktop-banner"
+        className="bm-staff-header-desktop"
         style={{
           backgroundColor: 'var(--bg-card)',
           borderRadius: 'var(--radius-lg)',
@@ -252,53 +252,147 @@ export const BranchStaffManagementScreen: React.FC = () => {
           gap: '16px',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px', flex: 1 }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <div
+              style={{
+                width: '42px',
+                height: '42px',
+                borderRadius: '12px',
+                backgroundColor: 'var(--primary-light)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--primary)',
+              }}
+            >
+              <Users size={22} />
+            </div>
+            <div>
+              <h1 style={{ fontSize: '22px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
+                Branch Staff & Accounts Administration
+              </h1>
+              <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: '3px 0 0' }}>
+                Branch: <strong>{currentBranch.name}</strong>
+              </p>
+            </div>
+          </div>
+
+          <button
+            onClick={handleOpenCreateStaff}
             style={{
-              width: '42px',
-              height: '42px',
-              borderRadius: '12px',
-              backgroundColor: 'var(--primary-light)',
+              padding: '10px 18px',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: 'var(--primary)',
+              color: '#FFFFFF',
+              border: 'none',
+              fontWeight: 750,
+              fontSize: '13px',
+              cursor: 'pointer',
               display: 'flex',
               alignItems: 'center',
-              justifyContent: 'center',
-              color: 'var(--primary)',
+              gap: '8px',
+              boxShadow: '0 2px 8px rgba(234, 88, 12, 0.25)',
+              transition: 'all 0.15s ease',
+              whiteSpace: 'nowrap',
             }}
           >
-            <Users size={22} />
+            <UserPlus size={16} />
+            <span>+ Create Staff ID / Account</span>
+          </button>
+        </div>
+      </div>
+
+      {/* Mobile Single Card (Small Screen Only) */}
+      <div
+        className="bm-staff-card-mobile"
+        style={{
+          backgroundColor: 'var(--bg-card)',
+          borderRadius: 'var(--radius-lg)',
+          border: '1px solid var(--border-color)',
+          padding: '16px',
+          boxShadow: 'var(--shadow-sm)',
+          flexDirection: 'column',
+          gap: '10px',
+        }}
+      >
+        {/* Top Row: Branch Team xyz IDs (left) & + Create Staff ID (top right) */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '10px' }}>
+          <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-main)' }}>
+            Branch Team {subordinates.length} IDs
           </div>
-          <div>
-            <h1 style={{ fontSize: '22px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-              Branch Staff & Accounts Administration
-            </h1>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: '3px 0 0' }}>
-              Branch: <strong>{currentBranch.name}</strong> · Personnel operating under Branch Manager (Cashiers, Kitchen Line, Floor Waiters, Support, and Riders).
-            </p>
-          </div>
+          <button
+            onClick={handleOpenCreateStaff}
+            style={{
+              padding: '7px 12px',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: 'var(--primary)',
+              color: '#FFFFFF',
+              border: 'none',
+              fontWeight: 750,
+              fontSize: '12px',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '5px',
+              boxShadow: '0 2px 6px rgba(234, 88, 12, 0.25)',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <UserPlus size={14} />
+            <span>+ Create Staff ID</span>
+          </button>
         </div>
 
-        <button
-          onClick={handleOpenCreateStaff}
+        {/* Below that line: Active xyz */}
+        <div style={{ fontSize: '13px', fontWeight: 700, color: '#15803D', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#16A34A', display: 'inline-block' }} />
+          <span>Active {activeStaffCount}</span>
+        </div>
+
+        {/* Below that line: Suspended xyz */}
+        <div style={{ fontSize: '13px', fontWeight: 700, color: '#B45309', display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ width: '8px', height: '8px', borderRadius: '50%', backgroundColor: '#D97706', display: 'inline-block' }} />
+          <span>Suspended {suspendedStaffCount}</span>
+        </div>
+
+        {/* Below that: all staff members who work under him in one row, and below each word the number of people */}
+        <div
           style={{
-            padding: '10px 18px',
+            marginTop: '2px',
+            backgroundColor: 'var(--bg-card-subtle)',
             borderRadius: 'var(--radius-md)',
-            backgroundColor: 'var(--primary)',
-            color: '#FFFFFF',
-            border: 'none',
-            fontWeight: 750,
-            fontSize: '13px',
-            cursor: 'pointer',
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            boxShadow: '0 2px 8px rgba(234, 88, 12, 0.25)',
-            transition: 'all 0.15s ease',
+            border: '1px solid var(--border-color)',
+            padding: '10px 6px',
+            display: 'grid',
+            gridTemplateColumns: 'repeat(5, 1fr)',
+            gap: '4px',
+            textAlign: 'center',
           }}
         >
-          <UserPlus size={16} />
-          <span>+ Create Staff ID / Account</span>
-        </button>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', minWidth: 0 }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>Cashiers</span>
+            <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-main)' }}>{cashierCount}</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', minWidth: 0 }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>Kitchen</span>
+            <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-main)' }}>{kitchenCount}</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', minWidth: 0 }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>Waiters</span>
+            <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-main)' }}>{floorCount}</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', minWidth: 0 }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>Support</span>
+            <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-main)' }}>{repCount}</span>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', minWidth: 0 }}>
+            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>Riders</span>
+            <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-main)' }}>{deliveryCount}</span>
+          </div>
+        </div>
       </div>
+
 
       {/* Platform Owner Manager-Mode Access Delegation Request Card */}
       {(() => {
@@ -457,11 +551,8 @@ export const BranchStaffManagementScreen: React.FC = () => {
           gap: '20px',
         }}
       >
-        {/* Quick KPI Badges (Desktop) */}
-        <div
-          className="bm-staff-desktop-kpis"
-          style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '12px 14px', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card-subtle)', border: '1px solid var(--border-color)' }}
-        >
+        {/* Quick KPI Badges (Desktop Only) */}
+        <div className="bm-staff-desktop-kpis" style={{ display: 'flex', flexWrap: 'wrap', gap: '8px', padding: '12px 14px', borderRadius: 'var(--radius-md)', backgroundColor: 'var(--bg-card-subtle)', border: '1px solid var(--border-color)' }}>
           <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12px', fontWeight: 700, color: 'var(--text-main)', paddingRight: '12px', borderRight: '1px solid var(--border-color)' }}>
             <span>Branch Team Under Manager:</span>
             <span style={{ padding: '2px 8px', borderRadius: 'var(--radius-full)', backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)', fontWeight: 800 }}>
@@ -496,11 +587,8 @@ export const BranchStaffManagementScreen: React.FC = () => {
           </div>
         </div>
 
-        {/* Search, Filter & View Controls (Desktop) */}
-        <div
-          className="bm-staff-desktop-controls"
-          style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}
-        >
+        {/* Search, Filter & View Controls (Desktop Only) */}
+        <div className="bm-staff-controls-desktop" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
           {/* Search Bar */}
           <div style={{ position: 'relative', flex: '1', minWidth: '220px', maxWidth: '380px' }}>
             <Search size={15} color="var(--text-muted)" style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }} />
@@ -619,236 +707,134 @@ export const BranchStaffManagementScreen: React.FC = () => {
           </div>
         </div>
 
-        {/* ========================================================
-            Mobile-Only Unified Staff Management Section (Screen <= 768px)
-            ======================================================== */}
-        {/* 1. Mobile Unified Card */}
-        <div
-          className="bm-staff-mobile-card"
-          style={{
-            backgroundColor: 'var(--bg-card)',
-            borderRadius: 'var(--radius-lg)',
-            border: '1px solid var(--border-color)',
-            padding: '16px',
-            boxShadow: 'var(--shadow-sm)',
-            flexDirection: 'column',
-            gap: '10px',
-            width: '100%',
-            boxSizing: 'border-box',
-          }}
-        >
-          {/* Row 1: Branch Team XYZ IDs + Top Right: + Create Staff ID */}
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', width: '100%', gap: '8px' }}>
-            <div style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-main)' }}>
-              Branch Team: <span style={{ color: 'var(--primary)', fontWeight: 850 }}>{subordinates.length} IDs</span>
-            </div>
-            <button
-              onClick={handleOpenCreateStaff}
-              style={{
-                padding: '7px 12px',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: 'var(--primary)',
-                color: '#FFFFFF',
-                border: 'none',
-                fontWeight: 750,
-                fontSize: '12px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '5px',
-                whiteSpace: 'nowrap',
-                boxShadow: '0 2px 6px rgba(234, 88, 12, 0.25)',
-              }}
-            >
-              <UserPlus size={14} />
-              <span>+ Create Staff ID</span>
-            </button>
-          </div>
-
-          {/* Row 2: Active XYZ */}
-          <div style={{ fontSize: '13px', fontWeight: 700, color: '#15803D', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span>Active:</span>
-            <span style={{ padding: '1px 8px', borderRadius: 'var(--radius-full)', backgroundColor: '#DCFCE7', color: '#15803D', fontWeight: 800 }}>
-              {activeStaffCount}
-            </span>
-          </div>
-
-          {/* Row 3: Suspended XYZ */}
-          <div style={{ fontSize: '13px', fontWeight: 700, color: '#B45309', display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <span>Suspended:</span>
-            <span style={{ padding: '1px 8px', borderRadius: 'var(--radius-full)', backgroundColor: '#FEF3C7', color: '#B45309', fontWeight: 800 }}>
-              {suspendedStaffCount}
-            </span>
-          </div>
-
-          {/* Row 4: Staff Member Positions in one row, and below each word the number of people */}
-          <div
-            style={{
-              marginTop: '4px',
-              paddingTop: '10px',
-              borderTop: '1px solid var(--border-color)',
-              display: 'grid',
-              gridTemplateColumns: 'repeat(5, 1fr)',
-              gap: '4px',
-              backgroundColor: 'var(--bg-card-subtle)',
-              borderRadius: 'var(--radius-md)',
-              padding: '10px 4px',
-              textAlign: 'center',
-            }}
-          >
-            <div>
-              <div style={{ fontSize: '11px', fontWeight: 750, color: 'var(--text-secondary)' }}>Cashiers</div>
-              <div style={{ fontSize: '14.5px', fontWeight: 850, color: 'var(--text-main)', marginTop: '2px' }}>{cashierCount}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: '11px', fontWeight: 750, color: 'var(--text-secondary)' }}>Kitchen</div>
-              <div style={{ fontSize: '14.5px', fontWeight: 850, color: 'var(--text-main)', marginTop: '2px' }}>{kitchenCount}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: '11px', fontWeight: 750, color: 'var(--text-secondary)' }}>Waiters</div>
-              <div style={{ fontSize: '14.5px', fontWeight: 850, color: 'var(--text-main)', marginTop: '2px' }}>{floorCount}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: '11px', fontWeight: 750, color: 'var(--text-secondary)' }}>Support</div>
-              <div style={{ fontSize: '14.5px', fontWeight: 850, color: 'var(--text-main)', marginTop: '2px' }}>{repCount}</div>
-            </div>
-            <div>
-              <div style={{ fontSize: '11px', fontWeight: 750, color: 'var(--text-secondary)' }}>Riders</div>
-              <div style={{ fontSize: '14.5px', fontWeight: 850, color: 'var(--text-main)', marginTop: '2px' }}>{deliveryCount}</div>
-            </div>
-          </div>
-        </div>
-
-        {/* 2. Horizontally scrollable row of roles */}
-        <div
-          className="bm-staff-mobile-roles"
-          style={{
-            display: 'flex',
-            gap: '8px',
-            overflowX: 'auto',
-            WebkitOverflowScrolling: 'touch',
-            scrollbarWidth: 'none',
-            padding: '2px 0',
-            width: '100%',
-          }}
-        >
-          {[
-            { key: 'all', label: 'All Roles' },
-            { key: 'cashier', label: 'Cashiers' },
-            { key: 'kitchen_staff', label: 'Kitchen' },
-            { key: 'floor_staff', label: 'Waiters' },
-            { key: 'branch_representative', label: 'Support' },
-            { key: 'delivery_staff', label: 'Riders' },
-          ].map((roleItem) => {
-            const active = staffRoleFilter === roleItem.key;
-            return (
-              <button
-                key={roleItem.key}
-                onClick={() => setStaffRoleFilter(roleItem.key as any)}
-                style={{
-                  padding: '7px 14px',
-                  borderRadius: 'var(--radius-full)',
-                  border: active ? '1px solid var(--primary)' : '1px solid var(--border-color)',
-                  backgroundColor: active ? 'var(--primary)' : 'var(--bg-card)',
-                  color: active ? '#FFFFFF' : 'var(--text-secondary)',
-                  fontWeight: 750,
-                  fontSize: '12px',
-                  cursor: 'pointer',
-                  whiteSpace: 'nowrap',
-                  flexShrink: 0,
-                  boxShadow: active ? '0 2px 6px rgba(234, 88, 12, 0.25)' : 'none',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                {roleItem.label}
-              </button>
-            );
-          })}
-        </div>
-
-        {/* 3. Search and Grid and Row Style all in one row */}
-        <div
-          className="bm-staff-mobile-search-row"
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            width: '100%',
-          }}
-        >
-          {/* Search Input */}
-          <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
-            <Search
-              size={15}
-              color="var(--text-muted)"
-              style={{ position: 'absolute', left: '12px', top: '50%', transform: 'translateY(-50%)' }}
-            />
-            <input
-              type="text"
-              placeholder="Search staff..."
-              value={staffSearchQuery}
-              onChange={(e) => setStaffSearchQuery(e.target.value)}
-              style={{
-                width: '100%',
-                padding: '9px 12px 9px 36px',
-                borderRadius: 'var(--radius-md)',
-                border: '1px solid var(--border-color)',
-                backgroundColor: 'var(--bg-card)',
-                fontSize: '12.5px',
-                color: 'var(--text-main)',
-                outline: 'none',
-                boxSizing: 'border-box',
-              }}
-            />
-          </div>
-
-          {/* Grid & Row Style Toggle Buttons */}
+        {/* Mobile Controls (Small Screen Only: Horizontally Scrollable Roles + Search & Grid/Row in One Row) */}
+        <div className="bm-staff-controls-mobile" style={{ flexDirection: 'column', gap: '12px' }}>
+          {/* Horizontally Scrollable Row of Roles */}
           <div
             style={{
               display: 'flex',
-              backgroundColor: 'var(--bg-card)',
-              borderRadius: 'var(--radius-md)',
-              padding: '3px',
-              border: '1px solid var(--border-color)',
-              flexShrink: 0,
+              gap: '8px',
+              overflowX: 'auto',
+              paddingBottom: '4px',
+              WebkitOverflowScrolling: 'touch',
             }}
           >
-            <button
-              onClick={() => setStaffViewMode('cards')}
-              title="Grid style (Cards)"
+            {[
+              { id: 'all', label: 'All Roles' },
+              { id: 'cashier', label: 'Cashiers' },
+              { id: 'kitchen_staff', label: 'Kitchen' },
+              { id: 'floor_staff', label: 'Waiters' },
+              { id: 'branch_representative', label: 'Support' },
+              { id: 'delivery_staff', label: 'Riders' },
+            ].map(({ id, label }) => {
+              const active = staffRoleFilter === id;
+              return (
+                <button
+                  key={id}
+                  onClick={() => setStaffRoleFilter(id as any)}
+                  style={{
+                    padding: '7px 14px',
+                    borderRadius: 'var(--radius-full)',
+                    border: active ? '1px solid var(--primary)' : '1px solid var(--border-color)',
+                    backgroundColor: active ? 'var(--primary)' : 'var(--bg-card-subtle)',
+                    color: active ? '#FFFFFF' : 'var(--text-secondary)',
+                    fontWeight: 700,
+                    fontSize: '12px',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    transition: 'all 0.15s ease',
+                    boxShadow: active ? '0 2px 6px rgba(234, 88, 12, 0.2)' : 'none',
+                    flexShrink: 0,
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Search + Grid Style + Row Style All In One Row */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: '8px',
+              width: '100%',
+            }}
+          >
+            {/* Search Bar */}
+            <div style={{ position: 'relative', flex: 1, minWidth: 0 }}>
+              <Search
+                size={14}
+                color="var(--text-muted)"
+                style={{ position: 'absolute', left: '10px', top: '50%', transform: 'translateY(-50%)' }}
+              />
+              <input
+                type="text"
+                placeholder="Search staff by name, ID, phone..."
+                value={staffSearchQuery}
+                onChange={(e) => setStaffSearchQuery(e.target.value)}
+                style={{
+                  width: '100%',
+                  padding: '8px 10px 8px 32px',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px solid var(--border-color)',
+                  backgroundColor: 'var(--bg-input)',
+                  fontSize: '12px',
+                  color: 'var(--text-main)',
+                  outline: 'none',
+                }}
+              />
+            </div>
+
+            {/* Grid & Row Style Toggle Buttons */}
+            <div
               style={{
-                padding: '6px 9px',
-                borderRadius: '4px',
-                border: 'none',
-                backgroundColor: staffViewMode === 'cards' ? 'var(--primary)' : 'transparent',
-                color: staffViewMode === 'cards' ? '#FFFFFF' : 'var(--text-secondary)',
-                cursor: 'pointer',
                 display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'all 0.15s ease',
+                backgroundColor: 'var(--bg-card-subtle)',
+                borderRadius: 'var(--radius-md)',
+                padding: '2px',
+                border: '1px solid var(--border-color)',
+                flexShrink: 0,
               }}
             >
-              <LayoutGrid size={16} />
-            </button>
-            <button
-              onClick={() => setStaffViewMode('table')}
-              title="Row style (Table)"
-              style={{
-                padding: '6px 9px',
-                borderRadius: '4px',
-                border: 'none',
-                backgroundColor: staffViewMode === 'table' ? 'var(--primary)' : 'transparent',
-                color: staffViewMode === 'table' ? '#FFFFFF' : 'var(--text-secondary)',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                transition: 'all 0.15s ease',
-              }}
-            >
-              <List size={16} />
-            </button>
+              <button
+                onClick={() => setStaffViewMode('cards')}
+                title="Grid Style"
+                aria-label="Grid Style"
+                style={{
+                  padding: '6px 8px',
+                  borderRadius: '4px',
+                  border: 'none',
+                  backgroundColor: staffViewMode === 'cards' ? 'var(--primary)' : 'transparent',
+                  color: staffViewMode === 'cards' ? '#FFFFFF' : 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <LayoutGrid size={15} />
+              </button>
+              <button
+                onClick={() => setStaffViewMode('table')}
+                title="Row Style (Table View)"
+                aria-label="Row Style (Table View)"
+                style={{
+                  padding: '6px 8px',
+                  borderRadius: '4px',
+                  border: 'none',
+                  backgroundColor: staffViewMode === 'table' ? 'var(--primary)' : 'transparent',
+                  color: staffViewMode === 'table' ? '#FFFFFF' : 'var(--text-secondary)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+              >
+                <List size={15} />
+              </button>
+            </div>
           </div>
         </div>
 
@@ -869,7 +855,7 @@ export const BranchStaffManagementScreen: React.FC = () => {
           </div>
         ) : staffViewMode === 'cards' ? (
           /* ID CARDS BADGES GRID */
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(min(100%, 280px), 1fr))', gap: '16px' }}>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: '16px' }}>
             {filteredStaff.map((s) => {
               const roleBadge = getRoleBadgeStyle(s.role);
               const isSuspended = s.status === 'suspended';
@@ -1091,7 +1077,7 @@ export const BranchStaffManagementScreen: React.FC = () => {
             })}
           </div>
         ) : (
-          /* TABLE VIEW (ROW STYLE) */
+          /* TABLE VIEW (Row Style - Horizontally Scrollable) */
           <div
             style={{
               borderRadius: 'var(--radius-md)',
@@ -1099,11 +1085,9 @@ export const BranchStaffManagementScreen: React.FC = () => {
               overflowX: 'auto',
               WebkitOverflowScrolling: 'touch',
               width: '100%',
-              maxWidth: '100%',
-              backgroundColor: 'var(--bg-card)',
             }}
           >
-            <table style={{ width: '100%', minWidth: '640px', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+            <table style={{ width: '100%', minWidth: '720px', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
               <thead>
                 <tr style={{ backgroundColor: 'var(--bg-card-subtle)', borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '11.5px', textTransform: 'uppercase' }}>
                   <th style={{ padding: '12px 14px' }}>Staff ID</th>

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useApp } from '@/context/AppContext';
 import { Table, TableStatus } from '@/types/cafe';
 import { ModalConfirmation } from '@/components/common/ModalConfirmation';
@@ -15,7 +15,6 @@ import {
   Bell,
   RefreshCw,
   Search,
-  Lock,
   Utensils,
   Award,
   TrendingUp,
@@ -27,7 +26,11 @@ import {
 } from 'lucide-react';
 import { WalkInOrderModal } from '@/staff/WalkInOrderModal';
 
-export const FloorTablesScreen: React.FC = () => {
+interface FloorTablesScreenProps {
+  initialView?: 'tables' | 'server_orders';
+}
+
+export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialView = 'tables' }) => {
   const {
     tables,
     currentBranchId,
@@ -43,6 +46,7 @@ export const FloorTablesScreen: React.FC = () => {
 
   const isManager = currentRole === 'branch_manager';
 
+  const [viewMode, setViewMode] = useState<'tables' | 'server_orders'>(initialView);
   const [activeTab, setActiveTab] = useState<'grid' | 'reservations'>('grid');
   const [managerTab, setManagerTab] = useState<'sessions' | 'waiters' | 'layout'>('sessions');
   const [sessionSearch, setSessionSearch] = useState('');
@@ -52,8 +56,8 @@ export const FloorTablesScreen: React.FC = () => {
   const [walkInModalOpen, setWalkInModalOpen] = useState(false);
   const [walkInTableDefault, setWalkInTableDefault] = useState<string | undefined>(undefined);
 
-  const branchTables = tables.filter((t) => t.branchId === currentBranchId);
-  const dineInOrders = orders.filter((o) => o.type === 'dine_in' && o.status !== 'completed' && o.status !== 'cancelled');
+  const branchTables = useMemo(() => tables.filter((t) => t.branchId === currentBranchId), [tables, currentBranchId]);
+  const dineInOrders = useMemo(() => orders.filter((o) => o.type === 'dine_in' && o.status !== 'completed' && o.status !== 'cancelled'), [orders]);
   const branchSessions = (tableSessions || []).filter((s) => !s.branchId || s.branchId === currentBranchId);
 
   const isDateToday = (dateStr?: string) => {
@@ -130,108 +134,14 @@ export const FloorTablesScreen: React.FC = () => {
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
-        {/* Header & Role Badge */}
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
-          <div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-              <h1 style={{ fontSize: '26px', fontWeight: 800, margin: 0, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
-                Floor & Table Seating Oversight
-              </h1>
-              <span
-                style={{
-                  fontSize: '11px',
-                  fontWeight: 800,
-                  padding: '4px 10px',
-                  borderRadius: 'var(--radius-full)',
-                  backgroundColor: 'rgba(234, 88, 12, 0.1)',
-                  color: '#EA580C',
-                  border: '1px solid rgba(234, 88, 12, 0.25)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '4px',
-                }}
-              >
-                <Lock size={12} />
-                <span>OBSERVATION MODE</span>
-              </span>
-            </div>
-            <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-              Branch: {currentBranch.name} · Physical Table Utilization · Start-to-End Session History · Waiter Order Metrics
-            </p>
-          </div>
-
-          {/* Manager Navigation Tabs */}
-          <div
-            style={{
-              display: 'flex',
-              backgroundColor: 'var(--bg-card)',
-              padding: '4px',
-              borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--border-color)',
-              gap: '4px',
-            }}
-          >
-            <button
-              onClick={() => setManagerTab('sessions')}
-              style={{
-                padding: '8px 16px',
-                borderRadius: '6px',
-                fontSize: '13px',
-                fontWeight: 750,
-                backgroundColor: managerTab === 'sessions' ? 'var(--primary)' : 'transparent',
-                color: managerTab === 'sessions' ? '#FFFFFF' : 'var(--text-secondary)',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                border: 'none',
-              }}
-            >
-              <History size={15} />
-              <span>Table Occupancy Log ({branchSessions.length})</span>
-            </button>
-            <button
-              onClick={() => setManagerTab('waiters')}
-              style={{
-                padding: '8px 16px',
-                borderRadius: '6px',
-                fontSize: '13px',
-                fontWeight: 750,
-                backgroundColor: managerTab === 'waiters' ? 'var(--primary)' : 'transparent',
-                color: managerTab === 'waiters' ? '#FFFFFF' : 'var(--text-secondary)',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                border: 'none',
-              }}
-            >
-              <Award size={15} />
-              <span>Waiter Performance & Orders</span>
-            </button>
-            <button
-              onClick={() => setManagerTab('layout')}
-              style={{
-                padding: '8px 16px',
-                borderRadius: '6px',
-                fontSize: '13px',
-                fontWeight: 750,
-                backgroundColor: managerTab === 'layout' ? 'var(--primary)' : 'transparent',
-                color: managerTab === 'layout' ? '#FFFFFF' : 'var(--text-secondary)',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                border: 'none',
-              }}
-            >
-              <LayoutGrid size={15} />
-              <span>Live Room Layout ({branchTables.length})</span>
-            </button>
-          </div>
+        {/* Header Title: Waiter & Floor */}
+        <div>
+          <h1 style={{ fontSize: '26px', fontWeight: 800, margin: 0, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
+            Waiter & Floor
+          </h1>
         </div>
 
-        {/* 4 TOP KPI CARDS */}
+        {/* 1. FIRST DISPLAY THIS: 4 TOP KPI CARDS */}
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
           <div style={{ backgroundColor: 'var(--bg-card)', padding: '18px 20px', borderRadius: 'var(--radius-lg)', border: '1px solid var(--border-color)', boxShadow: 'var(--shadow-sm)' }}>
             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
@@ -284,6 +194,82 @@ export const FloorTablesScreen: React.FC = () => {
               Total bill from today's table sessions
             </div>
           </div>
+        </div>
+
+        {/* 2. BELOW THAT DISPLAY THIS: Manager Navigation Tabs */}
+        <div
+          style={{
+            display: 'flex',
+            backgroundColor: 'var(--bg-card)',
+            padding: '4px',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--border-color)',
+            gap: '4px',
+            width: 'fit-content',
+            maxWidth: '100%',
+            overflowX: 'auto',
+          }}
+        >
+          <button
+            onClick={() => setManagerTab('sessions')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '6px',
+              fontSize: '13px',
+              fontWeight: 750,
+              backgroundColor: managerTab === 'sessions' ? 'var(--primary)' : 'transparent',
+              color: managerTab === 'sessions' ? '#FFFFFF' : 'var(--text-secondary)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              border: 'none',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <History size={15} />
+            <span>Table Occupancy Log ({branchSessions.length})</span>
+          </button>
+          <button
+            onClick={() => setManagerTab('waiters')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '6px',
+              fontSize: '13px',
+              fontWeight: 750,
+              backgroundColor: managerTab === 'waiters' ? 'var(--primary)' : 'transparent',
+              color: managerTab === 'waiters' ? '#FFFFFF' : 'var(--text-secondary)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              border: 'none',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <Award size={15} />
+            <span>Waiter Performance & Orders</span>
+          </button>
+          <button
+            onClick={() => setManagerTab('layout')}
+            style={{
+              padding: '8px 16px',
+              borderRadius: '6px',
+              fontSize: '13px',
+              fontWeight: 750,
+              backgroundColor: managerTab === 'layout' ? 'var(--primary)' : 'transparent',
+              color: managerTab === 'layout' ? '#FFFFFF' : 'var(--text-secondary)',
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '6px',
+              border: 'none',
+              whiteSpace: 'nowrap',
+            }}
+          >
+            <LayoutGrid size={15} />
+            <span>Live Room Layout ({branchTables.length})</span>
+          </button>
         </div>
 
         {/* TAB 1: TABLE SESSIONS & OCCUPANCY HISTORY (START TO END DATE & TIME) */}
@@ -726,6 +712,276 @@ export const FloorTablesScreen: React.FC = () => {
     );
   }
 
+  if (viewMode === 'server_orders') {
+    return (
+      <div
+        style={{
+          height: 'calc(100vh - 85px)',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          boxSizing: 'border-box',
+          backgroundColor: 'var(--bg-main)',
+        }}
+      >
+        {/* Top Control Bar */}
+        <div
+          style={{
+            flexShrink: 0,
+            backgroundColor: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            borderRadius: 'var(--radius-lg)',
+            padding: '10px 16px',
+            boxShadow: 'var(--shadow-sm)',
+            marginBottom: '10px',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '12px',
+            flexWrap: 'wrap',
+            justifyContent: 'space-between',
+            minHeight: '52px',
+            boxSizing: 'border-box',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <div
+              style={{
+                width: '34px',
+                height: '34px',
+                borderRadius: '8px',
+                backgroundColor: 'var(--primary-light)',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: 'var(--primary)',
+              }}
+            >
+              <Bell size={18} />
+            </div>
+            <div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <h1 style={{ fontSize: '16px', fontWeight: 850, margin: 0, color: 'var(--text-main)', lineHeight: 1 }}>
+                  Orders for Server / Waiter
+                </h1>
+                <span
+                  style={{
+                    fontSize: '11px',
+                    fontWeight: 800,
+                    backgroundColor: 'var(--primary)',
+                    color: '#FFFFFF',
+                    padding: '2px 8px',
+                    borderRadius: '10px',
+                  }}
+                >
+                  {dineInOrders.length} Pending
+                </span>
+              </div>
+              <p style={{ margin: '3px 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
+                Active dine-in food trays and beverage orders awaiting table dispatch
+              </p>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <button
+              onClick={() => {
+                setWalkInTableDefault(undefined);
+                setWalkInModalOpen(true);
+              }}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'var(--primary)',
+                color: '#FFFFFF',
+                border: 'none',
+                fontWeight: 750,
+                fontSize: '12.5px',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                boxShadow: '0 2px 8px var(--primary-glow)',
+                lineHeight: 1,
+              }}
+            >
+              <Plus size={14} strokeWidth={2.4} color="#FFFFFF" />
+              <span>Walk-in Order</span>
+            </button>
+          </div>
+        </div>
+
+        {/* Orders Content Area - Fully Scrollable */}
+        <div
+          style={{
+            flex: 1,
+            minHeight: 0,
+            overflowY: 'auto',
+            padding: '16px',
+            backgroundColor: 'var(--bg-card)',
+            borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--border-color)',
+            boxShadow: 'var(--shadow-sm)',
+            boxSizing: 'border-box',
+          }}
+        >
+          {dineInOrders.length === 0 ? (
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                justifyContent: 'center',
+                padding: '60px 20px',
+                textAlign: 'center',
+                gap: '12px',
+                color: 'var(--text-muted)',
+              }}
+            >
+              <div
+                style={{
+                  width: '56px',
+                  height: '56px',
+                  borderRadius: '50%',
+                  backgroundColor: 'var(--bg-card-subtle)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  color: 'var(--text-muted)',
+                }}
+              >
+                <Bell size={26} />
+              </div>
+              <div style={{ fontSize: '16px', fontWeight: 850, color: 'var(--text-main)' }}>
+                No Pending Server Orders
+              </div>
+              <div style={{ fontSize: '13px', maxWidth: '360px', lineHeight: 1.4 }}>
+                All dine-in tables are served. New orders sent from kitchen or cashier will appear here immediately.
+              </div>
+            </div>
+          ) : (
+            <div
+              style={{
+                display: 'grid',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                gap: '16px',
+              }}
+            >
+              {dineInOrders.map((ord) => {
+                const isReadyOrServed = ord.status === 'served' || ord.status === 'ready';
+
+                return (
+                  <div
+                    key={ord.id}
+                    style={{
+                      padding: '18px',
+                      borderRadius: 'var(--radius-lg)',
+                      backgroundColor: isReadyOrServed ? 'rgba(139, 92, 246, 0.06)' : 'var(--bg-card-subtle)',
+                      border: isReadyOrServed ? '2px solid #8B5CF6' : '1px solid var(--border-color)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '12px',
+                      boxShadow: 'var(--shadow-sm)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontWeight: 850, fontSize: '17px', color: 'var(--text-main)' }}>
+                        Table {ord.tableNumber || '?'}
+                      </span>
+                      <span
+                        style={{
+                          fontSize: '11px',
+                          fontWeight: 800,
+                          backgroundColor: ord.status === 'served' ? '#8B5CF6' : ord.status === 'ready' ? '#16A34A' : 'var(--status-preparing-bg)',
+                          color: '#FFFFFF',
+                          padding: '4px 10px',
+                          borderRadius: '6px',
+                          textTransform: 'uppercase',
+                        }}
+                      >
+                        {ord.status === 'served' ? 'KITCHEN READY (SERVE)' : ord.status.toUpperCase()}
+                      </span>
+                    </div>
+
+                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                      Order #{ord.orderNumber} ({ord.items.length} items) · Total: Rs. {ord.total.toLocaleString()}
+                    </div>
+
+                    <div
+                      style={{
+                        fontSize: '12px',
+                        color: 'var(--text-muted)',
+                        borderTop: '1px dashed var(--border-color)',
+                        paddingTop: '8px',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: '4px',
+                      }}
+                    >
+                      {ord.items.map((i, idx) => (
+                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between' }}>
+                          <span><strong>{i.quantity}x</strong> {i.name}</span>
+                          <span>Rs. {(i.unitPrice * i.quantity).toLocaleString()}</span>
+                        </div>
+                      ))}
+                    </div>
+
+                    {ord.notes && (
+                      <div style={{ fontSize: '12px', color: 'var(--primary)', backgroundColor: 'var(--primary-light)', padding: '6px 10px', borderRadius: '6px' }}>
+                        Note: {ord.notes}
+                      </div>
+                    )}
+
+                    <button
+                      onClick={() => {
+                        updateOrderStatus(ord.id, 'completed', undefined, {
+                          type: 'success',
+                          title: 'Order Served to Table ✓',
+                          message: `Order #${ord.orderNumber} served to Table ${ord.tableNumber || 'counter'}.`,
+                        });
+                      }}
+                      style={{
+                        marginTop: '4px',
+                        padding: '10px 14px',
+                        borderRadius: 'var(--radius-md)',
+                        backgroundColor: isReadyOrServed ? '#16A34A' : 'var(--bg-card)',
+                        color: isReadyOrServed ? '#FFFFFF' : 'var(--text-main)',
+                        border: isReadyOrServed ? 'none' : '1px solid var(--border-color)',
+                        fontSize: '13px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '8px',
+                        boxShadow: isReadyOrServed ? '0 2px 8px rgba(22, 163, 74, 0.3)' : 'none',
+                      }}
+                    >
+                      <CheckCircle size={16} />
+                      <span>Mark Delivered & Served ✓</span>
+                    </button>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+
+        {/* Walk-in Order Modal */}
+        {walkInModalOpen && (
+          <WalkInOrderModal
+            initialTableNumber={walkInTableDefault}
+            isFloorStaff={true}
+            onClose={() => {
+              setWalkInModalOpen(false);
+              setWalkInTableDefault(undefined);
+            }}
+          />
+        )}
+      </div>
+    );
+  }
+
   return (
     <div
       style={{
@@ -849,318 +1105,29 @@ export const FloorTablesScreen: React.FC = () => {
       {activeTab === 'grid' ? (
         <div
           style={{
-            display: 'grid',
-            gridTemplateColumns: '370px 1fr',
+            backgroundColor: 'var(--bg-card)',
+            borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--border-color)',
+            padding: '20px',
+            boxShadow: 'var(--shadow-sm)',
+            display: 'flex',
+            flexDirection: 'column',
             gap: '16px',
             flex: 1,
             minHeight: 0,
-            overflow: 'hidden',
+            boxSizing: 'border-box',
+            overflowY: 'auto',
+            overscrollBehavior: 'contain',
           }}
         >
-          {/* Left Sub-card: Orders Ready for Server / Waiter (Scrollable) */}
-          <div
-            style={{
-              backgroundColor: 'var(--bg-card)',
-              borderRadius: 'var(--radius-lg)',
-              border: '1px solid var(--border-color)',
-              padding: '18px',
-              boxShadow: 'var(--shadow-sm)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '14px',
-              height: '100%',
-              minHeight: 0,
-              boxSizing: 'border-box',
-              overflow: 'hidden',
-            }}
-          >
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                flexShrink: 0,
-                borderBottom: '1px solid var(--border-color)',
-                paddingBottom: '12px',
-              }}
-            >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                <Bell size={18} color="var(--primary)" />
-                <h3 style={{ fontSize: '16px', fontWeight: 800, margin: 0 }}>
-                  Orders for Server / Waiter
-                </h3>
-              </div>
-              <span
-                style={{
-                  fontSize: '11px',
-                  fontWeight: 800,
-                  backgroundColor: 'var(--bg-card-subtle)',
-                  padding: '2px 8px',
-                  borderRadius: '10px',
-                  border: '1px solid var(--border-color)',
-                }}
-              >
-                {dineInOrders.length}
-              </span>
-            </div>
-
-            <div
-              style={{
-                flex: 1,
-                minHeight: 0,
-                overflowY: 'auto',
-                overscrollBehavior: 'contain',
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '12px',
-                paddingRight: '4px',
-              }}
-            >
-              {dineInOrders.length === 0 ? (
-                <div style={{ color: 'var(--text-muted)', fontSize: '13px', textAlign: 'center', padding: '36px 12px' }}>
-                  No pending orders waiting for service
-                </div>
-              ) : (
-                dineInOrders.map((ord) => {
-                  const isReadyOrServed = ord.status === 'served' || ord.status === 'ready';
-
-                  return (
-                    <div
-                      key={ord.id}
-                      style={{
-                        padding: '14px',
-                        borderRadius: 'var(--radius-md)',
-                        backgroundColor: isReadyOrServed ? 'rgba(139, 92, 246, 0.08)' : 'var(--bg-card-subtle)',
-                        border: isReadyOrServed ? '1.5px solid #8B5CF6' : '1px solid var(--border-color)',
-                        display: 'flex',
-                        flexDirection: 'column',
-                        gap: '8px',
-                      }}
-                    >
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                        <span style={{ fontWeight: 850, fontSize: '15px', color: 'var(--text-main)' }}>
-                          Table {ord.tableNumber || '?'}
-                        </span>
-                        <span
-                          style={{
-                            fontSize: '10.5px',
-                            fontWeight: 800,
-                            backgroundColor: ord.status === 'served' ? '#8B5CF6' : ord.status === 'ready' ? '#16A34A' : 'var(--status-preparing-bg)',
-                            color: '#FFFFFF',
-                            padding: '3px 8px',
-                            borderRadius: '4px',
-                            textTransform: 'uppercase',
-                          }}
-                        >
-                          {ord.status === 'served' ? 'KITCHEN READY (SERVE)' : ord.status.toUpperCase()}
-                        </span>
-                      </div>
-
-                      <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)' }}>
-                        Order #{ord.orderNumber} ({ord.items.length} items) · Total: Rs. {ord.total.toLocaleString()}
-                      </div>
-
-                      <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', borderTop: '1px dashed var(--border-color)', paddingTop: '6px' }}>
-                        {ord.items.map((i) => `${i.quantity}x ${i.name}`).join(', ')}
-                      </div>
-
-                      <button
-                        onClick={() => {
-                          updateOrderStatus(ord.id, 'completed');
-                          addToast({
-                            type: 'success',
-                            title: 'Order Served to Table ✓',
-                            message: `Order #${ord.orderNumber} served to Table ${ord.tableNumber || 'counter'}.`,
-                          });
-                        }}
-                        style={{
-                          marginTop: '4px',
-                          padding: '8px 12px',
-                          borderRadius: '6px',
-                          backgroundColor: isReadyOrServed ? '#16A34A' : 'var(--bg-card)',
-                          color: isReadyOrServed ? '#FFFFFF' : 'var(--text-main)',
-                          border: isReadyOrServed ? 'none' : '1px solid var(--border-color)',
-                          fontSize: '12px',
-                          fontWeight: 750,
-                          cursor: 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '6px',
-                        }}
-                      >
-                        <CheckCircle size={14} />
-                        <span>Mark Delivered & Served ✓</span>
-                      </button>
-                    </div>
-                  );
-                })
-              )}
-            </div>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
+            <h3 style={{ fontSize: '17px', fontWeight: 800, margin: 0 }}>
+              Dining Room Layout ({branchTables.length} Tables)
+            </h3>
+            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Tap table to open quick actions</span>
           </div>
 
-          {/* Right Sub-card: Table Chart & Table Options (Scrollable) */}
-          <div
-            style={{
-              backgroundColor: 'var(--bg-card)',
-              borderRadius: 'var(--radius-lg)',
-              border: '1px solid var(--border-color)',
-              padding: '20px',
-              boxShadow: 'var(--shadow-sm)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '16px',
-              height: '100%',
-              minHeight: 0,
-              boxSizing: 'border-box',
-              overflowY: 'auto',
-              overscrollBehavior: 'contain',
-            }}
-          >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-              <h3 style={{ fontSize: '17px', fontWeight: 800, margin: 0 }}>
-                Dining Room Layout ({branchTables.length} Tables)
-              </h3>
-              <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Tap table to view/update status</span>
-            </div>
-
-            {/* Selected Table Controls / Sub Card */}
-            {selectedTable && (
-              <div
-                style={{
-                  padding: '16px',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'var(--bg-card-subtle)',
-                  border: '1.5px solid var(--primary)',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  gap: '12px',
-                  boxShadow: '0 4px 12px var(--primary-glow)',
-                  flexShrink: 0,
-                }}
-              >
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                  <div>
-                    <h4 style={{ fontSize: '16px', fontWeight: 800, margin: 0 }}>
-                      Selected: Table {selectedTable.number} (Current: {selectedTable.status.toUpperCase()})
-                    </h4>
-                    {selectedTable.reservedFor && (
-                      <div style={{ fontSize: '12px', color: '#9333EA', fontWeight: 600, marginTop: '2px' }}>
-                        Reserved For: {selectedTable.reservedFor}
-                      </div>
-                    )}
-                  </div>
-                  <button
-                    onClick={() => setSelectedTable(null)}
-                    style={{
-                      background: 'none',
-                      border: 'none',
-                      fontSize: '12px',
-                      color: 'var(--text-muted)',
-                      cursor: 'pointer',
-                      fontWeight: 700,
-                    }}
-                  >
-                    Close ✕
-                  </button>
-                </div>
-
-                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
-                  <button
-                    onClick={() => updateTableStatus(selectedTable.id, 'occupied')}
-                    style={{
-                      padding: '8px 14px',
-                      borderRadius: 'var(--radius-md)',
-                      backgroundColor: 'var(--table-occupied-bg)',
-                      color: 'var(--table-occupied-text)',
-                      fontWeight: 700,
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      border: 'none',
-                    }}
-                  >
-                    Mark Seated / Occupied
-                  </button>
-
-                  <button
-                    onClick={() => updateTableStatus(selectedTable.id, 'cleaning')}
-                    style={{
-                      padding: '8px 14px',
-                      borderRadius: 'var(--radius-md)',
-                      backgroundColor: 'var(--table-cleaning-bg)',
-                      color: 'var(--table-cleaning-text)',
-                      fontWeight: 700,
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      border: 'none',
-                    }}
-                  >
-                    Mark Cleaning
-                  </button>
-
-                  <button
-                    onClick={() => updateTableStatus(selectedTable.id, 'reserved')}
-                    style={{
-                      padding: '8px 14px',
-                      borderRadius: 'var(--radius-md)',
-                      backgroundColor: 'var(--table-reserved-bg)',
-                      color: 'var(--table-reserved-text)',
-                      fontWeight: 700,
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      border: 'none',
-                    }}
-                  >
-                    Mark Reserved
-                  </button>
-
-                  <button
-                    onClick={() => setConfirmFreeTableId(selectedTable.id)}
-                    style={{
-                      padding: '8px 14px',
-                      borderRadius: 'var(--radius-md)',
-                      backgroundColor: 'var(--table-available-bg)',
-                      color: 'var(--table-available-text)',
-                      fontWeight: 700,
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      border: 'none',
-                    }}
-                  >
-                    Mark Table Free ✓
-                  </button>
-
-                  <button
-                    onClick={() => {
-                      setWalkInTableDefault(selectedTable.number);
-                      setWalkInModalOpen(true);
-                    }}
-                    style={{
-                      padding: '8px 14px',
-                      borderRadius: 'var(--radius-md)',
-                      backgroundColor: 'var(--primary)',
-                      color: '#FFFFFF',
-                      fontWeight: 750,
-                      fontSize: '12px',
-                      cursor: 'pointer',
-                      border: 'none',
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      gap: '5px',
-                      marginLeft: 'auto',
-                      lineHeight: 1,
-                      boxShadow: '0 2px 6px var(--primary-glow)',
-                    }}
-                  >
-                    <Plus size={13} strokeWidth={2.4} color="#FFFFFF" style={{ flexShrink: 0 }} />
-                    <span style={{ fontWeight: 750, color: '#FFFFFF', lineHeight: 1 }}>Walk-in Order (Table {selectedTable.number})</span>
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Table Chart Grid */}
+          {/* Table Chart Grid */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '14px' }}>
               {branchTables.map((tbl) => {
                 const style = getStatusStyle(tbl.status);
@@ -1215,7 +1182,6 @@ export const FloorTablesScreen: React.FC = () => {
               })}
             </div>
           </div>
-        </div>
       ) : (
         /* RESERVATIONS LIST TAB (v1.1 PRD Requirement) */
         <div
@@ -1293,6 +1259,220 @@ export const FloorTablesScreen: React.FC = () => {
                 </div>
               </div>
             ))}
+          </div>
+        </div>
+      )}
+
+      {/* WhatsApp Reactions-Style Pop-up Screen on Table Click */}
+      {selectedTable && (
+        <div
+          onClick={() => setSelectedTable(null)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            backgroundColor: 'rgba(0,0,0,0.36)',
+            backdropFilter: 'blur(3px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: 'var(--bg-card)',
+              borderRadius: '28px',
+              border: '1.5px solid var(--border-color)',
+              padding: '12px 18px',
+              boxShadow: '0 20px 48px rgba(0,0,0,0.22), 0 4px 14px rgba(0,0,0,0.08)',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '10px',
+              flexWrap: 'wrap',
+              maxWidth: '94vw',
+              animation: 'scaleUp 0.15s ease',
+            }}
+          >
+            {/* Table Badge */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 14px',
+                borderRadius: '20px',
+                backgroundColor: 'var(--bg-card-subtle)',
+                border: '1px solid var(--border-color)',
+                fontSize: '13.5px',
+                fontWeight: 850,
+                color: 'var(--text-main)',
+              }}
+            >
+              <span>Table {selectedTable.number}</span>
+              <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 650 }}>
+                ({selectedTable.capacity}p · {selectedTable.status.toUpperCase()})
+              </span>
+            </div>
+
+            {/* Simple Row of Action Options (Like WhatsApp Reactions) */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+              {/* Option 1: Mark Table Free */}
+              <button
+                onClick={() => {
+                  updateTableStatus(selectedTable.id, 'available');
+                  setSelectedTable(null);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 14px',
+                  borderRadius: '20px',
+                  backgroundColor: 'var(--table-available-bg)',
+                  color: 'var(--table-available-text)',
+                  border: '1.5px solid #16A34A',
+                  fontSize: '12.5px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  transition: 'all 0.12s ease',
+                }}
+                title="Mark Free / Available"
+              >
+                <span>🟢</span>
+                <span>Mark Free</span>
+              </button>
+
+              {/* Option 2: Mark Seated */}
+              <button
+                onClick={() => {
+                  updateTableStatus(selectedTable.id, 'occupied');
+                  setSelectedTable(null);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 14px',
+                  borderRadius: '20px',
+                  backgroundColor: 'var(--table-occupied-bg)',
+                  color: 'var(--table-occupied-text)',
+                  border: '1.5px solid #EA580C',
+                  fontSize: '12.5px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  transition: 'all 0.12s ease',
+                }}
+                title="Mark Seated / Occupied"
+              >
+                <span>🔴</span>
+                <span>Seated</span>
+              </button>
+
+              {/* Option 3: Mark Cleaning */}
+              <button
+                onClick={() => {
+                  updateTableStatus(selectedTable.id, 'cleaning');
+                  setSelectedTable(null);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 14px',
+                  borderRadius: '20px',
+                  backgroundColor: 'var(--table-cleaning-bg)',
+                  color: 'var(--table-cleaning-text)',
+                  border: '1.5px solid #CA8A04',
+                  fontSize: '12.5px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  transition: 'all 0.12s ease',
+                }}
+                title="Mark Cleaning"
+              >
+                <span>🧹</span>
+                <span>Cleaning</span>
+              </button>
+
+              {/* Option 4: Mark Reserved */}
+              <button
+                onClick={() => {
+                  updateTableStatus(selectedTable.id, 'reserved');
+                  setSelectedTable(null);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 14px',
+                  borderRadius: '20px',
+                  backgroundColor: 'var(--table-reserved-bg)',
+                  color: 'var(--table-reserved-text)',
+                  border: '1.5px solid #9333EA',
+                  fontSize: '12.5px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  transition: 'all 0.12s ease',
+                }}
+                title="Mark Reserved"
+              >
+                <span>🟣</span>
+                <span>Reserved</span>
+              </button>
+
+              {/* Option 5: Take Walk-in Order */}
+              <button
+                onClick={() => {
+                  setWalkInTableDefault(selectedTable.number);
+                  setWalkInModalOpen(true);
+                  setSelectedTable(null);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '8px 16px',
+                  borderRadius: '20px',
+                  backgroundColor: 'var(--primary)',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  fontSize: '12.5px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 8px var(--primary-glow)',
+                  transition: 'all 0.12s ease',
+                }}
+                title="Take Order for this Table"
+              >
+                <Plus size={14} strokeWidth={2.4} />
+                <span>+ Order</span>
+              </button>
+
+              {/* Close Button */}
+              <button
+                onClick={() => setSelectedTable(null)}
+                style={{
+                  width: '32px',
+                  height: '32px',
+                  borderRadius: '50%',
+                  border: '1px solid var(--border-color)',
+                  backgroundColor: 'var(--bg-card-subtle)',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '14px',
+                  fontWeight: 850,
+                  padding: 0,
+                }}
+                title="Close"
+              >
+                ✕
+              </button>
+            </div>
           </div>
         </div>
       )}

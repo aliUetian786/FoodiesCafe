@@ -28,6 +28,45 @@ import {
   ManagerAccessRequest,
 } from '@/types/cafe';
 
+import { store } from '@/redux/store';
+import {
+  setOrders as setReduxOrders,
+  upsertOrder as upsertReduxOrder,
+  updateOrderStatusInStore as updateReduxOrderStatus,
+  filterOrdersToToday as filterReduxOrdersToToday,
+} from '@/redux/slices/ordersSlice';
+import {
+  setCart as setReduxCart,
+  addToCart as addReduxCart,
+  updateCartItemQty as updateReduxCartQty,
+  removeFromCart as removeReduxCart,
+  clearCart as clearReduxCart,
+} from '@/redux/slices/cartSlice';
+import {
+  setBranches as setReduxBranches,
+  setCurrentBranchId as setReduxBranchId,
+  setMenuItems as setReduxMenuItems,
+  setCategories as setReduxCategories,
+  setTables as setReduxTables,
+  setShifts as setReduxShifts,
+  setRefundRequests as setReduxRefundRequests,
+  setComplaints as setReduxComplaints,
+  setTableSessions as setReduxTableSessions,
+  setUsers as setReduxUsers,
+  setHeroBanners as setReduxHeroBanners,
+  setDealCard as setReduxDealCard,
+  setFooterSettings as setReduxFooterSettings,
+  updateTableStatusInStore as updateReduxTableStatus,
+} from '@/redux/slices/cafeSlice';
+import {
+  setCurrentRole as setReduxRole,
+  setCurrentUser as setReduxUser,
+  addToast as addReduxToast,
+  removeToast as removeReduxToast,
+  setMenuSearchQuery as setReduxSearchQuery,
+} from '@/redux/slices/uiSlice';
+import { runSync, broadcastStateMutation } from '@/redux/sync/syncEngine';
+
 interface Toast {
   id: string;
   type: 'info' | 'success' | 'warning' | 'error';
@@ -87,16 +126,21 @@ interface AppContextType {
       customerCoordinates?: { lat: number; lng: number };
     }
   ) => Order;
-  updateOrderStatus: (orderId: string, newStatus: OrderStatus, reason?: string) => void;
-  sendOrderToKitchen: (orderId: string) => void;
+  updateOrderStatus: (
+    orderId: string,
+    newStatus: OrderStatus,
+    reason?: string,
+    customNotification?: { title: string; message: string; type?: 'info' | 'success' | 'warning' }
+  ) => void;
+  sendOrderToKitchen: (orderId: string, silent?: boolean) => void;
   setOrderKitchenForwardTime: (orderId: string, customMinutes: number) => void;
-  recordCashPayment: (orderId: string, amountReceived: number) => { change: number; success: boolean };
+  recordCashPayment: (orderId: string, amountReceived: number, silent?: boolean) => { change: number; success: boolean };
   editOrderStage1: (orderId: string, updatedItems: OrderItem[]) => void;
   addAddOnsToOrderStage2: (orderId: string, addOnItems: OrderItem[]) => void;
   cancelOrder: (orderId: string, reason: string) => void;
 
   // Delivery & Rider Actions
-  assignRiderToOrder: (orderId: string, riderId: string) => void;
+  assignRiderToOrder: (orderId: string, riderId: string, silent?: boolean) => void;
   unassignRiderFromOrder: (orderId: string) => void;
   finishRiderDelivery: (orderId: string, paymentCollected?: boolean) => void;
   updateRiderAvailability: (riderId: string, status: 'available' | 'busy' | 'offline') => void;
@@ -111,7 +155,7 @@ interface AppContextType {
   addTable: (tableData: Omit<Table, 'id'>) => void;
   updateTable: (tableId: string, updates: Partial<Table>) => void;
   deleteTable: (tableId: string) => void;
-  updateTableStatus: (tableId: string, status: TableStatus, reservationName?: string) => void;
+  updateTableStatus: (tableId: string, status: TableStatus, reservationName?: string, customMessage?: string, silent?: boolean) => void;
   markTableFree: (tableIdOrNumber: string) => void;
   addTableSession: (session: Omit<TableSession, 'id'>) => void;
   completeTableSession: (tableId: string) => void;
@@ -448,9 +492,9 @@ const INITIAL_HERO_BANNERS: HeroBanner[] = [
 
 const INITIAL_DEAL_CARD: DealCard = {
   title: 'Royal Chicken Dum Biryani',
-  subtitle: 'Slow-steamed in copper handi with saffron & house spices',
+  subtitle: '',
   price: 'Rs. 650',
-  tag: '🌟 TODAY\'S CHEF SPECIAL',
+  tag: '',
   imageUrl: '/food-biryani.jpg',
   categoryLink: 'Biryani & Rice',
 };
@@ -483,8 +527,8 @@ const INITIAL_USERS: User[] = [
   { id: 'user-kitchen', name: 'Chef Ustaad Aslam', phone: '+92 300 6667788', email: 'kitchen.gulberg@foodiescafe.pk', role: 'kitchen_staff', branchId: 'gulberg-lahore', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-cashier', name: 'Bilal Farooq', phone: '+92 300 8889900', email: 'cashier.gulberg@foodiescafe.pk', role: 'cashier', branchId: 'gulberg-lahore', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-floor', name: 'Kashif Ali', phone: '+92 300 1112233', email: 'floor.gulberg@foodiescafe.pk', role: 'floor_staff', branchId: 'gulberg-lahore', status: 'active', password: 'password123', pin: '1234' },
-  { id: 'user-rider-1', name: 'Tariq Mehmood (Rider)', phone: '+92 301 9991122', email: 'rider1.gulberg@foodiescafe.pk', role: 'delivery_staff', branchId: 'gulberg-lahore', status: 'active', password: 'password123', pin: '1234', riderAvailability: 'available', riderTotalDeliveries: 14 },
-  { id: 'user-rider-2', name: 'Usman Ghani (Rider)', phone: '+92 302 8882233', email: 'rider2.gulberg@foodiescafe.pk', role: 'delivery_staff', branchId: 'gulberg-lahore', status: 'active', password: 'password123', pin: '1234', riderAvailability: 'available', riderTotalDeliveries: 9 },
+  { id: 'user-rider-1', name: 'Tariq Mehmood (Rider)', phone: '+92 301 9991122', email: 'rider1.gulberg@foodiescafe.pk', role: 'delivery_staff', branchId: 'gulberg-lahore', status: 'active', password: 'password123', pin: '1234', riderAvailability: 'available', riderTotalDeliveries: 0 },
+  { id: 'user-rider-2', name: 'Usman Ghani (Rider)', phone: '+92 302 8882233', email: 'rider2.gulberg@foodiescafe.pk', role: 'delivery_staff', branchId: 'gulberg-lahore', status: 'active', password: 'password123', pin: '1234', riderAvailability: 'available', riderTotalDeliveries: 0 },
   // Islamabad Staff
   { id: 'user-bm-isb', name: 'Noman Bashir', phone: '+92 300 3334455', email: 'manager.islamabad@foodiescafe.pk', role: 'branch_manager', branchId: 'f7-islamabad', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-cashier-isb', name: 'Hamza Tariq', phone: '+92 300 3338899', email: 'cashier.islamabad@foodiescafe.pk', role: 'cashier', branchId: 'f7-islamabad', status: 'active', password: 'password123', pin: '1234' },
@@ -499,62 +543,7 @@ const INITIAL_USERS: User[] = [
   { id: 'user-rep-khi', name: 'Mahnoor Baloch', phone: '+92 300 5555544', email: 'rep.karachi@foodiescafe.pk', role: 'branch_representative', branchId: 'clifton-karachi', status: 'active', password: 'password123', pin: '1234' },
 ];
 
-const INITIAL_COMPLAINTS: Complaint[] = [
-  {
-    id: 'cmp-101',
-    ticketNumber: 'TKT-4128',
-    customerId: 'user-cust',
-    customerName: 'Zeeshan Ahmed',
-    customerPhone: '+92 301 5551234',
-    branchId: 'gulberg-lahore',
-    orderId: 'test-123',
-    orderNumber: 'FC-9999',
-    subject: 'Table Reservation & Karahi Spice Inquiry',
-    status: 'in_progress',
-    assignedTo: 'Zara Noor (Branch Rep)',
-    createdAt: 'Today, 04:15 PM',
-    messages: [
-      {
-        id: 'msg-1',
-        sender: 'customer',
-        senderName: 'Zeeshan Ahmed',
-        text: 'Salam, can you please ensure the Karahi is medium spice and reserve 2 extra seats near the window?',
-        timestamp: '04:15 PM',
-      },
-      {
-        id: 'msg-2',
-        sender: 'representative',
-        senderName: 'Zara Noor (Branch Rep)',
-        text: 'WaSalam Zeeshan! Absolutely, Chef Aslam has noted medium spice and window seating is confirmed for your arrival.',
-        timestamp: '04:18 PM',
-      },
-    ],
-  },
-  {
-    id: 'cmp-102',
-    ticketNumber: 'TKT-8921',
-    customerId: 'user-ali',
-    customerName: 'Ali Raza',
-    customerPhone: '+92 3012345678',
-    branchId: 'gulberg-lahore',
-    orderId: 'ord-1792354205181',
-    orderNumber: 'FC-4352',
-    subject: 'Takeaway Counter Collection Query',
-    status: 'new',
-    assignedTo: 'Zara Noor (Branch Rep)',
-    createdAt: 'Today, 05:00 PM',
-    messages: [
-      {
-        id: 'msg-3',
-        sender: 'customer',
-        senderName: 'Ali Raza',
-        text: 'Hi, I am reaching the Gulberg branch in 10 minutes for Order #FC-4352. Is it packed and ready at the takeaway counter?',
-        timestamp: '05:00 PM',
-      },
-    ],
-  },
-];
-
+const INITIAL_COMPLAINTS: Complaint[] = [];
 
 const DEFAULT_OPEN_SHIFT: CashShift = {
   id: 'sh-today-1',
@@ -562,9 +551,9 @@ const DEFAULT_OPEN_SHIFT: CashShift = {
   cashierName: 'Bilal Farooq',
   branchId: 'gulberg-lahore',
   openedAt: 'Today, 09:00 AM',
-  openingFloat: 5000,
-  cashCollected: 34200,
-  expectedCash: 39200,
+  openingFloat: 0,
+  cashCollected: 0,
+  expectedCash: 0,
   status: 'open',
 };
 
@@ -588,10 +577,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     status: 'active',
   };
 
+  // Staff login session duration: valid for 4-8 hours (8-hour shift max: 8 * 60 * 60 * 1000 ms)
+  const STAFF_SESSION_MAX_AGE_MS = 8 * 60 * 60 * 1000;
+
   const [currentRole, setCurrentRole] = useState<Role>(() => {
     if (typeof window !== 'undefined') {
       const isStaffPath = window.location.pathname.startsWith('/staff');
       const savedStaffRole = localStorage.getItem('foodies_staff_role');
+      const savedLoginTime = localStorage.getItem('foodies_staff_login_time');
+
+      // Check if staff session has expired (> 8 hours)
+      if (savedLoginTime && Date.now() - Number(savedLoginTime) > STAFF_SESSION_MAX_AGE_MS) {
+        localStorage.removeItem('foodies_staff_user');
+        localStorage.removeItem('foodies_staff_role');
+        localStorage.removeItem('foodies_staff_view');
+        localStorage.removeItem('foodies_staff_login_time');
+        return 'customer';
+      }
+
       if (savedStaffRole && savedStaffRole !== 'customer') {
         return savedStaffRole as Role;
       }
@@ -614,6 +617,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (typeof window !== 'undefined') {
       const isStaffPath = window.location.pathname.startsWith('/staff');
       if (isStaffPath) {
+        const savedLoginTime = localStorage.getItem('foodies_staff_login_time');
+        // Check if staff session has expired (> 8 hours)
+        if (savedLoginTime && Date.now() - Number(savedLoginTime) > STAFF_SESSION_MAX_AGE_MS) {
+          localStorage.removeItem('foodies_staff_user');
+          localStorage.removeItem('foodies_staff_role');
+          localStorage.removeItem('foodies_staff_view');
+          localStorage.removeItem('foodies_staff_login_time');
+          return GUEST_CUSTOMER;
+        }
+
         try {
           const savedStaff = localStorage.getItem('foodies_staff_user');
           if (savedStaff) {
@@ -644,9 +657,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (typeof window === 'undefined') return;
     try {
       if (currentUser && currentUser.role && currentUser.role !== 'customer') {
-        // Staff member: save strictly to staff session keys
+        // Staff member: save strictly to staff session keys and ensure login time is set
         localStorage.setItem('foodies_staff_user', JSON.stringify(currentUser));
         localStorage.setItem('foodies_staff_role', currentUser.role);
+        if (!localStorage.getItem('foodies_staff_login_time')) {
+          localStorage.setItem('foodies_staff_login_time', Date.now().toString());
+        }
       } else if (currentUser && currentUser.name && currentUser.name !== 'Guest Customer') {
         // Customer: save strictly to customer key
         localStorage.setItem('foodies_customer_user', JSON.stringify(currentUser));
@@ -695,7 +711,19 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (typeof window !== 'undefined') {
       try {
         const saved = localStorage.getItem('foodies_shifts_live');
-        if (saved) return JSON.parse(saved);
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed)) {
+            const clean = parsed
+              .filter((s: CashShift) => s.id !== 'sh-yesterday-1' && s.id !== 'sh-yesterday-2')
+              .map((s: CashShift) =>
+                s.id === 'sh-today-1' && (s.cashCollected === 34200 || s.openingFloat === 5000 || s.expectedCash === 5000)
+                  ? { ...s, openingFloat: 0, cashCollected: 0, expectedCash: 0 }
+                  : s
+              );
+            if (clean.length > 0) return clean;
+          }
+        }
       } catch (e) {}
     }
     return INITIAL_SHIFTS;
@@ -726,6 +754,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [customerCoordinates, setCustomerCoordinates] = useState<{ lat: number; lng: number } | null>(null);
   const tabIdRef = useRef<string>(typeof window !== 'undefined' ? Math.random().toString(36).substring(2, 9) : 'tab');
   const liveBroadcastChannelRef = useRef<BroadcastChannel | null>(null);
+  const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
+  const lastToastRef = useRef<{ title: string; message: string; timestamp: number } | null>(null);
 
   const [managerAccessRequests, setManagerAccessRequests] = useState<Record<string, ManagerAccessRequest>>(() => {
     if (typeof window !== 'undefined') {
@@ -755,6 +785,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (typeof window === 'undefined') return;
     try {
       localStorage.setItem('foodies_orders_live', JSON.stringify(ordersList));
+      store.dispatch(setReduxOrders(ordersList));
+      broadcastStateMutation('SYNC_ORDERS', ordersList);
       if (liveBroadcastChannelRef.current) {
         liveBroadcastChannelRef.current.postMessage({
           type: 'SYNC_ORDERS',
@@ -769,6 +801,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (typeof window === 'undefined') return;
     try {
       localStorage.setItem('foodies_tables_live', JSON.stringify(tablesList));
+      store.dispatch(setReduxTables(tablesList));
+      broadcastStateMutation('SYNC_TABLES', tablesList);
       if (liveBroadcastChannelRef.current) {
         liveBroadcastChannelRef.current.postMessage({
           type: 'SYNC_TABLES',
@@ -783,6 +817,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (typeof window === 'undefined') return;
     try {
       localStorage.setItem('foodies_menu_items', JSON.stringify(itemsList));
+      store.dispatch(setReduxMenuItems(itemsList));
+      broadcastStateMutation('SYNC_MENU', itemsList);
       if (liveBroadcastChannelRef.current) {
         liveBroadcastChannelRef.current.postMessage({
           type: 'SYNC_MENU',
@@ -797,6 +833,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (typeof window === 'undefined') return;
     try {
       localStorage.setItem('foodies_complaints', JSON.stringify(complaintsList));
+      store.dispatch(setReduxComplaints(complaintsList));
+      broadcastStateMutation('SYNC_COMPLAINTS', complaintsList);
       if (liveBroadcastChannelRef.current) {
         liveBroadcastChannelRef.current.postMessage({
           type: 'SYNC_COMPLAINTS',
@@ -811,6 +849,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (typeof window === 'undefined') return;
     try {
       localStorage.setItem('foodies_shifts_live', JSON.stringify(shiftsList));
+      store.dispatch(setReduxShifts(shiftsList));
+      broadcastStateMutation('SYNC_SHIFTS', shiftsList);
       if (liveBroadcastChannelRef.current) {
         liveBroadcastChannelRef.current.postMessage({
           type: 'SYNC_SHIFTS',
@@ -825,6 +865,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (typeof window === 'undefined') return;
     try {
       localStorage.setItem('foodies_refunds_live', JSON.stringify(refundsList));
+      store.dispatch(setReduxRefundRequests(refundsList));
+      broadcastStateMutation('SYNC_REFUNDS', refundsList);
       if (liveBroadcastChannelRef.current) {
         liveBroadcastChannelRef.current.postMessage({
           type: 'SYNC_REFUNDS',
@@ -839,6 +881,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (typeof window === 'undefined') return;
     try {
       localStorage.setItem('foodies_table_sessions_live', JSON.stringify(sessionsList));
+      store.dispatch(setReduxTableSessions(sessionsList));
+      broadcastStateMutation('SYNC_TABLE_SESSIONS', sessionsList);
       if (liveBroadcastChannelRef.current) {
         liveBroadcastChannelRef.current.postMessage({
           type: 'SYNC_TABLE_SESSIONS',
@@ -853,6 +897,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (typeof window === 'undefined') return;
     try {
       localStorage.setItem('foodies_users_live', JSON.stringify(usersList));
+      store.dispatch(setReduxUsers(usersList));
+      broadcastStateMutation('SYNC_USERS', usersList);
       if (liveBroadcastChannelRef.current) {
         liveBroadcastChannelRef.current.postMessage({
           type: 'SYNC_USERS',
@@ -916,13 +962,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     } catch (e) {}
 
-    // Load persisted complaints on first mount
+    // Load persisted complaints on first mount (filter out stale dummy tickets)
     const savedComplaints = localStorage.getItem('foodies_complaints');
     if (savedComplaints) {
       try {
         const parsed = JSON.parse(savedComplaints);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setComplaints(parsed);
+          const cleanComplaints = parsed.filter(
+            (c: Complaint) => c.id !== 'cmp-101' && c.id !== 'cmp-102' && c.orderNumber !== 'FC-9999' && c.orderNumber !== 'FC-4352'
+          );
+          setComplaints(cleanComplaints);
+          localStorage.setItem('foodies_complaints', JSON.stringify(cleanComplaints));
         }
       } catch (e) {}
     }
@@ -934,9 +984,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         const parsed = JSON.parse(savedOrders);
         if (Array.isArray(parsed)) {
-          const cleanOrders = parsed.filter((o: Order) => o.id !== 'ord-101' && o.id !== 'ord-102');
+          const cleanOrders = parsed.filter(
+            (o: Order) =>
+              !o.id?.startsWith('ord-seed-') &&
+              !o.id?.startsWith('ord-10') &&
+              o.id !== 'ord-seed-1' &&
+              o.id !== 'ord-seed-2' &&
+              o.id !== 'ord-seed-3' &&
+              o.id !== 'ord-seed-4' &&
+              o.orderNumber !== 'FC-6744' &&
+              o.orderNumber !== 'FC-7819' &&
+              o.orderNumber !== 'FC-8812' &&
+              o.orderNumber !== 'FC-9021'
+          );
           if (cleanOrders.length > 0) {
             setOrders(cleanOrders);
+            localStorage.setItem('foodies_orders_live', JSON.stringify(cleanOrders));
           } else {
             localStorage.removeItem('foodies_orders_live');
             setOrders([]);
@@ -944,6 +1007,58 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
       } catch (e) {}
     }
+
+    // Sanitize shifts, refunds, and table sessions from localStorage
+    try {
+      const savedRefunds = localStorage.getItem('foodies_refunds_live');
+      if (savedRefunds) {
+        const parsed = JSON.parse(savedRefunds);
+        if (Array.isArray(parsed)) {
+          const clean = parsed.filter(
+            (r: RefundRequest) =>
+              r.id !== 'ref-pending-1' &&
+              r.id !== 'ref-approved-1' &&
+              !r.id.startsWith('ref-pending') &&
+              !r.id.startsWith('ref-approved') &&
+              r.orderNumber !== 'FC-8812' &&
+              r.orderNumber !== 'FC-9021' &&
+              r.orderNumber !== 'FC-8492' &&
+              r.orderNumber !== 'FC-6744' &&
+              r.orderNumber !== 'FC-7819'
+          );
+          setRefundRequests(clean);
+          if (clean.length > 0) {
+            localStorage.setItem('foodies_refunds_live', JSON.stringify(clean));
+          } else {
+            localStorage.removeItem('foodies_refunds_live');
+          }
+        }
+      }
+      const savedSessions = localStorage.getItem('foodies_table_sessions_live');
+      if (savedSessions) {
+        const parsed = JSON.parse(savedSessions);
+        if (Array.isArray(parsed)) {
+          const clean = parsed.filter((s: TableSession) => !s.id?.startsWith('sess-'));
+          setTableSessions(clean);
+          localStorage.setItem('foodies_table_sessions_live', JSON.stringify(clean));
+        }
+      }
+      const savedShifts = localStorage.getItem('foodies_shifts_live');
+      if (savedShifts) {
+        const parsed = JSON.parse(savedShifts);
+        if (Array.isArray(parsed)) {
+          const clean = parsed
+            .filter((s: CashShift) => s.id !== 'sh-yesterday-1' && s.id !== 'sh-yesterday-2')
+            .map((s: CashShift) =>
+              s.id === 'sh-today-1' && (s.cashCollected === 34200 || s.openingFloat === 5000 || s.expectedCash === 5000)
+                ? { ...s, openingFloat: 0, cashCollected: 0, expectedCash: 0 }
+                : s
+            );
+          setShifts(clean.length > 0 ? clean : INITIAL_SHIFTS);
+          localStorage.setItem('foodies_shifts_live', JSON.stringify(clean.length > 0 ? clean : INITIAL_SHIFTS));
+        }
+      }
+    } catch (e) {}
 
     // Load persisted menu items on first mount
     const savedMenu = localStorage.getItem('foodies_menu_items');
@@ -1199,287 +1314,71 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
   }, []);
 
-  // Synchronize state with PostgreSQL database via Next.js API routes with live 2.5s recurring poll
+  // High-performance Redux Toolkit store synchronization & background fast sync
   useEffect(() => {
-    async function fetchDatabaseData() {
-      try {
-        const bRes = await fetch('/api/branches');
-        if (bRes.ok) {
-          const data = await bRes.json();
-          if (Array.isArray(data.branches) && data.branches.length > 0) {
-            setBranches((prev) => {
-              if (JSON.stringify(prev) === JSON.stringify(data.branches)) return prev;
-              return data.branches;
-            });
-          }
-        }
-      } catch (e) {}
+    // 1. Initial push of context state to Redux store
+    if (orders.length > 0) store.dispatch(setReduxOrders(orders));
+    if (cart.length > 0) store.dispatch(setReduxCart(cart));
+    if (branches.length > 0) store.dispatch(setReduxBranches(branches));
+    if (tables.length > 0) store.dispatch(setReduxTables(tables));
 
-      try {
-        const mRes = await fetch('/api/menu');
-        if (mRes.ok) {
-          const data = await mRes.json();
-          if (Array.isArray(data.menuItems) && data.menuItems.length > 0) {
-            setMenuItems((prev) => {
-              if (prev.length === data.menuItems.length) {
-                const isIdentical = prev.every((pItem, idx) => {
-                  const dItem = data.menuItems[idx];
-                  return (
-                    pItem.id === dItem.id &&
-                    Number(pItem.basePrice) === Number(dItem.basePrice) &&
-                    pItem.name === dItem.name &&
-                    pItem.category === dItem.category &&
-                    pItem.isAvailable === dItem.isAvailable &&
-                    JSON.stringify(pItem.branchPriceOverrides) === JSON.stringify(dItem.branchPriceOverrides) &&
-                    JSON.stringify(pItem.branchAvailability) === JSON.stringify(dItem.branchAvailability)
-                  );
-                });
-                if (isIdentical) return prev;
-              }
-              try {
-                localStorage.setItem('foodies_menu_items', JSON.stringify(data.menuItems));
-              } catch (e) {}
-              return data.menuItems;
-            });
-          }
-          if (Array.isArray(data.categories) && data.categories.length > 0) {
-            setCategories((prev) => {
-              if (JSON.stringify(prev) === JSON.stringify(data.categories)) return prev;
-              return data.categories;
-            });
-          }
-        }
-      } catch (e) {}
+    // 2. Subscribe to Redux Store changes (dispatched by RTK syncEngine or components)
+    let prevReduxState = store.getState();
+    const unsubscribe = store.subscribe(() => {
+      const state = store.getState();
 
-      try {
-        const tRes = await fetch('/api/tables');
-        if (tRes.ok) {
-          const data = await tRes.json();
-          if (Array.isArray(data.tables) && data.tables.length > 0) {
-            setTables((prev) => {
-              const activeDineInMap = new Map<string, string>();
-              orders.forEach((o) => {
-                if (o.type === 'dine_in' && o.status !== 'completed' && o.status !== 'cancelled' && o.tableNumber) {
-                  activeDineInMap.set(`${o.branchId}-${o.tableNumber}`, o.id);
-                }
-              });
+      if (state.orders.orders !== prevReduxState.orders.orders) {
+        setOrders(state.orders.orders);
+      }
+      if (state.cart.items !== prevReduxState.cart.items) {
+        setCart(state.cart.items);
+      }
+      if (state.cafe.branches !== prevReduxState.cafe.branches) {
+        setBranches(state.cafe.branches);
+      }
+      if (state.cafe.menuItems !== prevReduxState.cafe.menuItems) {
+        setMenuItems(state.cafe.menuItems);
+      }
+      if (state.cafe.categories !== prevReduxState.cafe.categories) {
+        setCategories(state.cafe.categories);
+      }
+      if (state.cafe.tables !== prevReduxState.cafe.tables) {
+        setTables(state.cafe.tables);
+      }
+      if (state.cafe.shifts !== prevReduxState.cafe.shifts) {
+        setShifts(state.cafe.shifts);
+      }
+      if (state.cafe.refundRequests !== prevReduxState.cafe.refundRequests) {
+        setRefundRequests(state.cafe.refundRequests);
+      }
+      if (state.cafe.complaints !== prevReduxState.cafe.complaints) {
+        setComplaints(state.cafe.complaints);
+      }
+      if (state.cafe.tableSessions !== prevReduxState.cafe.tableSessions) {
+        setTableSessions(state.cafe.tableSessions);
+      }
+      if (state.cafe.users !== prevReduxState.cafe.users) {
+        setUsers(state.cafe.users);
+      }
+      if (state.cafe.heroBanners !== prevReduxState.cafe.heroBanners) {
+        setHeroBanners(state.cafe.heroBanners);
+      }
+      if (state.cafe.dealCard !== prevReduxState.cafe.dealCard) {
+        setDealCard(state.cafe.dealCard);
+      }
+      if (state.cafe.footerSettings !== prevReduxState.cafe.footerSettings) {
+        setFooterSettings(state.cafe.footerSettings);
+      }
 
-              const resolvedTables = data.tables.map((t: any) => {
-                const key = `${t.branchId}-${t.number}`;
-                if (activeDineInMap.has(key)) {
-                  return {
-                    ...t,
-                    status: 'occupied',
-                    currentOrderId: activeDineInMap.get(key) || t.currentOrderId,
-                  };
-                }
-                return t;
-              });
+      prevReduxState = state;
+    });
 
-              if (JSON.stringify(prev) === JSON.stringify(resolvedTables)) return prev;
-              try {
-                localStorage.setItem('foodies_tables_live', JSON.stringify(resolvedTables));
-              } catch (e) {}
-              return resolvedTables;
-            });
-          }
-        }
-      } catch (e) {}
+    // 3. Trigger initial fast sync
+    runSync({ full: true });
 
-      try {
-        const oRes = await fetch(`/api/orders?dateScope=${hasLoadedOlderOrders ? 'all' : 'today'}`);
-        if (oRes.ok) {
-          const data = await oRes.json();
-          if (Array.isArray(data.orders)) {
-            setOrders((prev) => {
-              if (prev.length === data.orders.length) {
-                const isIdentical = prev.every((pOrder, idx) => {
-                  const dOrder = data.orders[idx];
-                  return (
-                    pOrder.id === dOrder.id &&
-                    pOrder.status === dOrder.status &&
-                    pOrder.paymentStatus === dOrder.paymentStatus &&
-                    pOrder.version === dOrder.version &&
-                    pOrder.total === dOrder.total &&
-                    pOrder.items?.length === dOrder.items?.length &&
-                    pOrder.assignedRiderId === dOrder.assignedRiderId &&
-                    pOrder.riderStatus === dOrder.riderStatus
-                  );
-                });
-                if (isIdentical) return prev;
-              }
-              try {
-                localStorage.setItem('foodies_orders_live', JSON.stringify(data.orders));
-              } catch (e) {}
-              return data.orders;
-            });
-          }
-        }
-      } catch (e) {}
-
-      try {
-        const cRes = await fetch('/api/complaints');
-        if (cRes.ok) {
-          const data = await cRes.json();
-          if (Array.isArray(data.complaints) && data.complaints.length > 0) {
-            setComplaints((prev) => {
-              if (prev.length === data.complaints.length) {
-                const isIdentical = prev.every((pCmp, idx) => {
-                  const dCmp = data.complaints[idx];
-                  return (
-                    pCmp.id === dCmp.id &&
-                    pCmp.status === dCmp.status &&
-                    pCmp.messages?.length === dCmp.messages?.length
-                  );
-                });
-                if (isIdentical) return prev;
-              }
-              try {
-                localStorage.setItem('foodies_complaints', JSON.stringify(data.complaints));
-              } catch (e) {}
-              return data.complaints;
-            });
-          }
-        }
-      } catch (e) {}
-
-      try {
-        const mktRes = await fetch('/api/marketing');
-        if (mktRes.ok) {
-          const data = await mktRes.json();
-          if (Array.isArray(data.heroBanners) && data.heroBanners.length > 0) {
-            setHeroBanners((prev) => {
-              if (JSON.stringify(prev) === JSON.stringify(data.heroBanners)) return prev;
-              try { localStorage.setItem('foodies_hero_banners', JSON.stringify(data.heroBanners)); } catch (e) {}
-              return data.heroBanners;
-            });
-          }
-          if (data.dealCard) {
-            setDealCard((prev) => {
-              if (JSON.stringify(prev) === JSON.stringify(data.dealCard)) return prev;
-              try { localStorage.setItem('foodies_deal_card', JSON.stringify(data.dealCard)); } catch (e) {}
-              return data.dealCard;
-            });
-          }
-          if (data.footerSettings) {
-            setFooterSettings((prev) => {
-              if (JSON.stringify(prev) === JSON.stringify(data.footerSettings)) return prev;
-              try { localStorage.setItem('foodies_footer_settings', JSON.stringify(data.footerSettings)); } catch (e) {}
-              return data.footerSettings;
-            });
-          }
-          if (Array.isArray(data.categories) && data.categories.length > 0) {
-            setCategories((prev) => {
-              if (JSON.stringify(prev) === JSON.stringify(data.categories)) return prev;
-              try { localStorage.setItem('foodies_categories', JSON.stringify(data.categories)); } catch (e) {}
-              return data.categories;
-            });
-          }
-        }
-      } catch (e) {}
-
-      try {
-        const shRes = await fetch('/api/shifts');
-        if (shRes.ok) {
-          const data = await shRes.json();
-          if (Array.isArray(data.shifts)) {
-            setShifts((prev) => {
-              if (JSON.stringify(prev) === JSON.stringify(data.shifts)) return prev;
-              try { localStorage.setItem('foodies_shifts_live', JSON.stringify(data.shifts)); } catch (e) {}
-              return data.shifts;
-            });
-          }
-        }
-      } catch (e) {}
-
-      try {
-        const refRes = await fetch('/api/refunds');
-        if (refRes.ok) {
-          const data = await refRes.json();
-          if (Array.isArray(data.refunds)) {
-            setRefundRequests((prev) => {
-              if (JSON.stringify(prev) === JSON.stringify(data.refunds)) return prev;
-              try { localStorage.setItem('foodies_refunds_live', JSON.stringify(data.refunds)); } catch (e) {}
-              return data.refunds;
-            });
-          }
-        }
-      } catch (e) {}
-
-      try {
-        const sessRes = await fetch('/api/tables/sessions');
-        if (sessRes.ok) {
-          const data = await sessRes.json();
-          if (Array.isArray(data.sessions)) {
-            setTableSessions((prev) => {
-              if (JSON.stringify(prev) === JSON.stringify(data.sessions)) return prev;
-              try { localStorage.setItem('foodies_table_sessions_live', JSON.stringify(data.sessions)); } catch (e) {}
-              return data.sessions;
-            });
-          }
-        }
-      } catch (e) {}
-
-      try {
-        const uRes = await fetch('/api/users');
-        if (uRes.ok) {
-          const data = await uRes.json();
-          if (Array.isArray(data.users) && data.users.length > 0) {
-            setUsers((prev) => {
-              if (JSON.stringify(prev) === JSON.stringify(data.users)) return prev;
-              try { localStorage.setItem('foodies_users_live', JSON.stringify(data.users)); } catch (e) {}
-              return data.users;
-            });
-
-            // Synchronize active staff member's live session if authenticated
-            if (typeof window !== 'undefined') {
-              const savedStaffUser = localStorage.getItem('foodies_staff_user');
-              if (savedStaffUser) {
-                try {
-                  const parsed = JSON.parse(savedStaffUser);
-                  if (parsed && parsed.id) {
-                    const freshStaff = data.users.find((u: User) => u.id === parsed.id || (u.email && parsed.email && u.email === parsed.email));
-                    if (freshStaff && freshStaff.status === 'active' && freshStaff.role !== 'customer') {
-                      setCurrentUser((curr) => {
-                        if (curr && curr.id === freshStaff.id && curr.role === freshStaff.role && curr.name === freshStaff.name) {
-                          return curr;
-                        }
-                        return freshStaff;
-                      });
-                      setCurrentRole((currRole) => {
-                        if (currRole === 'customer' || !currRole) {
-                          return freshStaff.role;
-                        }
-                        return currRole;
-                      });
-                      localStorage.setItem('foodies_staff_user', JSON.stringify(freshStaff));
-                      localStorage.setItem('foodies_staff_role', freshStaff.role);
-                    }
-                  }
-                } catch (e) {}
-              }
-            }
-          }
-        }
-      } catch (e) {}
-
-      try {
-        const audRes = await fetch('/api/audit-logs');
-        if (audRes.ok) {
-          const data = await audRes.json();
-          if (Array.isArray(data.logs) && data.logs.length > 0) {
-            setAuditLogs((prev) => {
-              if (JSON.stringify(prev) === JSON.stringify(data.logs)) return prev;
-              return data.logs;
-            });
-          }
-        }
-      } catch (e) {}
-    }
-
-    fetchDatabaseData();
-    const pollInterval = setInterval(fetchDatabaseData, 2500);
-    return () => clearInterval(pollInterval);
+    return () => {
+      unsubscribe();
+    };
   }, []);
 
   // Persist cart to localStorage whenever it changes
@@ -1546,15 +1445,70 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   }, []);
 
   const addToast = (toast: Omit<Toast, 'id'>) => {
+    const now = Date.now();
     const id = Math.random().toString(36).substring(2, 9);
-    setToasts((prev) => [...prev, { ...toast, id }]);
-    setTimeout(() => {
-      removeToast(id);
-    }, 4500);
+
+    setToasts((prev) => {
+      const last = lastToastRef.current;
+      const isRecent = last && now - last.timestamp < 1600;
+
+      // 1. Exact duplicate check: suppress identical notifications
+      if (isRecent && last.title === toast.title && last.message === toast.message) {
+        return prev;
+      }
+
+      // 2. Chained action consolidation: If another toast arrives within 1600ms,
+      // combine ALL information into this single notification!
+      if (prev.length > 0 && isRecent) {
+        const currentActive = prev[0];
+
+        // Combine messages cleanly if not already contained
+        let combinedMessage = currentActive.message.trim();
+        const nextMsg = toast.message.trim();
+
+        if (nextMsg && !combinedMessage.includes(nextMsg) && !nextMsg.includes(combinedMessage)) {
+          combinedMessage = `${combinedMessage} · ${nextMsg}`;
+        } else if (nextMsg.length > combinedMessage.length) {
+          combinedMessage = nextMsg;
+        }
+
+        // Choose the most informative title
+        const preferredTitle =
+          toast.title.length >= currentActive.title.length ? toast.title : currentActive.title;
+        const preferredType =
+          toast.type === 'error' || currentActive.type === 'error'
+            ? 'error'
+            : toast.type === 'warning' || currentActive.type === 'warning'
+            ? 'warning'
+            : toast.type === 'success' || currentActive.type === 'success'
+            ? 'success'
+            : toast.type;
+
+        lastToastRef.current = { title: preferredTitle, message: combinedMessage, timestamp: now };
+
+        if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+        toastTimerRef.current = setTimeout(() => {
+          setToasts([]);
+        }, 4500);
+
+        return [{ id: currentActive.id, type: preferredType, title: preferredTitle, message: combinedMessage }];
+      }
+
+      // 3. New single notification: enforce strictly 1 toast on screen with all details
+      lastToastRef.current = { title: toast.title, message: toast.message, timestamp: now };
+
+      if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+      toastTimerRef.current = setTimeout(() => {
+        setToasts([]);
+      }, 4500);
+
+      return [{ ...toast, id }];
+    });
   };
 
-  const removeToast = (id: string) => {
-    setToasts((prev) => prev.filter((t) => t.id !== id));
+  const removeToast = (_id?: string) => {
+    if (toastTimerRef.current) clearTimeout(toastTimerRef.current);
+    setToasts([]);
   };
 
   const currentBranch = branches.find((b) => b.id === currentBranchId) || branches[0];
@@ -1901,10 +1855,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  const updateOrderStatus = (orderId: string, newStatus: OrderStatus, reason?: string) => {
+  const updateOrderStatus = (
+    orderId: string,
+    newStatus: OrderStatus,
+    reason?: string,
+    customNotification?: { title: string; message: string; type?: 'info' | 'success' | 'warning' }
+  ) => {
+    let orderNum = '';
     setOrders((prev) => {
       const updated = prev.map((ord) => {
         if (ord.id === orderId || ord.orderNumber === orderId) {
+          orderNum = ord.orderNumber;
           const inKitchen = newStatus === 'accepted' || newStatus === 'preparing' || newStatus === 'ready' || newStatus === 'served';
           return {
             ...ord,
@@ -1958,15 +1919,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
 
-    addToast({
-      type: 'info',
-      title: 'Order Status Updated',
-      message: `Order status changed to ${newStatus.toUpperCase()}${reason ? ` (${reason})` : ''}`,
-    });
+    if (customNotification) {
+      addToast({
+        type: customNotification.type || 'info',
+        title: customNotification.title,
+        message: customNotification.message,
+      });
+    } else {
+      const statusTitle =
+        newStatus === 'completed'
+          ? 'Order Completed ✓'
+          : newStatus === 'ready'
+          ? 'Order Kitchen Ready 🍽️'
+          : newStatus === 'served'
+          ? 'Order Sent to Waiter 🍽️'
+          : newStatus === 'out_for_delivery'
+          ? 'Order Out for Delivery 🛵'
+          : newStatus === 'preparing'
+          ? 'Cooking in Kitchen 👨‍🍳'
+          : 'Order Status Updated';
+
+      addToast({
+        type: newStatus === 'completed' ? 'success' : 'info',
+        title: statusTitle,
+        message: `Order #${orderNum || orderId} status changed to ${newStatus.toUpperCase()}${reason ? ` (${reason})` : ''}.`,
+      });
+    }
   };
 
   // Delivery Rider Actions
-  const assignRiderToOrder = (orderId: string, riderId: string) => {
+  const assignRiderToOrder = (orderId: string, riderId: string, silent = false) => {
     const rider = users.find((u) => u.id === riderId);
     const riderName = rider?.name || 'Assigned Rider';
     let orderNum = '';
@@ -2029,11 +2011,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }).catch(() => {});
     } catch (e) {}
 
-    addToast({
-      type: 'success',
-      title: 'Rider Assigned! 🛵',
-      message: `Order #${orderNum || orderId} assigned to ${riderName}. You can assign more orders or change before departure.`,
-    });
+    if (!silent) {
+      addToast({
+        type: 'success',
+        title: 'Rider Assigned! 🛵',
+        message: `Order #${orderNum || orderId} assigned to ${riderName}. You can assign more orders or change before departure.`,
+      });
+    }
   };
 
   const departRider = (riderId: string) => {
@@ -2436,7 +2420,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       DEFAULT_OPEN_SHIFT;
 
     const currentCollected = Number(targetShift.cashCollected || 0);
-    const currentExpected = Number(targetShift.expectedCash || (targetShift.openingFloat || 5000));
+    const currentExpected = Number(targetShift.expectedCash || (targetShift.openingFloat || 0));
     const nextCashCollected = currentCollected + addedAmount;
     const nextExpectedCash = currentExpected + addedAmount;
     const targetShiftId = targetShift.id || 'sh-today-1';
@@ -2467,7 +2451,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               cashierId: currentUser.id || 'user-cashier',
               cashierName: currentUser.name || 'Bilal Farooq',
               branchId: currentBranchId,
-              openingFloat: 5000,
+              openingFloat: 0,
               cashCollected: nextCashCollected,
               expectedCash: nextExpectedCash,
               status: 'open' as const,
@@ -2495,10 +2479,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }).catch((err) => console.error('Failed to sync shift to DB:', err));
     } catch (e) {}
 
+    const tableInfo = ord?.tableNumber ? ` · Table #${ord.tableNumber} is now free` : '';
     addToast({
       type: 'success',
-      title: 'Cash Payment Recorded',
-      message: `Payment saved. Change due: Rs. ${change.toLocaleString()}`,
+      title: 'Payment Settled & Bill Closed ✓',
+      message: `Order #${ord?.orderNumber || orderId} settled (Rs. ${Number(ord?.total || amountReceived).toLocaleString()}). Change due: Rs. ${change.toLocaleString()}${tableInfo}.`,
     });
 
     return { change, success: true };
@@ -2877,25 +2862,41 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  const updateTableStatus = (tableId: string, status: TableStatus, reservationName?: string) => {
+  const updateTableStatus = (tableId: string, status: TableStatus, reservationName?: string, customMessage?: string) => {
+    let tableNum = '';
     setTables((prev) => {
-      const next = prev.map((t) =>
-        t.id === tableId
-          ? {
-              ...t,
-              status,
-              reservedFor: status === 'reserved' ? reservationName || 'Reserved Guest' : undefined,
-              currentOrderId: status === 'available' ? undefined : t.currentOrderId,
-            }
-          : t
-      );
+      const next = prev.map((t) => {
+        if (t.id === tableId || t.number === tableId) {
+          tableNum = t.number;
+          return {
+            ...t,
+            status,
+            reservedFor: status === 'reserved' ? reservationName || 'Reserved Guest' : undefined,
+            currentOrderId: status === 'available' ? undefined : t.currentOrderId,
+          };
+        }
+        return t;
+      });
       broadcastTables(next);
       return next;
     });
+
+    const statusTitle =
+      status === 'available'
+        ? 'Table Free ✓'
+        : status === 'occupied'
+        ? 'Table Seated 🍽️'
+        : status === 'cleaning'
+        ? 'Table Cleaning 🧹'
+        : 'Table Reserved 📅';
+
+    const statusMsg =
+      customMessage || `Table ${tableNum || tableId} is now ${status === 'available' ? 'free and available' : status}.`;
+
     addToast({
-      type: 'info',
-      title: 'Table Status Changed',
-      message: `Table marked as ${status.toUpperCase()}`,
+      type: status === 'available' ? 'success' : 'info',
+      title: statusTitle,
+      message: statusMsg,
     });
 
     // Asynchronously sync table status to PostgreSQL database
@@ -4259,3 +4260,50 @@ export const useApp = () => {
   if (!context) throw new Error('useApp must be used within AppProvider');
   return context;
 };
+
+// Redux Toolkit Direct Hooks, Store, Slices & Sync Engine Exports
+export { useAppDispatch, useAppSelector } from '@/redux/hooks';
+export { store } from '@/redux/store';
+export {
+  selectAllOrders,
+  selectTodayOrders,
+  selectActiveOrders,
+  selectOrdersByBranch,
+  selectOrderById,
+  selectHasLoadedOlderOrders,
+  selectIsFetchingOlderOrders,
+} from '@/redux/slices/ordersSlice';
+export {
+  selectCartItems,
+  selectCartCount,
+  selectCartSubtotal,
+} from '@/redux/slices/cartSlice';
+export {
+  selectBranches,
+  selectCurrentBranchId,
+  selectCurrentBranch,
+  selectMenuItems,
+  selectCategories,
+  selectTables,
+  selectBranchTables,
+  selectComplaints,
+  selectShifts,
+  selectCurrentShift,
+  selectRefundRequests,
+  selectHeroBanners,
+  selectDealCard,
+  selectFooterSettings,
+  selectUsers,
+  selectAuditLogs,
+  selectTableSessions,
+  selectActiveTableSession,
+  selectCustomerCoordinates,
+} from '@/redux/slices/cafeSlice';
+export {
+  selectTheme,
+  selectCurrentRole,
+  selectCurrentUser,
+  selectToasts,
+  selectMenuSearchQuery,
+} from '@/redux/slices/uiSlice';
+export { runSync, broadcastStateMutation } from '@/redux/sync/syncEngine';

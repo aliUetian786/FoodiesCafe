@@ -13,25 +13,29 @@ export async function GET(request: Request) {
              expected_cash as "expectedCash", counted_cash as "countedCash",
              difference, difference_reason as "differenceReason", status
       FROM cash_shifts
+      WHERE id NOT IN ('sh-yesterday-1', 'sh-yesterday-2')
     `;
     const params: any[] = [];
 
     if (branchId) {
-      sql += ` WHERE branch_id = $1`;
+      sql += ` AND branch_id = $1`;
       params.push(branchId);
     }
 
     sql += ` ORDER BY opened_at DESC LIMIT 100`;
 
     const res = await query(sql, params);
-    const shifts = res.rows.map((row: any) => ({
-      ...row,
-      openingFloat: Number(row.openingFloat) || 0,
-      cashCollected: Number(row.cashCollected) || 0,
-      expectedCash: Number(row.expectedCash) || 0,
-      countedCash: row.countedCash !== null ? Number(row.countedCash) : undefined,
-      difference: row.difference !== null ? Number(row.difference) : undefined,
-    }));
+    const shifts = res.rows.map((row: any) => {
+      const isLegacyDefaultShift = row.id === 'sh-today-1' && (Number(row.openingFloat) === 5000 || Number(row.cashCollected) === 34200);
+      return {
+        ...row,
+        openingFloat: isLegacyDefaultShift ? 0 : Number(row.openingFloat) || 0,
+        cashCollected: isLegacyDefaultShift ? 0 : Number(row.cashCollected) || 0,
+        expectedCash: isLegacyDefaultShift ? 0 : Number(row.expectedCash) || 0,
+        countedCash: row.countedCash !== null ? Number(row.countedCash) : undefined,
+        difference: row.difference !== null ? Number(row.difference) : undefined,
+      };
+    });
 
     return NextResponse.json({ shifts });
   } catch (error: any) {

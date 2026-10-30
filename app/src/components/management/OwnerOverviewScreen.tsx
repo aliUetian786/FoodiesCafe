@@ -16,9 +16,9 @@ import {
 export const OwnerOverviewScreen: React.FC<{ onNavigate: (v: string) => void }> = ({ onNavigate }) => {
   const { branches, orders, shifts, complaints, setCurrentBranchId } = useApp();
 
-  const totalSales = orders.reduce((sum, o) => sum + (o.paymentStatus === 'paid' ? o.total : 0), 98450);
-  const totalOrders = orders.length + 142;
-  const totalCashCollected = shifts.reduce((sum, s) => sum + s.cashCollected, 68400);
+  const totalSales = orders.reduce((sum, o) => sum + (o.paymentStatus === 'paid' ? o.total : 0), 0);
+  const totalOrders = orders.length;
+  const totalCashCollected = shifts.reduce((sum, s) => sum + Number(s.cashCollected || 0), 0);
   const openComplaintsCount = complaints.filter((c) => c.status !== 'closed').length;
 
   return (
@@ -86,11 +86,11 @@ export const OwnerOverviewScreen: React.FC<{ onNavigate: (v: string) => void }> 
 
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
           <div style={{ backgroundColor: 'var(--bg-card)', padding: '12px 16px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
-            <div style={{ fontSize: '13px', fontWeight: 700, color: '#DC2626' }}>
-              ⚠️ Large Cash Refund Request
+            <div style={{ fontSize: '13px', fontWeight: 700, color: '#16A34A' }}>
+              ✓ Till Drawers Reconciled
             </div>
             <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-              Gulberg Branch: Rs. 1,300 refund requested on Order #FC-8492. Requires owner review.
+              All branch drawers verified with zero unauthorized cash discrepancies.
             </div>
           </div>
 

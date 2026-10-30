@@ -1,14 +1,22 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
+let branchesColumnsMigrated = false;
+
+async function ensureBranchesColumns() {
+  if (branchesColumnsMigrated) return;
+  try {
+    await query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS max_order_distance_km DOUBLE PRECISION NOT NULL DEFAULT 50`);
+    await query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS table_qr_max_distance_meters INT NOT NULL DEFAULT 300`);
+    await query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS payment_settings JSONB`);
+    branchesColumnsMigrated = true;
+  } catch (e) {}
+}
+
 export async function GET() {
   try {
-    // Auto-migrate columns if missing
-    try {
-      await query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS max_order_distance_km DOUBLE PRECISION NOT NULL DEFAULT 50`);
-      await query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS table_qr_max_distance_meters INT NOT NULL DEFAULT 300`);
-      await query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS payment_settings JSONB`);
-    } catch (e) {}
+    // Auto-migrate columns if missing (cached once)
+    await ensureBranchesColumns();
 
     const res = await query(
       `SELECT id, name, city, address, phone, opening_hours as "openingHours",

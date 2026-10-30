@@ -85,8 +85,8 @@ VALUES
 ('user-kitchen', 'Chef Ustaad Aslam', '+92 300 6667788', 'kitchen.gulberg@foodiescafe.pk', NULL, 'kitchen_staff', 'gulberg-lahore', 'active', 0, 'password123', NULL, 0, NULL),
 ('user-cashier', 'Bilal Farooq', '+92 300 8889900', 'cashier.gulberg@foodiescafe.pk', NULL, 'cashier', 'gulberg-lahore', 'active', 0, 'password123', NULL, 0, NULL),
 ('user-floor', 'Kashif Ali', '+92 300 1112233', 'floor.gulberg@foodiescafe.pk', NULL, 'floor_staff', 'gulberg-lahore', 'active', 0, 'password123', NULL, 0, NULL),
-('user-rider-1', 'Tariq Mehmood', '+92 301 9991122', 'rider1.gulberg@foodiescafe.pk', NULL, 'delivery_staff', 'gulberg-lahore', 'active', 0, 'password123', 'available', 14, NULL),
-('user-rider-2', 'Usman Ghani', '+92 302 8882233', 'rider2.gulberg@foodiescafe.pk', NULL, 'delivery_staff', 'gulberg-lahore', 'active', 0, 'password123', 'available', 8, NULL),
+('user-rider-1', 'Tariq Mehmood', '+92 301 9991122', 'rider1.gulberg@foodiescafe.pk', NULL, 'delivery_staff', 'gulberg-lahore', 'active', 0, 'password123', 'available', 0, NULL),
+('user-rider-2', 'Usman Ghani', '+92 302 8882233', 'rider2.gulberg@foodiescafe.pk', NULL, 'delivery_staff', 'gulberg-lahore', 'active', 0, 'password123', 'available', 0, NULL),
 -- Islamabad Staff
 ('user-bm-isb', 'Noman Bashir', '+92 300 3334455', 'manager.islamabad@foodiescafe.pk', NULL, 'branch_manager', 'f7-islamabad', 'active', 0, 'password123', NULL, 0, NULL),
 ('user-cashier-isb', 'Hamza Tariq', '+92 300 3338899', 'cashier.islamabad@foodiescafe.pk', NULL, 'cashier', 'f7-islamabad', 'active', 0, 'password123', NULL, 0, NULL),
@@ -248,118 +248,13 @@ VALUES
 ('primary-deal', 'Royal Chicken Dum Biryani', 'Slow-steamed in copper handi with saffron & house spices', 'Rs. 650', '🌟 TODAY''S CHEF SPECIAL', '/food-biryani.jpg', 'Biryani & Rice')
 ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, price = EXCLUDED.price;
 
--- 9. Sample Multi-Fulfillment Orders (Dine-In, Takeaway, Delivery)
-INSERT INTO orders (
-    id, order_number, branch_id, customer_id, customer_name, customer_phone,
-    type, table_number, table_pin, pickup_time, status, payment_status,
-    payment_method, items, original_subtotal, add_on_subtotal, tax, total,
-    notes, delivery_address, version, created_at, completed_at
-) VALUES
-(
-    'ord-seed-1',
-    'FC-6744',
-    'gulberg-lahore',
-    'user-cust',
-    'Zeeshan Ahmed',
-    '+92 301 5551234',
-    'dine_in',
-    'T-03',
-    '3941',
-    NULL,
-    'completed',
-    'paid',
-    'Cash',
-    '[{"id":"it-1","menuItemId":"m1","name":"Royal Chicken Dum Biryani","size":"Regular (Single)","quantity":2,"unitPrice":650,"extras":["Extra Zeera Raita"]},{"id":"it-2","menuItemId":"m6","name":"Traditional Peshawari Qahwa","quantity":2,"unitPrice":120}]'::jsonb,
-    1540,
-    0,
-    77,
-    1617,
-    'Serve steaming hot with extra fresh spoons',
-    NULL,
-    1,
-    CURRENT_TIMESTAMP - INTERVAL '3 hours',
-    CURRENT_TIMESTAMP - INTERVAL '2 hours'
-),
-(
-    'ord-seed-2',
-    'FC-7819',
-    'gulberg-lahore',
-    'user-cust-2',
-    'Ayesha Khan',
-    '+92 321 4448899',
-    'takeaway',
-    NULL,
-    NULL,
-    '02:30 PM (Pickup)',
-    'completed',
-    'paid',
-    'Raast QR',
-    '[{"id":"it-3","menuItemId":"m4","name":"The Foodies Crunch Burger","size":"Single Fillet","quantity":2,"unitPrice":620,"extras":["Seasoned Masala Fries"]},{"id":"it-4","menuItemId":"m6","name":"Traditional Peshawari Qahwa","quantity":1,"unitPrice":120}]'::jsonb,
-    1360,
-    160,
-    76,
-    1596,
-    'Pack extra dip in paper bag',
-    NULL,
-    1,
-    CURRENT_TIMESTAMP - INTERVAL '2 hours',
-    CURRENT_TIMESTAMP - INTERVAL '1 hour 15 minutes'
-),
-(
-    'ord-seed-3',
-    'FC-8812',
-    'gulberg-lahore',
-    'user-cust-3',
-    'Hamza Tariq',
-    '+92 333 7776655',
-    'delivery',
-    NULL,
-    NULL,
-    NULL,
-    'ready',
-    'paid',
-    'Card',
-    '[{"id":"it-5","menuItemId":"m2","name":"Desi Ghee Shinwari Chicken Karahi","size":"Half (serves 2)","quantity":1,"unitPrice":1250,"extras":["Roghni Naan"]},{"id":"it-6","menuItemId":"m5","name":"Fresh Tandoori Roghni Naan","quantity":3,"unitPrice":80}]'::jsonb,
-    1490,
-    80,
-    78.5,
-    1648.5,
-    'Ring bell twice, deliver to 2nd floor flat',
-    'House 22-A, Block G, Gulberg III, Lahore',
-    1,
-    CURRENT_TIMESTAMP - INTERVAL '45 minutes',
-    NULL
-),
-(
-    'ord-seed-4',
-    'FC-9021',
-    'gulberg-lahore',
-    'user-cust-4',
-    'Dr. Arshad Beg',
-    '+92 300 9991122',
-    'dine_in',
-    'T-01',
-    '4921',
-    NULL,
-    'completed',
-    'paid',
-    'Cash',
-    '[{"id":"it-7","menuItemId":"m3","name":"Smoky Beef Seekh Kebabs (4 Pcs)","size":"Standard (4 pcs)","quantity":2,"unitPrice":780,"extras":["Tandoori Paratha"]}]'::jsonb,
-    1560,
-    90,
-    82.5,
-    1732.5,
-    'Low spice, well grilled',
-    NULL,
-    1,
-    CURRENT_TIMESTAMP - INTERVAL '4 hours',
-    CURRENT_TIMESTAMP - INTERVAL '3 hours 10 minutes'
-)
-ON CONFLICT (order_number) DO UPDATE SET
-    status = EXCLUDED.status,
-    payment_status = EXCLUDED.payment_status;
+-- 9. Clean Purge of Legacy Mock Orders, Refunds, and Sessions
+DELETE FROM refund_requests WHERE id LIKE 'ref-%' OR id LIKE 'ref-pending-%' OR id LIKE 'ref-approved-%';
+DELETE FROM table_sessions WHERE id LIKE 'sess-%';
+DELETE FROM orders WHERE id LIKE 'ord-seed-%' OR order_number IN ('FC-6744', 'FC-7819', 'FC-8812', 'FC-9021');
+DELETE FROM cash_shifts WHERE id IN ('sh-yesterday-1', 'sh-yesterday-2');
 
--- 10. Cash Shifts Seed (Per Shift, Per Person, Per Day)
+-- 10. Cash Shifts Seed (Clean Initial Drawer - Zero Mock Collections)
 INSERT INTO cash_shifts (
     id, cashier_id, cashier_name, branch_id, opened_at, closed_at,
     opening_float, cash_collected, expected_cash, counted_cash, difference, difference_reason, status
@@ -369,164 +264,25 @@ INSERT INTO cash_shifts (
     'user-cashier',
     'Bilal Farooq',
     'gulberg-lahore',
-    CURRENT_TIMESTAMP - INTERVAL '5 hours',
+    CURRENT_TIMESTAMP,
     NULL,
-    5000,
-    34200,
-    39200,
+    0,
+    0,
+    0,
     NULL,
     NULL,
     NULL,
     'open'
-),
-(
-    'sh-yesterday-1',
-    'user-cashier-2',
-    'Tariq Jamil',
-    'gulberg-lahore',
-    CURRENT_TIMESTAMP - INTERVAL '29 hours',
-    CURRENT_TIMESTAMP - INTERVAL '17 hours',
-    5000,
-    58400,
-    63400,
-    63400,
-    0,
-    'Verified exact cash drawer balance',
-    'closed'
-),
-(
-    'sh-yesterday-2',
-    'user-cashier',
-    'Bilal Farooq',
-    'gulberg-lahore',
-    CURRENT_TIMESTAMP - INTERVAL '41 hours',
-    CURRENT_TIMESTAMP - INTERVAL '29 hours',
-    5000,
-    46800,
-    51800,
-    51800,
-    0,
-    'Matched closing receipts',
-    'closed'
 )
-ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, cash_collected = EXCLUDED.cash_collected;
+ON CONFLICT (id) DO UPDATE SET
+    opening_float = 0,
+    cash_collected = 0,
+    expected_cash = 0,
+    status = 'open';
 
--- 11. Refund Requests Seed (Pending Manager Action)
-INSERT INTO refund_requests (
-    id, order_id, order_number, branch_id, amount, reason, requested_by, status, created_at, approved_by, approved_at
-) VALUES
-(
-    'ref-pending-1',
-    'ord-seed-3',
-    'FC-8812',
-    'gulberg-lahore',
-    1648.50,
-    'Customer requested refund due to delivery rider delayed over 40 mins & cold soup',
-    'Zara Noor (Branch Representative)',
-    'requested',
-    CURRENT_TIMESTAMP - INTERVAL '25 minutes',
-    NULL,
-    NULL
-),
-(
-    'ref-approved-1',
-    'ord-seed-4',
-    'FC-9021',
-    'gulberg-lahore',
-    650.00,
-    'Customer accidentally double ordered Biryani side; manager authorized refund',
-    'Bilal Farooq (Cashier)',
-    'approved',
-    CURRENT_TIMESTAMP - INTERVAL '3 hours',
-    'Rashid Mehmood (Branch Manager)',
-    CURRENT_TIMESTAMP - INTERVAL '2 hours 45 minutes'
-)
-ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, amount = EXCLUDED.amount;
+-- 11. Refund Requests Seed (Clean initial state - zero dummy refund requests)
+-- Real refund requests are created when submitted by customers or staff.
 
--- 12. Table Sessions Seed (Occupied Start to End Date & Time, Waiter Performance)
-INSERT INTO table_sessions (
-    id, table_id, table_number, branch_id, floor, started_at, ended_at,
-    duration_min, customer_name, order_id, order_number, waiter_name, total_amount, status
-) VALUES
-(
-    'sess-1',
-    't1',
-    'T-01',
-    'gulberg-lahore',
-    'Ground Floor (Main Dining)',
-    CURRENT_TIMESTAMP - INTERVAL '4 hours',
-    CURRENT_TIMESTAMP - INTERVAL '3 hours 10 minutes',
-    50,
-    'Dr. Arshad Beg (2 Guests)',
-    'ord-seed-4',
-    'FC-9021',
-    'Kashif Ali (Floor Staff)',
-    1732.50,
-    'completed'
-),
-(
-    'sess-2',
-    't3',
-    'T-03',
-    'gulberg-lahore',
-    'Ground Floor (Main Dining)',
-    CURRENT_TIMESTAMP - INTERVAL '3 hours',
-    CURRENT_TIMESTAMP - INTERVAL '2 hours',
-    60,
-    'Zeeshan Ahmed (2 Guests)',
-    'ord-seed-1',
-    'FC-6744',
-    'Kashif Ali (Floor Staff)',
-    1617.00,
-    'completed'
-),
-(
-    'sess-3',
-    't5',
-    'T-05',
-    'gulberg-lahore',
-    '1st Floor (Family Hall)',
-    CURRENT_TIMESTAMP - INTERVAL '2 hours 15 minutes',
-    CURRENT_TIMESTAMP - INTERVAL '1 hour 10 minutes',
-    65,
-    'Mrs. Fatima Malik (4 Guests)',
-    'ord-seed-5',
-    'FC-7011',
-    'Bilal Waiter (Floor Staff)',
-    4850.00,
-    'completed'
-),
-(
-    'sess-4',
-    't2',
-    'T-02',
-    'gulberg-lahore',
-    'Ground Floor (Main Dining)',
-    CURRENT_TIMESTAMP - INTERVAL '1 hour 30 minutes',
-    CURRENT_TIMESTAMP - INTERVAL '45 minutes',
-    45,
-    'Omer Siddiqui (3 Guests)',
-    'ord-seed-6',
-    'FC-7590',
-    'Kashif Ali (Floor Staff)',
-    3200.00,
-    'completed'
-),
-(
-    'sess-5',
-    't4',
-    'T-04',
-    'gulberg-lahore',
-    'Ground Floor (Main Dining)',
-    CURRENT_TIMESTAMP - INTERVAL '35 minutes',
-    NULL,
-    35,
-    'Senator Tariq & Family (6 Guests)',
-    'ord-seed-7',
-    'FC-8114',
-    'Bilal Waiter (Floor Staff)',
-    5900.00,
-    'occupied'
-)
-ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, duration_min = EXCLUDED.duration_min;
+-- 12. Table Sessions Seed (Clean initial state - all tables free and available)
+-- Real table sessions are recorded when guests are seated at tables.
 

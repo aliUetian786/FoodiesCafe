@@ -12,11 +12,15 @@ export async function GET(request: Request) {
              status, created_at as "createdAt", approved_by as "approvedBy",
              approved_at as "approvedAt"
       FROM refund_requests
+      WHERE id NOT LIKE 'ref-pending-%' 
+        AND id NOT LIKE 'ref-approved-%'
+        AND id NOT IN ('ref-pending-1', 'ref-approved-1')
+        AND order_number NOT IN ('FC-8812', 'FC-9021', 'FC-8492', 'FC-6744', 'FC-7819')
     `;
     const params: any[] = [];
 
     if (branchId) {
-      sql += ` WHERE branch_id = $1`;
+      sql += ` AND branch_id = $1`;
       params.push(branchId);
     }
 

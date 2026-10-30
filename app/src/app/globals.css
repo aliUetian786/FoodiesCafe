@@ -235,8 +235,23 @@ button {
   background: var(--text-muted);
 }
 
-/* Global Print Styles: Hide all site elements, header, drawer, and background, print only the receipt */
+/* Global Print Styles: Tight slip page size matching text length, zero margin sides/bottom */
+@page {
+  size: 80mm auto;
+  margin: 0 !important;
+  padding: 0 !important;
+}
 @media print {
+  html, body {
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    background: #FFFFFF !important;
+    color: #000000 !important;
+    height: auto !important;
+    min-height: 0 !important;
+  }
   body * {
     visibility: hidden !important;
   }
@@ -248,13 +263,17 @@ button {
     position: absolute !important;
     left: 0 !important;
     top: 0 !important;
-    width: 100% !important;
-    max-width: 580px !important;
-    margin: 0 auto !important;
-    padding: 24px !important;
-    border: 1px solid var(--border-color) !important;
+    width: 80mm !important;
+    max-width: 80mm !important;
+    margin: 0 !important;
+    padding: 6px 8px 4px 8px !important;
+    border: none !important;
     box-shadow: none !important;
     background: #FFFFFF !important;
+    height: auto !important;
+    min-height: 0 !important;
+    page-break-inside: avoid !important;
+    break-inside: avoid !important;
   }
   .no-print {
     display: none !important;
@@ -289,6 +308,22 @@ button {
 }
 
 @media (max-width: 768px) {
+  .staff-layout-root {
+    position: fixed !important;
+    inset: 0 !important;
+    width: 100vw !important;
+    height: 100vh !important;
+    max-height: 100vh !important;
+    overflow: hidden !important;
+  }
+  .staff-layout-main-wrapper {
+    height: 100vh !important;
+    max-height: 100vh !important;
+    overflow: hidden !important;
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+  }
   .staff-desktop-sidebar {
     display: none !important;
   }
@@ -300,10 +335,23 @@ button {
   }
   .staff-mobile-drawer-panel {
     display: flex !important;
+    width: 230px !important;
+    max-width: 65vw !important;
   }
   .staff-header-inner {
+    position: sticky !important;
+    top: 0 !important;
+    left: 0 !important;
+    right: 0 !important;
+    width: 100% !important;
+    height: 60px !important;
+    flex-shrink: 0 !important;
+    z-index: 1000 !important;
     padding: 0 12px !important;
     gap: 8px !important;
+    background-color: var(--bg-card) !important;
+    border-bottom: 1px solid var(--border-color) !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05) !important;
   }
   .staff-header-branch-name {
     max-width: 130px;
@@ -312,8 +360,13 @@ button {
     white-space: nowrap;
   }
   .staff-main-content {
+    flex: 1 !important;
+    height: calc(100vh - 60px) !important;
+    max-height: calc(100vh - 60px) !important;
+    min-height: 0 !important;
     padding: 12px 10px !important;
     overflow-y: auto !important;
+    -webkit-overflow-scrolling: touch !important;
   }
 }
 
@@ -371,52 +424,303 @@ button {
   }
 }
 
-/* Branch Staff Management (Option 2) Mobile Responsive Styling */
-.bm-staff-desktop-banner {
+/* Branch Staff Management (Desktop vs Small Screen Mobile Layout) */
+.bm-staff-header-desktop {
   display: flex !important;
+}
+.bm-staff-card-mobile {
+  display: none !important;
 }
 .bm-staff-desktop-kpis {
   display: flex !important;
 }
-.bm-staff-desktop-controls {
+.bm-staff-controls-desktop {
   display: flex !important;
 }
-.bm-staff-mobile-card {
-  display: none !important;
-}
-.bm-staff-mobile-roles {
-  display: none !important;
-}
-.bm-staff-mobile-search-row {
+.bm-staff-controls-mobile {
   display: none !important;
 }
 
 @media (max-width: 768px) {
-  .bm-staff-desktop-banner {
+  .bm-staff-header-desktop {
     display: none !important;
+  }
+  .bm-staff-card-mobile {
+    display: flex !important;
   }
   .bm-staff-desktop-kpis {
     display: none !important;
   }
-  .bm-staff-desktop-controls {
+  .bm-staff-controls-desktop {
     display: none !important;
   }
-  .bm-staff-mobile-card {
-    display: flex !important;
-  }
-  .bm-staff-mobile-roles {
-    display: flex !important;
-  }
-  .bm-staff-mobile-search-row {
+  .bm-staff-controls-mobile {
     display: flex !important;
   }
   .bm-staff-main-container {
-    background-color: transparent !important;
-    border: none !important;
-    padding: 0 !important;
-    box-shadow: none !important;
-    gap: 12px !important;
+    padding: 14px !important;
+    gap: 14px !important;
   }
 }
 
+/* Menu, Categories & Services Management (Responsive Layout & Mobile Small Screen Adaptation) */
+.menu-create-btn-desktop {
+  display: flex !important;
+}
+.menu-new-item-1q {
+  display: none !important;
+}
+.menu-categories-scroll-3q {
+  flex: 1 1 100% !important;
+  max-width: 100% !important;
+  width: 100% !important;
+}
+
+@media (max-width: 768px) {
+  /* Row 1: Horizontal tabs made compact and small */
+  .menu-mgmt-tabs-container {
+    gap: 5px !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+    width: 100% !important;
+    flex-wrap: nowrap !important;
+  }
+  .menu-mgmt-tabs-container::-webkit-scrollbar {
+    display: none !important;
+  }
+  .menu-mgmt-tab-btn {
+    padding: 6px 9px !important;
+    font-size: 11px !important;
+    gap: 4px !important;
+    border-radius: var(--radius-sm) !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+  }
+  .menu-mgmt-tab-btn svg {
+    width: 13px !important;
+    height: 13px !important;
+  }
+  .menu-create-btn-desktop {
+    display: none !important;
+  }
+
+  /* Row 2: 3/4 scrollable categories + 1/4 + New Item button */
+  .menu-second-row {
+    width: 100% !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    flex-wrap: nowrap !important;
+  }
+  .menu-categories-scroll-3q {
+    flex: 0 0 75% !important;
+    max-width: 75% !important;
+    width: 75% !important;
+    display: flex !important;
+    gap: 4px !important;
+    overflow-x: auto !important;
+    -webkit-overflow-scrolling: touch !important;
+    scrollbar-width: none !important;
+  }
+  .menu-categories-scroll-3q::-webkit-scrollbar {
+    display: none !important;
+  }
+  .menu-category-pill-btn {
+    padding: 4px 8px !important;
+    font-size: 11px !important;
+    white-space: nowrap !important;
+    flex-shrink: 0 !important;
+  }
+  .menu-new-item-1q {
+    flex: 0 0 calc(25% - 6px) !important;
+    max-width: calc(25% - 6px) !important;
+    width: calc(25% - 6px) !important;
+    display: flex !important;
+    align-items: center !important;
+    flex-shrink: 0 !important;
+  }
+  .menu-new-item-btn-compact {
+    padding: 5px 6px !important;
+    font-size: 11px !important;
+    gap: 3px !important;
+    width: 100% !important;
+    white-space: nowrap !important;
+    overflow: hidden !important;
+    text-overflow: ellipsis !important;
+  }
+  .menu-new-item-btn-compact svg {
+    width: 12px !important;
+    height: 12px !important;
+    flex-shrink: 0 !important;
+  }
+
+  /* Menu Items Dishes Table: Only Dish / Product & Actions, completely unscroolable horizontally */
+  .menu-items-table-container {
+    overflow-x: hidden !important;
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  .menu-items-table {
+    table-layout: fixed !important;
+    width: 100% !important;
+    font-size: 12px !important;
+  }
+  .menu-col-category,
+  .menu-col-price,
+  .menu-col-avail,
+  .menu-dish-desc {
+    display: none !important;
+  }
+  .menu-col-dish {
+    padding: 10px 8px !important;
+    width: calc(100% - 130px) !important;
+    max-width: calc(100% - 130px) !important;
+    overflow: hidden !important;
+  }
+  .menu-col-actions {
+    padding: 10px 8px !important;
+    width: 130px !important;
+    min-width: 130px !important;
+    max-width: 130px !important;
+    text-align: right !important;
+    white-space: nowrap !important;
+  }
+}
+
+.menu-items-table {
+  table-layout: fixed !important;
+  width: 100% !important;
+}
+.menu-col-actions {
+  width: 140px;
+  white-space: nowrap;
+}
+.menu-col-dish {
+  overflow: hidden;
+}
+
+/* Kitchen Monitor Header Responsive Adaptations (Clean Mobile Kitchen Status) */
+.kitchen-title-desktop {
+  display: inline !important;
+}
+.kitchen-title-mobile {
+  display: none !important;
+}
+.kitchen-badge-desktop {
+  display: inline-flex !important;
+}
+.kitchen-desc-desktop {
+  display: block !important;
+}
+.kitchen-stock-btn-desktop {
+  display: flex !important;
+}
+
+@media (max-width: 768px) {
+  .kitchen-title-desktop {
+    display: none !important;
+  }
+  .kitchen-title-mobile {
+    display: inline !important;
+  }
+  .kitchen-badge-desktop {
+    display: none !important;
+  }
+  .kitchen-desc-desktop {
+    display: none !important;
+  }
+  .kitchen-stock-btn-desktop {
+    display: none !important;
+  }
+  .kitchen-top-bar {
+    margin-bottom: -10px !important;
+  }
+}
+
+/* Cash Desk Monitor Responsive Styling */
+.cashier-title-mobile {
+  display: none !important;
+}
+.cashier-title-desktop {
+  display: inline-block;
+}
+
+@media (max-width: 768px) {
+  .cashier-title-desktop {
+    display: none !important;
+  }
+  .cashier-title-mobile {
+    display: inline-block !important;
+  }
+  .cashier-badge-desktop {
+    display: none !important;
+  }
+  .cashier-desc-desktop {
+    display: none !important;
+  }
+  .cashier-fastmode-banner {
+    display: none !important;
+  }
+  .cashier-orders-archive-banner {
+    display: none !important;
+  }
+  .cashier-order-detail-pane {
+    display: none !important;
+  }
+  .cashier-orders-grid {
+    grid-template-columns: 1fr !important;
+    width: 100% !important;
+  }
+  .cashier-orders-list-pane {
+    width: 100% !important;
+    max-width: 100% !important;
+  }
+  .cashier-orders-list-scroll {
+    max-height: none !important;
+  }
+}
+
+/* Representative / Customer Support Small Screen Responsive Navigation */
+.rep-mobile-back-btn {
+  display: none !important;
+}
+
+@media (max-width: 768px) {
+  .rep-support-workspace {
+    display: flex !important;
+    flex-direction: column !important;
+    width: 100% !important;
+    height: 100% !important;
+    overflow: hidden !important;
+  }
+
+  .rep-card-customers.rep-mobile-show {
+    display: flex !important;
+    width: 100% !important;
+    height: 100% !important;
+    flex: 1 !important;
+  }
+  .rep-card-customers.rep-mobile-hide {
+    display: none !important;
+  }
+
+  .rep-card-chat.rep-mobile-show {
+    display: flex !important;
+    width: 100% !important;
+    height: 100% !important;
+    flex: 1 !important;
+  }
+  .rep-card-chat.rep-mobile-hide {
+    display: none !important;
+  }
+
+  .rep-desktop-only {
+    display: none !important;
+  }
+
+  .rep-mobile-back-btn {
+    display: inline-flex !important;
+  }
+}
 

@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useApp } from '@/context/AppContext';
+import { useApp, useAppSelector, selectCartCount, selectCartSubtotal } from '@/context/AppContext';
 import { CustomerFloorSeatingModal } from './CustomerFloorSeatingModal';
 import {
   X,
@@ -307,7 +307,9 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
 
   if (!isOpen) return null;
 
-  const subtotal = cart.reduce((acc, i) => acc + i.unitPrice * i.quantity, 0);
+  // Redux Toolkit memoized selectors for real-time fast calculation
+  const subtotal = useAppSelector(selectCartSubtotal);
+  const cartCount = useAppSelector(selectCartCount);
   const total = subtotal;
 
   const handleGuestSubmit = async (e?: React.FormEvent) => {
@@ -698,18 +700,18 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
           {/* Modal Body - Strictly unscrollable, fluid typography and spacing */}
           <div style={{ padding: 'clamp(10px, 2.2vw, 16px) clamp(12px, 2.5vw, 20px)', overflow: 'hidden', display: 'flex', flexDirection: 'column', gap: 'clamp(8px, 1.8vw, 12px)', boxSizing: 'border-box' }}>
 
-            {/* STAGE: ORDER REVIEW / SUMMARY (Appears when checkout clicked on small screens) */}
+            {/* STAGE: ORDER REVIEW / SUMMARY (Appears when checkout clicked on small screens - Equal Card Size to Subsequent Steps) */}
             {checkoutStep === 'order_review' && (
               <div style={{ display: 'flex', flexDirection: 'column', gap: 'clamp(8px, 1.8vw, 12px)', boxSizing: 'border-box' }}>
                 <div
                   style={{
-                    height: 'auto',
+                    height: 'clamp(250px, 48vh, 310px)',
                     minHeight: 0,
-                    maxHeight: '235px',
+                    maxHeight: 'clamp(250px, 48vh, 310px)',
                     backgroundColor: 'var(--bg-card-subtle)',
                     borderRadius: '16px',
                     border: '1px solid var(--border-color)',
-                    padding: 'clamp(8px, 2vw, 12px)',
+                    padding: 'clamp(10px, 2.2vw, 14px) clamp(10px, 2.5vw, 16px)',
                     display: 'flex',
                     flexDirection: 'column',
                     justifyContent: 'space-between',
@@ -736,19 +738,20 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
                         borderRadius: 'var(--radius-full)',
                       }}
                     >
-                      {cart.reduce((acc, i) => acc + i.quantity, 0)} {cart.reduce((acc, i) => acc + i.quantity, 0) === 1 ? 'Item' : 'Items'}
+                      {cartCount} {cartCount === 1 ? 'Item' : 'Items'}
                     </span>
                   </div>
 
-                  {/* List of cart items - vertically scrollable showing 2 items at a time and card size not bigger than that */}
+                  {/* List of cart items - vertically scrollable if items count does not fit the equal card container */}
                   <div
                     style={{
-                      maxHeight: '112px',
-                      overflowY: cart.length > 2 ? 'auto' : 'hidden',
+                      flex: 1,
+                      minHeight: 0,
+                      overflowY: 'auto',
                       display: 'flex',
                       flexDirection: 'column',
-                      gap: 'clamp(4px, 1.2vw, 6px)',
-                      paddingRight: '2px',
+                      gap: 'clamp(5px, 1.3vw, 7px)',
+                      paddingRight: '4px',
                       boxSizing: 'border-box',
                     }}
                   >

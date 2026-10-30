@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import { useApp } from '@/context/AppContext';
 import { Order, OrderStatus } from '@/types/cafe';
 import { ModalConfirmation } from '@/components/common/ModalConfirmation';
@@ -29,34 +29,79 @@ export const KitchenQueueScreen: React.FC = () => {
   const [dishSearch, setDishSearch] = useState('');
   const [availabilityFilter, setAvailabilityFilter] = useState<'all' | 'unavailable' | 'available'>('all');
 
-  const branchOrders = orders.filter((o) => o.status !== 'cancelled' && o.status !== 'completed' && (!o.branchId || o.branchId === currentBranch.id));
+  // High-performance memoized order categorization (Redux Toolkit architecture)
+  const {
+    branchOrders,
+    incomingOrders,
+    heldAtSupportOrders,
+    preparingOrders,
+    readyOrders,
+    servedOrders,
+    cameTodayCount,
+    acceptedTodayCount,
+    preparedTodayCount,
+  } = useMemo(() => {
+    const isOrderDispatchedToKitchen = (o: Order) => {
+      if (footerSettings?.orderRoutingSupportFirst === false) return true;
+      if (o.sentToKitchen) return true;
+      if (o.status === 'accepted' || o.status === 'preparing' || o.status === 'ready' || o.status === 'served') return true;
+      if (o.forwardToKitchenAt && Date.now() >= new Date(o.forwardToKitchenAt).getTime()) return true;
+      return false;
+    };
 
-  // Determine if order is authorized for kitchen queue (or currently held at Customer Services)
-  const isOrderDispatchedToKitchen = (o: Order) => {
-    if (footerSettings?.orderRoutingSupportFirst === false) return true;
-    if (o.sentToKitchen) return true;
-    if (o.status === 'accepted' || o.status === 'preparing' || o.status === 'ready' || o.status === 'served') return true;
-    if (o.forwardToKitchenAt && Date.now() >= new Date(o.forwardToKitchenAt).getTime()) return true;
-    return false;
-  };
+    const bOrders: Order[] = [];
+    const incoming: Order[] = [];
+    const held: Order[] = [];
+    const preparing: Order[] = [];
+    const ready: Order[] = [];
+    const served: Order[] = [];
+    let cameToday = 0;
+    let acceptedToday = 0;
+    let preparedToday = 0;
+    const branchId = currentBranch.id;
 
-  const incomingOrders = branchOrders.filter((o) => (o.status === 'placed' || o.status === 'accepted') && isOrderDispatchedToKitchen(o));
-  const heldAtSupportOrders = branchOrders.filter((o) => o.status === 'placed' && !isOrderDispatchedToKitchen(o));
-  const preparingOrders = branchOrders.filter((o) => o.status === 'preparing');
-  const readyOrders = branchOrders.filter((o) => o.status === 'ready');
-  const servedOrders = branchOrders.filter((o) => o.status === 'served');
+    for (let i = 0; i < orders.length; i++) {
+      const o = orders[i];
+      if (o.branchId && o.branchId !== branchId) continue;
+      cameToday++;
+      if (o.status !== 'placed' && o.status !== 'cancelled') acceptedToday++;
+      if (o.status === 'ready' || o.status === 'served' || o.status === 'completed') preparedToday++;
 
-  const unavailableItems = menuItems.filter((m) => m.branchAvailability[currentBranch.id] === false);
+      if (o.status !== 'cancelled' && o.status !== 'completed') {
+        bOrders.push(o);
+        if (o.status === 'placed' || o.status === 'accepted') {
+          if (isOrderDispatchedToKitchen(o)) {
+            incoming.push(o);
+          } else {
+            held.push(o);
+          }
+        } else if (o.status === 'preparing') {
+          preparing.push(o);
+        } else if (o.status === 'ready') {
+          ready.push(o);
+        } else if (o.status === 'served') {
+          served.push(o);
+        }
+      }
+    }
 
-  // Manager Kitchen Status Metrics (Came Today, Accepted Today, Prepared Today)
-  const allBranchOrdersToday = orders.filter((o) => !o.branchId || o.branchId === currentBranch.id);
-  const cameTodayCount = allBranchOrdersToday.length;
-  const acceptedTodayCount = allBranchOrdersToday.filter(
-    (o) => o.status !== 'placed' && o.status !== 'cancelled'
-  ).length;
-  const preparedTodayCount = allBranchOrdersToday.filter(
-    (o) => o.status === 'ready' || o.status === 'served' || o.status === 'completed'
-  ).length;
+    return {
+      branchOrders: bOrders,
+      incomingOrders: incoming,
+      heldAtSupportOrders: held,
+      preparingOrders: preparing,
+      readyOrders: ready,
+      servedOrders: served,
+      cameTodayCount: cameToday,
+      acceptedTodayCount: acceptedToday,
+      preparedTodayCount: preparedToday,
+    };
+  }, [orders, currentBranch.id, footerSettings?.orderRoutingSupportFirst]);
+
+  const unavailableItems = useMemo(
+    () => menuItems.filter((m) => m.branchAvailability?.[currentBranch.id] === false),
+    [menuItems, currentBranch.id]
+  );
 
   const handleStartPreparing = (orderId: string) => {
     updateOrderStatus(orderId, 'preparing');
@@ -64,22 +109,19 @@ export const KitchenQueueScreen: React.FC = () => {
 
   const handleMarkReadyConfirm = () => {
     if (!confirmReadyOrderId) return;
-    updateOrderStatus(confirmReadyOrderId, 'ready');
     const ord = orders.find((o) => o.id === confirmReadyOrderId);
-    if (ord?.assignedWaiterName) {
-      addToast({
-        type: 'info',
-        title: 'Floor Waiter Notified 🍽️',
-        message: `Order #${ord.orderNumber} for Table ${ord.tableNumber || 'Counter'} is READY! Dispatched to Waiter ${ord.assignedWaiterName}.`,
-      });
-    }
+    const waiterMsg = ord?.assignedWaiterName ? ` Dispatched to Waiter ${ord.assignedWaiterName}.` : '';
+    updateOrderStatus(confirmReadyOrderId, 'ready', undefined, {
+      type: 'info',
+      title: 'Order Kitchen Ready 🍽️',
+      message: `Order #${ord?.orderNumber || confirmReadyOrderId} for Table ${ord?.tableNumber || 'Counter'} is READY!${waiterMsg}`,
+    });
     setConfirmReadyOrderId(null);
   };
 
   const handleMarkToServe = (orderId: string) => {
-    updateOrderStatus(orderId, 'served');
     const ord = orders.find((o) => o.id === orderId);
-    addToast({
+    updateOrderStatus(orderId, 'served', undefined, {
       type: 'info',
       title: 'Dispatched to Floor Staff / Waiter 🍽️',
       message: `Order #${ord?.orderNumber || ''} sent to ${ord?.assignedWaiterName || 'server'} for Table ${ord?.tableNumber || 'Counter'}.`,
@@ -155,37 +197,47 @@ export const KitchenQueueScreen: React.FC = () => {
       <html>
         <head>
           <title>Kitchen Ticket #${ord.orderNumber}</title>
-          <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700&display=swap" rel="stylesheet">
+          <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
           <style>
             @page {
               size: 80mm auto;
-              margin: 0;
+              margin: 0 !important;
+              padding: 0 !important;
             }
             * {
-              box-sizing: border-box;
+              box-sizing: border-box !important;
               margin: 0;
               padding: 0;
-              font-family: 'Plus Jakarta Sans', system-ui, sans-serif;
+              font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
               -webkit-print-color-adjust: exact !important;
               print-color-adjust: exact !important;
             }
             html, body {
-              width: 80mm;
-              margin: 0 auto;
-              padding: 4mm 2mm;
+              width: 80mm !important;
+              max-width: 80mm !important;
+              margin: 0 !important;
+              padding: 0 !important;
               background: #FFFFFF !important;
-              color: #1A1A1A !important;
+              color: #000000 !important;
+              height: auto !important;
+              min-height: 0 !important;
+              overflow: visible !important;
             }
             .kot-container {
-              width: 100% !important;
+              width: 80mm !important;
               max-width: 80mm !important;
-              border: 1px dashed #CBD5E1 !important;
-              border-radius: 6px !important;
-              padding: 16px 12px !important;
+              margin: 0 !important;
+              padding: 6px 8px 4px 8px !important;
+              border: none !important;
+              border-radius: 0 !important;
               background: #FFFFFF !important;
               position: relative !important;
               overflow: hidden !important;
               box-shadow: none !important;
+              height: auto !important;
+              min-height: 0 !important;
+              page-break-inside: avoid !important;
+              break-inside: avoid !important;
             }
           </style>
         </head>
@@ -193,28 +245,28 @@ export const KitchenQueueScreen: React.FC = () => {
           <div class="kot-container">
             <!-- 135-degree rotated Cafe Logo Watermark -->
             <div style="position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; overflow: hidden; pointer-events: none; z-index: 0;">
-              <img src="/logo.png" alt="Logo Watermark" style="width: 85%; height: 85%; object-fit: contain; transform: rotate(135deg); opacity: 0.16; display: block; -webkit-print-color-adjust: exact; print-color-adjust: exact;" />
+              <img src="/logo.png" alt="Logo Watermark" style="width: 80%; height: 80%; object-fit: contain; transform: rotate(135deg); opacity: 0.15; display: block; -webkit-print-color-adjust: exact; print-color-adjust: exact;" />
             </div>
             
             <div style="position: relative; z-index: 1;">
-              <div style="text-align: center; border-bottom: 1px dashed #000000; padding-bottom: 8px; margin-bottom: 10px;">
-                <h3 style="font-size: 18px; font-weight: 900; margin: 0; font-family: 'Outfit', sans-serif;">FOODIES CAFE · KITCHEN KOT</h3>
-                <div style="font-size: 11px; color: #475569; margin-top: 2px;">${currentBranch.name}</div>
-                <div style="font-size: 14px; font-weight: 850; color: #EA580C; margin-top: 4px;">
+              <div style="text-align: center; border-bottom: 1.5px dashed #000000; padding-bottom: 5px; margin-bottom: 6px;">
+                <h3 style="font-size: 19px; font-weight: 900; margin: 0; font-family: 'Outfit', sans-serif; letter-spacing: 0.5px;">FOODIES CAFE · KITCHEN KOT</h3>
+                <div style="font-size: 11px; font-weight: 600; color: #475569; margin-top: 1px;">${currentBranch.name}</div>
+                <div style="display: inline-block; font-size: 12.5px; font-weight: 850; color: #EA580C; background: #FFF7ED; padding: 2px 8px; border-radius: 4px; margin-top: 3px; border: 1px solid #FFEDD5;">
                   ${ord.type === 'dine_in' ? `DINE-IN · TABLE ${ord.tableNumber || '?'}` : ord.type === 'takeaway' ? 'TAKEAWAY COUNTER' : 'DELIVERY DISPATCH'}
                 </div>
               </div>
 
-              <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 8px; color: #64748B;">
+              <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 4px; color: #334155; font-weight: 600;">
                 <span>Ticket: <strong>#${ord.orderNumber}</strong></span>
-                <span>Time: ${ord.createdAt}</span>
+                <span>${ord.createdAt}</span>
               </div>
 
-              <div style="border-top: 1px solid #E2E8F0; padding-top: 8px; margin-bottom: 12px;">
+              <div style="border-top: 1px solid #CBD5E1; padding-top: 5px; margin-bottom: 6px;">
                 ${itemsHtml}
               </div>
 
-              <div style="text-align: center; font-size: 10px; color: #64748B; border-top: 1px dashed #CBD5E1; padding-top: 6px;">
+              <div style="text-align: center; font-size: 10px; font-weight: 600; color: #64748B; border-top: 1px dashed #CBD5E1; padding-top: 4px; margin-top: 2px;">
                 Printed for Kitchen Preparation · FoodiesCafe
               </div>
             </div>
@@ -453,14 +505,16 @@ export const KitchenQueueScreen: React.FC = () => {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '24px' }}>
       {/* Kitchen Top Bar & Actions */}
-      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
+      <div className="kitchen-top-bar" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '12px' }}>
         <div>
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <h1 style={{ fontSize: '28px', fontWeight: 850, margin: 0, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
-              {isManager ? 'Kitchen Operations Status Monitor' : 'Live Kitchen Queue Board'}
+            <h1 style={{ fontSize: 'clamp(20px, 4vw, 28px)', fontWeight: 850, margin: 0, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
+              <span className="kitchen-title-desktop">{isManager ? 'Kitchen Operations Status Monitor' : 'Live Kitchen Queue Board'}</span>
+              <span className="kitchen-title-mobile">{isManager ? 'Kitchen Status' : 'Kitchen Queue'}</span>
             </h1>
             {isManager && (
               <span
+                className="kitchen-badge-desktop"
                 style={{
                   fontSize: '11px',
                   fontWeight: 800,
@@ -477,7 +531,7 @@ export const KitchenQueueScreen: React.FC = () => {
               </span>
             )}
           </div>
-          <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+          <p className="kitchen-desc-desktop" style={{ fontSize: '13.5px', color: 'var(--text-secondary)', marginTop: '2px' }}>
             Branch: <strong>{currentBranch.name}</strong> ·{' '}
             {isManager
               ? 'Real-time kitchen status: Orders arrived today, accepted & prepared pipeline'
@@ -488,6 +542,7 @@ export const KitchenQueueScreen: React.FC = () => {
         {/* Stock / Dish Availability Button */}
         <button
           onClick={() => setUnavailableModalOpen(true)}
+          className="kitchen-stock-btn-desktop"
           style={{
             padding: '10px 16px',
             borderRadius: 'var(--radius-md)',

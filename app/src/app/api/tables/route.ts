@@ -1,17 +1,25 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
+let tablesColumnsMigrated = false;
+
+async function ensureTablesColumns() {
+  if (tablesColumnsMigrated) return;
+  try {
+    await query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS qr_code TEXT`);
+    await query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS qr_expires_at TIMESTAMPTZ`);
+    await query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS allow_qr_reserved BOOLEAN DEFAULT false`);
+    tablesColumnsMigrated = true;
+  } catch (e) {}
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const branchId = searchParams.get('branchId');
 
-    // Auto-migrate tables columns if missing
-    try {
-      await query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS qr_code TEXT`);
-      await query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS qr_expires_at TIMESTAMPTZ`);
-      await query(`ALTER TABLE tables ADD COLUMN IF NOT EXISTS allow_qr_reserved BOOLEAN DEFAULT false`);
-    } catch (e) {}
+    // Auto-migrate tables columns if missing (cached once)
+    await ensureTablesColumns();
 
     let sql = `
       SELECT id, number, branch_id as "branchId", floor, capacity, chairs,

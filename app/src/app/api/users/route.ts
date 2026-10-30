@@ -1,17 +1,25 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
 
+let usersColumnsMigrated = false;
+
+async function ensureUsersColumns() {
+  if (usersColumnsMigrated) return;
+  try {
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS rider_availability VARCHAR(30) DEFAULT 'available'`);
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS rider_total_deliveries INT DEFAULT 0`);
+    await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS rider_active_order_id VARCHAR(64)`);
+    usersColumnsMigrated = true;
+  } catch (e) {}
+}
+
 export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const branchId = searchParams.get('branchId');
 
-    // Auto-migrate users columns if missing
-    try {
-      await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS rider_availability VARCHAR(30) DEFAULT 'available'`);
-      await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS rider_total_deliveries INT DEFAULT 0`);
-      await query(`ALTER TABLE users ADD COLUMN IF NOT EXISTS rider_active_order_id VARCHAR(64)`);
-    } catch (e) {}
+    // Auto-migrate users columns if missing (cached once)
+    await ensureUsersColumns();
 
     let sql = `
       SELECT id, name, phone, email, address, role,
