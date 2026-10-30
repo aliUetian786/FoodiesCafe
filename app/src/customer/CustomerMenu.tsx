@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import { useApp, useAppSelector, selectCartCount, selectCartSubtotal } from '@/context/AppContext';
 import { MenuItem } from '@/types/cafe';
 import {
@@ -42,21 +42,43 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
   } = useApp();
 
   const searchQuery = menuSearchQuery;
-  const categories = appCategories || [];
-  const [selectedCategory, setSelectedCategory] = useState<string>(() => appCategories?.[0] || 'Appetizers');
+  // Dynamically ensure all categories present in menuItems are supported alongside appCategories
+  const categories: string[] = useMemo(() => {
+    const list: string[] = [...(appCategories || [])];
+    (menuItems || []).forEach((item) => {
+      if (item.category && !list.includes(item.category)) {
+        list.push(item.category);
+      }
+    });
+    return list.length > 0 ? list : ['Biryani & Rice', 'Karahi & Handi', 'BBQ & Kebabs', 'Burgers & Fast Food', 'Tandoor & Breads', 'Beverages & Desserts'];
+  }, [appCategories, menuItems]);
+
+  const [selectedCategory, setSelectedCategory] = useState<string>(() => categories[0] || 'Biryani & Rice');
 
   const categoryRowRef = useRef<HTMLDivElement>(null);
   const categoryBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const isManualScrollRef = useRef(false);
 
-  // Sync selectedCategory if initial appCategories loaded later
+  // Sync selectedCategory if categories loaded later
   useEffect(() => {
-    if (appCategories && appCategories.length > 0) {
-      if (!selectedCategory || !appCategories.includes(selectedCategory)) {
-        setSelectedCategory(appCategories[0]);
+    if (categories && categories.length > 0) {
+      if (!selectedCategory || !categories.includes(selectedCategory)) {
+        setSelectedCategory(categories[0]);
       }
     }
-  }, [appCategories, selectedCategory]);
+  }, [categories, selectedCategory]);
+
+  // Helper to match item categories robustly (with alias support)
+  const isItemInCategory = (itemCat: string, sectionCat: string) => {
+    if (itemCat === sectionCat) return true;
+    const norm = (s: string) => (s || '').toLowerCase().replace(/&/g, 'and').replace(/[^a-z0-9]/g, '');
+    const iNorm = norm(itemCat);
+    const sNorm = norm(sectionCat);
+    if (iNorm === sNorm) return true;
+    if ((iNorm.includes('karahi') || iNorm.includes('shinwari')) && (sNorm.includes('karahi') || sNorm.includes('shinwari'))) return true;
+    if ((iNorm.includes('tandoor') || iNorm.includes('bread')) && (sNorm.includes('tandoor') || sNorm.includes('bread'))) return true;
+    return false;
+  };
 
   // Filtered items when searching
   const filteredItems = menuItems.filter((item) => {
@@ -318,7 +340,9 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
 
   // Helper to render an individual item card
   const renderItemCard = (item: MenuItem) => {
-    const isAvailable = item.branchAvailability[currentBranchId] ?? item.isAvailable;
+    const isAvailable = (item.branchAvailability && item.branchAvailability[currentBranchId] !== undefined)
+      ? Boolean(item.branchAvailability[currentBranchId])
+      : (item.isAvailable ?? true);
     const rawPrice = item.branchPriceOverrides?.[currentBranchId] ?? item.basePrice;
     const displayPrice = Number(rawPrice) || 0;
 
@@ -663,7 +687,7 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
               minWidth: 0,
             }}
           >
-            {categories.map((cat) => (
+            {categories.map((cat: string) => (
               <button
                 key={cat}
                 ref={(el) => {
@@ -808,8 +832,8 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
           ) : (
             /* Default Mode: Category Sections for ScrollSpy */
             <div style={{ display: 'flex', flexDirection: 'column', gap: '48px' }}>
-              {categories.map((cat) => {
-                  const catItems = menuItems.filter((i) => i.category === cat);
+              {categories.map((cat: string) => {
+                  const catItems = menuItems.filter((i) => isItemInCategory(i.category, cat));
                   if (catItems.length === 0) return null;
 
                   return (

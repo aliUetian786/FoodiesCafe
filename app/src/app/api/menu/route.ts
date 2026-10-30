@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { INITIAL_MENU, INITIAL_CATEGORIES } from '@/database/embeddedSeed';
 
 export async function GET() {
   try {
@@ -19,7 +20,7 @@ export async function GET() {
       `SELECT name FROM categories ORDER BY display_order ASC`
     );
 
-    const menuItems = itemsRes.rows.map((row: any) => ({
+    const menuItems = (itemsRes?.rows || []).map((row: any) => ({
       ...row,
       basePrice: Number(row.basePrice) || 0,
       branchAvailability:
@@ -40,15 +41,21 @@ export async function GET() {
           : row.extras || [],
     }));
 
+    const categories = (catsRes?.rows && catsRes.rows.length > 0)
+      ? catsRes.rows.map((r: any) => r.name)
+      : INITIAL_CATEGORIES;
+
     return NextResponse.json({
-      menuItems,
-      categories: catsRes.rows.map((r: any) => r.name),
+      menuItems: menuItems.length > 0 ? menuItems : INITIAL_MENU,
+      categories,
     });
   } catch (error: any) {
-    return NextResponse.json(
-      { error: 'Failed to fetch menu from PostgreSQL', details: error.message },
-      { status: 500 }
-    );
+    return NextResponse.json({
+      menuItems: INITIAL_MENU,
+      categories: INITIAL_CATEGORIES,
+      fallback: true,
+      error: error?.message,
+    });
   }
 }
 

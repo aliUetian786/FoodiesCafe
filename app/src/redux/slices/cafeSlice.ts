@@ -16,6 +16,7 @@ import {
   ManagerAccessRequest,
   BranchPaymentSettings,
 } from '@/types/cafe';
+import { INITIAL_MENU, INITIAL_CATEGORIES } from '@/database/embeddedSeed';
 
 export const DEFAULT_PAYMENT_SETTINGS: BranchPaymentSettings = {
   dine_in: { COD: true, Wallet: true, Card: true, Bank: true, Installment: false },
@@ -92,113 +93,6 @@ const INITIAL_BRANCHES: Branch[] = [
       takeaway: { COD: true, Wallet: true, Card: true, Bank: true, Installment: false },
       delivery: { COD: true, Wallet: true, Card: true, Bank: true, Installment: true },
     },
-  },
-];
-
-const INITIAL_MENU: MenuItem[] = [
-  {
-    id: 'm1',
-    name: 'Royal Chicken Dum Biryani',
-    category: 'Biryani & Rice',
-    description: 'Fragrant long-grain basmati cooked with saffron, marinated chicken, caramelised onions & secret house spices in a sealed copper handi.',
-    basePrice: 650,
-    image: '/food-biryani.jpg',
-    isAvailable: true,
-    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
-    sizes: [
-      { name: 'Regular (Single)', priceDelta: 0 },
-      { name: 'Jumbo (Double)', priceDelta: 350 },
-    ],
-    extras: [
-      { name: 'Extra Zeera Raita', price: 60 },
-      { name: 'Fresh Kachumber Salad', price: 70 },
-      { name: 'Extra Boiled Egg', price: 50 },
-    ],
-  },
-  {
-    id: 'm2',
-    name: 'Desi Ghee Shinwari Chicken Karahi',
-    category: 'Karahi & Handi',
-    description: 'Fresh country chicken wok-tossed in pure organic desi ghee, ripe tomatoes, coarse crushed black pepper and ginger juliennes.',
-    basePrice: 1250,
-    image: '/hero-bg.jpg',
-    isAvailable: true,
-    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
-    sizes: [
-      { name: 'Half (serves 2)', priceDelta: 0 },
-      { name: 'Full (serves 4)', priceDelta: 1100 },
-    ],
-    extras: [
-      { name: 'Roghni Naan', price: 80 },
-      { name: 'Garlic Butter Naan', price: 110 },
-      { name: 'Mint Chutney', price: 50 },
-    ],
-  },
-  {
-    id: 'm3',
-    name: 'Smoky Beef Seekh Kebabs (4 Pcs)',
-    category: 'BBQ & Kebabs',
-    description: 'Melt-in-mouth prime beef mince seasoned with roasted cumin, brown onion paste, coriander seeds and charcoal grilled over hot embers.',
-    basePrice: 780,
-    image: '/hero-bg.jpg',
-    isAvailable: true,
-    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': false, 'clifton-karachi': true },
-    sizes: [
-      { name: 'Standard (4 pcs)', priceDelta: 0 },
-      { name: 'Platter (8 pcs)', priceDelta: 680 },
-    ],
-    extras: [
-      { name: 'Tandoori Paratha', price: 90 },
-      { name: 'Mint Coriander Dip', price: 40 },
-    ],
-  },
-  {
-    id: 'm4',
-    name: 'The Foodies Crunch Burger',
-    category: 'Burgers & Fast Food',
-    description: 'Crispy fried buttermilk chicken fillet tossed in spicy glaze, topped with cheddar cheese, tangy coleslaw, garlic aioli on a toasted brioche.',
-    basePrice: 620,
-    image: '/hero-bg.jpg',
-    isAvailable: true,
-    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
-    sizes: [
-      { name: 'Single Fillet', priceDelta: 0 },
-      { name: 'Double Monster Fillet', priceDelta: 280 },
-    ],
-    extras: [
-      { name: 'Seasoned Masala Fries', price: 160 },
-      { name: 'Cheese Dip Shot', price: 90 },
-    ],
-  },
-  {
-    id: 'm5',
-    name: 'Fresh Tandoori Roghni Naan',
-    category: 'Breads & Sides',
-    description: 'Soft leavened bread brushed with clarified butter, toasted white sesame seeds and baked against clay tandoor walls.',
-    basePrice: 80,
-    image: '/food-biryani.jpg',
-    isAvailable: true,
-    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
-  },
-  {
-    id: 'm6',
-    name: 'Traditional Peshawari Qahwa with Cardamom',
-    category: 'Beverages & Desserts',
-    description: 'Brewed green tea leaves infused with green cardamom pods, cinnamon bark, served with saffron candy crystals.',
-    basePrice: 120,
-    image: '/food-biryani.jpg',
-    isAvailable: true,
-    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
-  },
-  {
-    id: 'm7',
-    name: 'Shahi Malai Kulfi on Stick',
-    category: 'Beverages & Desserts',
-    description: 'Dense, creamy frozen dessert made from reduced whole milk, infused with roasted pistachios, almonds, and rose essence.',
-    basePrice: 220,
-    image: '/food-biryani.jpg',
-    isAvailable: false,
-    branchAvailability: { 'gulberg-lahore': false, 'f7-islamabad': false, 'clifton-karachi': true },
   },
 ];
 
@@ -352,7 +246,7 @@ const initialState: CafeState = {
   branches: INITIAL_BRANCHES,
   currentBranchId: getInitialBranchId(),
   menuItems: INITIAL_MENU,
-  categories: ['Biryani & Rice', 'Shinwari & Karahi', 'Burgers & Fast Food', 'Tandoor & Breads', 'Beverages & Desserts'],
+  categories: INITIAL_CATEGORIES,
   tables: INITIAL_TABLES,
   tableSessions: [],
   complaints: [],

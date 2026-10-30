@@ -1,5 +1,6 @@
 import { NextResponse } from 'next/server';
 import { query } from '@/lib/db';
+import { INITIAL_MENU, INITIAL_CATEGORIES } from '@/database/embeddedSeed';
 
 let ordersColumnsMigrated = false;
 async function ensureOrdersColumns() {
@@ -254,10 +255,10 @@ export async function GET(request: Request) {
       const [menuRes, catRes, mktRes, usersRes] = await Promise.all([
         query(`
           SELECT id, name, category, description, base_price as "basePrice",
-                 image_url as "imageUrl", is_available as "isAvailable",
+                 image, is_available as "isAvailable",
                  branch_availability as "branchAvailability",
                  branch_price_overrides as "branchPriceOverrides",
-                 custom_options as "customOptions", sizes
+                 sizes, extras
           FROM menu_items
           ORDER BY category ASC, name ASC
         `).catch(() => ({ rows: [] })),
@@ -275,16 +276,17 @@ export async function GET(request: Request) {
         `).catch(() => ({ rows: [] })),
       ]);
 
-      responsePayload.menuItems = menuRes.rows.map((r: any) => ({
+      const parsedMenuItems = menuRes.rows.map((r: any) => ({
         ...r,
         basePrice: Number(r.basePrice || 0),
-        branchAvailability: typeof r.branchAvailability === 'string' ? JSON.parse(r.branchAvailability) : r.branchAvailability,
-        branchPriceOverrides: typeof r.branchPriceOverrides === 'string' ? JSON.parse(r.branchPriceOverrides) : r.branchPriceOverrides,
-        customOptions: typeof r.customOptions === 'string' ? JSON.parse(r.customOptions) : r.customOptions,
-        sizes: typeof r.sizes === 'string' ? JSON.parse(r.sizes) : r.sizes,
+        branchAvailability: typeof r.branchAvailability === 'string' ? JSON.parse(r.branchAvailability) : (r.branchAvailability || {}),
+        branchPriceOverrides: typeof r.branchPriceOverrides === 'string' ? JSON.parse(r.branchPriceOverrides) : (r.branchPriceOverrides || {}),
+        sizes: typeof r.sizes === 'string' ? JSON.parse(r.sizes) : (r.sizes || []),
+        extras: typeof r.extras === 'string' ? JSON.parse(r.extras) : (r.extras || []),
       }));
 
-      responsePayload.categories = catRes.rows.map((c: any) => c.name);
+      responsePayload.menuItems = parsedMenuItems.length > 0 ? parsedMenuItems : INITIAL_MENU;
+      responsePayload.categories = catRes.rows.length > 0 ? catRes.rows.map((c: any) => c.name) : INITIAL_CATEGORIES;
       responsePayload.users = usersRes.rows.map((u: any) => ({
         ...u,
         riderAvailability: u.role === 'delivery_staff' ? (u.riderAvailability || 'available') : u.riderAvailability,

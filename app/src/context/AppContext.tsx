@@ -66,6 +66,7 @@ import {
   setMenuSearchQuery as setReduxSearchQuery,
 } from '@/redux/slices/uiSlice';
 import { runSync, broadcastStateMutation } from '@/redux/sync/syncEngine';
+import { INITIAL_MENU, INITIAL_CATEGORIES } from '@/database/embeddedSeed';
 
 interface Toast {
   id: string;
@@ -317,125 +318,10 @@ const INITIAL_BRANCHES: Branch[] = [
   },
 ];
 
-const INITIAL_MENU: MenuItem[] = [
-  {
-    id: 'm1',
-    name: 'Royal Chicken Dum Biryani',
-    category: 'Biryani & Rice',
-    description: 'Fragrant long-grain basmati cooked with saffron, marinated chicken, caramelised onions & secret house spices in a sealed copper handi.',
-    basePrice: 650,
-    image: '/food-biryani.jpg',
-    isAvailable: true,
-    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
-    sizes: [
-      { name: 'Regular (Single)', priceDelta: 0 },
-      { name: 'Jumbo (Double)', priceDelta: 350 },
-    ],
-    extras: [
-      { name: 'Extra Zeera Raita', price: 60 },
-      { name: 'Fresh Kachumber Salad', price: 70 },
-      { name: 'Extra Boiled Egg', price: 50 },
-    ],
-  },
-  {
-    id: 'm2',
-    name: 'Desi Ghee Shinwari Chicken Karahi',
-    category: 'Karahi & Handi',
-    description: 'Fresh country chicken wok-tossed in pure organic desi ghee, ripe tomatoes, coarse crushed black pepper and ginger juliennes.',
-    basePrice: 1250,
-    image: '/hero-bg.jpg',
-    isAvailable: true,
-    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
-    sizes: [
-      { name: 'Half (serves 2)', priceDelta: 0 },
-      { name: 'Full (serves 4)', priceDelta: 1100 },
-    ],
-    extras: [
-      { name: 'Roghni Naan', price: 80 },
-      { name: 'Garlic Butter Naan', price: 110 },
-      { name: 'Mint Chutney', price: 50 },
-    ],
-  },
-  {
-    id: 'm3',
-    name: 'Smoky Beef Seekh Kebabs (4 Pcs)',
-    category: 'BBQ & Kebabs',
-    description: 'Melt-in-mouth prime beef mince seasoned with roasted cumin, brown onion paste, coriander seeds and charcoal grilled over hot embers.',
-    basePrice: 780,
-    image: '/hero-bg.jpg',
-    isAvailable: true,
-    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': false, 'clifton-karachi': true },
-    sizes: [
-      { name: 'Standard (4 pcs)', priceDelta: 0 },
-      { name: 'Platter (8 pcs)', priceDelta: 680 },
-    ],
-    extras: [
-      { name: 'Tandoori Paratha', price: 90 },
-      { name: 'Mint Coriander Dip', price: 40 },
-    ],
-  },
-  {
-    id: 'm4',
-    name: 'The Foodies Crunch Burger',
-    category: 'Burgers & Fast Food',
-    description: 'Crispy fried buttermilk chicken fillet tossed in spicy glaze, topped with cheddar cheese, tangy coleslaw, garlic aioli on a toasted brioche.',
-    basePrice: 620,
-    image: '/hero-bg.jpg',
-    isAvailable: true,
-    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
-    sizes: [
-      { name: 'Single Fillet', priceDelta: 0 },
-      { name: 'Double Monster Fillet', priceDelta: 280 },
-    ],
-    extras: [
-      { name: 'Seasoned Masala Fries', price: 160 },
-      { name: 'Cheese Dip Shot', price: 90 },
-    ],
-  },
-  {
-    id: 'm5',
-    name: 'Fresh Tandoori Roghni Naan',
-    category: 'Breads & Sides',
-    description: 'Soft leavened bread brushed with clarified butter, toasted white sesame seeds and baked against clay tandoor walls.',
-    basePrice: 80,
-    image: '/food-biryani.jpg',
-    isAvailable: true,
-    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
-  },
-  {
-    id: 'm6',
-    name: 'Traditional Peshawari Qahwa with Cardamom',
-    category: 'Beverages & Desserts',
-    description: 'Brewed green tea leaves infused with green cardamom pods, cinnamon bark, served with saffron candy crystals.',
-    basePrice: 120,
-    image: '/food-biryani.jpg',
-    isAvailable: true,
-    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
-  },
-  {
-    id: 'm7',
-    name: 'Shahi Malai Kulfi on Stick',
-    category: 'Beverages & Desserts',
-    description: 'Dense, creamy frozen dessert made from reduced whole milk, infused with roasted pistachios, almonds, and rose essence.',
-    basePrice: 220,
-    image: '/food-biryani.jpg',
-    isAvailable: false, // Marked unavailable to test UI graying out rule
-    branchAvailability: { 'gulberg-lahore': false, 'f7-islamabad': false, 'clifton-karachi': true },
-  },
-];
-
 const INITIAL_FLOORS: string[] = [
   'Ground Floor (Main Dining)',
   '1st Floor (Family Hall)',
   'Rooftop Terrace (Open Air)',
-];
-
-const INITIAL_CATEGORIES: string[] = [
-  'Biryani & Rice',
-  'Shinwari & Karahi',
-  'Burgers & Fast Food',
-  'Tandoor & Breads',
-  'Beverages & Desserts',
 ];
 
 const INITIAL_FOOTER_SETTINGS: FooterSettings = {
@@ -1097,15 +983,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     } catch (e) {}
 
-    // Load persisted menu items on first mount
+    // Load persisted menu items on first mount with smart fallback merge
     const savedMenu = localStorage.getItem('foodies_menu_items');
     if (savedMenu) {
       try {
         const parsed = JSON.parse(savedMenu);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          setMenuItems(parsed);
+          const existingIds = new Set(parsed.map((p: any) => p.id));
+          const missingDefaults = INITIAL_MENU.filter((m) => !existingIds.has(m.id));
+          const fullMerged = [...parsed, ...missingDefaults];
+          setMenuItems(fullMerged);
+          localStorage.setItem('foodies_menu_items', JSON.stringify(fullMerged));
         }
       } catch (e) {}
+    } else {
+      localStorage.setItem('foodies_menu_items', JSON.stringify(INITIAL_MENU));
+    }
+
+    const savedCats = localStorage.getItem('foodies_categories');
+    if (savedCats) {
+      try {
+        const parsed = JSON.parse(savedCats);
+        if (Array.isArray(parsed) && parsed.length > 0) {
+          const unionCats = Array.from(new Set([...INITIAL_CATEGORIES, ...parsed]));
+          setCategories(unionCats);
+          localStorage.setItem('foodies_categories', JSON.stringify(unionCats));
+        }
+      } catch (e) {}
+    } else {
+      localStorage.setItem('foodies_categories', JSON.stringify(INITIAL_CATEGORIES));
     }
 
     // Clean up stale dummy table reservations from localStorage if any

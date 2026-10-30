@@ -2,6 +2,7 @@ import { Pool, QueryResult, QueryResultRow } from 'pg';
 import fs from 'fs';
 import path from 'path';
 import { newDb, DataType } from 'pg-mem';
+import { FALLBACK_SCHEMA_SQL, FALLBACK_SEED_SQL } from '@/database/embeddedSeed';
 
 // Dual-engine PostgreSQL Client
 // Primary: Real PostgreSQL (via DATABASE_URL or local PostgreSQL server)
@@ -42,31 +43,54 @@ function createMemoryPgPool() {
   // Load schema and seed data
   try {
     const schemaPaths = [
+      path.resolve(process.cwd(), 'src/database/schema.sql'),
       path.resolve(process.cwd(), 'database/schema.sql'),
       path.resolve(process.cwd(), '../database/schema.sql'),
       path.resolve(__dirname, '../../../database/schema.sql'),
       path.resolve(__dirname, '../../../../database/schema.sql'),
     ];
     const seedPaths = [
+      path.resolve(process.cwd(), 'src/database/seed.sql'),
       path.resolve(process.cwd(), 'database/seed.sql'),
       path.resolve(process.cwd(), '../database/seed.sql'),
       path.resolve(__dirname, '../../../database/seed.sql'),
       path.resolve(__dirname, '../../../../database/seed.sql'),
     ];
 
-    const schemaPath = schemaPaths.find((p) => fs.existsSync(p));
-    const seedPath = seedPaths.find((p) => fs.existsSync(p));
+    const schemaPath = schemaPaths.find((p) => {
+      try { return fs.existsSync(p); } catch { return false; }
+    });
+    const seedPath = seedPaths.find((p) => {
+      try { return fs.existsSync(p); } catch { return false; }
+    });
 
+    let schemaSql = FALLBACK_SCHEMA_SQL;
     if (schemaPath) {
-      const schemaSql = fs.readFileSync(schemaPath, 'utf8');
-      memDb.public.none(schemaSql);
+      try {
+        schemaSql = fs.readFileSync(schemaPath, 'utf8');
+      } catch {
+        schemaSql = FALLBACK_SCHEMA_SQL;
+      }
     }
+    memDb.public.none(schemaSql);
+
+    let seedSql = FALLBACK_SEED_SQL;
     if (seedPath) {
-      const seedSql = fs.readFileSync(seedPath, 'utf8');
-      memDb.public.none(seedSql);
+      try {
+        seedSql = fs.readFileSync(seedPath, 'utf8');
+      } catch {
+        seedSql = FALLBACK_SEED_SQL;
+      }
     }
+    memDb.public.none(seedSql);
   } catch (err) {
     console.error('Error seeding pg-mem in-memory postgres:', err);
+    try {
+      memDb.public.none(FALLBACK_SCHEMA_SQL);
+      memDb.public.none(FALLBACK_SEED_SQL);
+    } catch (fallbackErr) {
+      console.error('Embedded schema fallback failed:', fallbackErr);
+    }
   }
 
   const pgAdapter = memDb.adapters.createPg();
@@ -190,32 +214,46 @@ export async function testConnection(): Promise<{
 export async function initDatabase(): Promise<{ success: boolean; message: string }> {
   try {
     const schemaPaths = [
+      path.resolve(process.cwd(), 'src/database/schema.sql'),
       path.resolve(process.cwd(), 'database/schema.sql'),
       path.resolve(process.cwd(), '../database/schema.sql'),
       path.resolve(__dirname, '../../../database/schema.sql'),
       path.resolve(__dirname, '../../../../database/schema.sql'),
     ];
     const seedPaths = [
+      path.resolve(process.cwd(), 'src/database/seed.sql'),
       path.resolve(process.cwd(), 'database/seed.sql'),
       path.resolve(process.cwd(), '../database/seed.sql'),
       path.resolve(__dirname, '../../../database/seed.sql'),
       path.resolve(__dirname, '../../../../database/seed.sql'),
     ];
 
-    const schemaPath = schemaPaths.find((p) => fs.existsSync(p));
-    const seedPath = seedPaths.find((p) => fs.existsSync(p));
+    const schemaPath = schemaPaths.find((p) => {
+      try { return fs.existsSync(p); } catch { return false; }
+    });
+    const seedPath = seedPaths.find((p) => {
+      try { return fs.existsSync(p); } catch { return false; }
+    });
 
-    if (!schemaPath) {
-      return { success: false, message: 'schema.sql file not found' };
+    let schemaSql = FALLBACK_SCHEMA_SQL;
+    if (schemaPath) {
+      try {
+        schemaSql = fs.readFileSync(schemaPath, 'utf8');
+      } catch {
+        schemaSql = FALLBACK_SCHEMA_SQL;
+      }
     }
-
-    const schemaSql = fs.readFileSync(schemaPath, 'utf8');
     await query(schemaSql);
 
+    let seedSql = FALLBACK_SEED_SQL;
     if (seedPath) {
-      const seedSql = fs.readFileSync(seedPath, 'utf8');
-      await query(seedSql);
+      try {
+        seedSql = fs.readFileSync(seedPath, 'utf8');
+      } catch {
+        seedSql = FALLBACK_SEED_SQL;
+      }
     }
+    await query(seedSql);
 
     return { success: true, message: 'Database schema and seed data successfully initialized.' };
   } catch (err: any) {
