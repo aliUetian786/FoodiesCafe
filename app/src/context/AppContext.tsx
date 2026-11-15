@@ -1881,18 +1881,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               const incStatus = inc.status as string;
               const inFlightStatus = inFlight?.status as string | undefined;
 
+              const isDeliveryFinished =
+                (inc.type === 'delivery' || existing?.type === 'delivery') &&
+                isLocallyPaid &&
+                (incStatus === 'delivered' || incStatus === 'completed' || existingStatus === 'completed' || inc.riderStatus === 'delivered' || inFlight?.riderStatus === 'delivered');
+
+              const isDineInFinished =
+                (inc.type === 'dine_in' || existing?.type === 'dine_in') &&
+                isLocallyPaid &&
+                (incStatus === 'served' || incStatus === 'completed' || existingStatus === 'served' || existingStatus === 'completed');
+
+              const isTakeawayFinished =
+                (inc.type === 'takeaway' || existing?.type === 'takeaway') &&
+                isLocallyPaid &&
+                (incStatus === 'taken' || incStatus === 'completed' || existingStatus === 'taken' || existingStatus === 'completed');
+
               const isTerminalSettled =
                 incStatus === 'completed' ||
-                incStatus === 'delivered' ||
                 existingStatus === 'completed' ||
                 inFlightStatus === 'completed' ||
-                inc.riderStatus === 'delivered' ||
-                inFlight?.riderStatus === 'delivered' ||
-                (isLocallyPaid && (
-                  (inc.type === 'delivery' || existing?.type === 'delivery') ||
-                  ((inc.type === 'dine_in' || existing?.type === 'dine_in') && (existingStatus === 'served' || incStatus === 'served' || existingStatus === 'ready' || incStatus === 'ready')) ||
-                  ((inc.type === 'takeaway' || existing?.type === 'takeaway') && (existingStatus === 'ready' || incStatus === 'ready' || existingStatus === 'taken' || incStatus === 'taken'))
-                ));
+                isDeliveryFinished ||
+                isDineInFinished ||
+                isTakeawayFinished;
 
               if (existing) {
                 const existingRank = STATUS_RANK[existing.status] || 0;
@@ -2249,18 +2259,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   const incStatus = inc.status as string;
                   const inFlightStatus = inFlight?.status as string | undefined;
 
+                  const isDeliveryFinished =
+                    (inc.type === 'delivery' || existing?.type === 'delivery') &&
+                    isLocallyPaid &&
+                    (incStatus === 'delivered' || incStatus === 'completed' || existingStatus === 'completed' || inc.riderStatus === 'delivered' || inFlight?.riderStatus === 'delivered');
+
+                  const isDineInFinished =
+                    (inc.type === 'dine_in' || existing?.type === 'dine_in') &&
+                    isLocallyPaid &&
+                    (incStatus === 'served' || incStatus === 'completed' || existingStatus === 'served' || existingStatus === 'completed');
+
+                  const isTakeawayFinished =
+                    (inc.type === 'takeaway' || existing?.type === 'takeaway') &&
+                    isLocallyPaid &&
+                    (incStatus === 'taken' || incStatus === 'completed' || existingStatus === 'taken' || existingStatus === 'completed');
+
                   const isOrderTerminalSettled =
                     incStatus === 'completed' ||
-                    incStatus === 'delivered' ||
                     existingStatus === 'completed' ||
                     inFlightStatus === 'completed' ||
-                    inc.riderStatus === 'delivered' ||
-                    inFlight?.riderStatus === 'delivered' ||
-                    (isLocallyPaid && (
-                      (inc.type === 'delivery' || existing?.type === 'delivery') ||
-                      ((inc.type === 'dine_in' || existing?.type === 'dine_in') && (existingStatus === 'served' || incStatus === 'served' || existingStatus === 'ready' || incStatus === 'ready')) ||
-                      ((inc.type === 'takeaway' || existing?.type === 'takeaway') && (existingStatus === 'ready' || incStatus === 'ready' || existingStatus === 'taken' || incStatus === 'taken'))
-                    ));
+                    isDeliveryFinished ||
+                    isDineInFinished ||
+                    isTakeawayFinished;
 
                   if (existing) {
                     const existingRank = STATUS_RANK[existing.status] || 0;
@@ -2319,17 +2339,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                       Boolean(inc.paymentCollected);
                     const incStatus = inc.status as string;
                     const inFlightStatus = inFlight?.status as string | undefined;
+
+                    const isDeliveryFinished =
+                      inc.type === 'delivery' &&
+                      isLocallyPaid &&
+                      (incStatus === 'delivered' || incStatus === 'completed' || inFlightStatus === 'completed' || inc.riderStatus === 'delivered' || inFlight?.riderStatus === 'delivered');
+
+                    const isDineInFinished =
+                      inc.type === 'dine_in' &&
+                      isLocallyPaid &&
+                      (incStatus === 'served' || incStatus === 'completed');
+
+                    const isTakeawayFinished =
+                      inc.type === 'takeaway' &&
+                      isLocallyPaid &&
+                      (incStatus === 'taken' || incStatus === 'completed');
+
                     const isOrderTerminalSettled =
                       incStatus === 'completed' ||
-                      incStatus === 'delivered' ||
                       inFlightStatus === 'completed' ||
-                      inc.riderStatus === 'delivered' ||
-                      inFlight?.riderStatus === 'delivered' ||
-                      (isLocallyPaid && (
-                        inc.type === 'delivery' ||
-                        (inc.type === 'dine_in' && (incStatus === 'served' || incStatus === 'ready')) ||
-                        (inc.type === 'takeaway' && (incStatus === 'ready' || incStatus === 'taken'))
-                      ));
+                      isDeliveryFinished ||
+                      isDineInFinished ||
+                      isTakeawayFinished;
                     map.set(inc.id, isOrderTerminalSettled ? {
                       ...inc,
                       status: 'completed',
@@ -2905,8 +2936,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       } catch (e) { }
     }
 
+    // Register order in in-flight protection map immediately
+    inFlightStatusRef.current.set(newOrder.id, {
+      status: newOrder.status,
+      sentToKitchen: newOrder.sentToKitchen,
+      paymentStatus: newOrder.paymentStatus,
+      paymentCollected: newOrder.paymentCollected,
+      timestamp: Date.now(),
+    });
+    if (newOrder.orderNumber) {
+      inFlightStatusRef.current.set(newOrder.orderNumber, {
+        status: newOrder.status,
+        sentToKitchen: newOrder.sentToKitchen,
+        paymentStatus: newOrder.paymentStatus,
+        paymentCollected: newOrder.paymentCollected,
+        timestamp: Date.now(),
+      });
+    }
+
+    try {
+      store.dispatch(upsertReduxOrder(newOrder));
+    } catch (e) { }
+
     setOrders((prev) => {
-      const updated = [newOrder, ...prev];
+      const updated = [newOrder, ...prev.filter((o) => o.id !== newOrder.id && o.orderNumber !== newOrder.orderNumber)];
+      try {
+        localStorage.setItem('foodies_orders_live', JSON.stringify(updated));
+      } catch (e) { }
       broadcastOrders(updated);
       return updated;
     });
@@ -3953,16 +4009,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     const targetShiftId = targetShift.id || 'sh-today-1';
 
+    // Only promote to completed if already served, taken, or delivered; if still in kitchen preparation, keep active cooking status
+    const shouldCompleteOrder =
+      ord?.status === 'served' ||
+      ord?.status === 'taken' ||
+      ord?.status === 'delivered' ||
+      ord?.status === 'completed';
+    const targetStatus = shouldCompleteOrder ? 'completed' : (ord?.status || 'accepted');
+
     // 1. Immediately record in-flight payment lock to prevent race conditions from background polling
     inFlightStatusRef.current.set(orderId, {
-      status: 'completed',
+      status: targetStatus,
       paymentStatus: 'paid',
       paymentCollected: true,
       timestamp: Date.now(),
     });
     if (ord?.orderNumber) {
       inFlightStatusRef.current.set(ord.orderNumber, {
-        status: 'completed',
+        status: targetStatus,
         paymentStatus: 'paid',
         paymentCollected: true,
         timestamp: Date.now(),
@@ -3977,7 +4041,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             ...item,
             paymentStatus: 'paid' as const,
             paymentCollected: true,
-            status: 'completed' as const,
+            status: targetStatus as OrderStatus,
             cashierId: currentUser.id,
             cashierName: currentUser.name,
             shiftId: targetShiftId,
@@ -4002,7 +4066,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           orderId,
           paymentStatus: 'paid',
           paymentCollected: true,
-          status: 'completed',
+          status: targetStatus,
           cashierId: currentUser.id,
           cashierName: currentUser.name,
           actorId: currentUser.id,

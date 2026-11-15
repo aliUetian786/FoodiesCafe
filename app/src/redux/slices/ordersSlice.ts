@@ -105,13 +105,32 @@ export const ordersSlice = createSlice({
         const resolvedWaiterId = existing.assignedWaiterId || inc.assignedWaiterId;
         const resolvedWaiterName = existing.assignedWaiterName || inc.assignedWaiterName;
 
+        const isPaid = isLocallyPaid || inc.paymentStatus === 'paid' || Boolean(inc.paymentCollected);
+        const currentOrIncStatus = inc.status as string;
+        const currentOrExistingStatus = existing.status as string;
+        const currentOrRiderStatus = resolvedRiderStatus as string | undefined;
+
+        const isDeliveryFinished =
+          (inc.type === 'delivery' || existing.type === 'delivery') &&
+          isPaid &&
+          (currentOrIncStatus === 'delivered' || currentOrIncStatus === 'completed' || currentOrExistingStatus === 'completed' || currentOrRiderStatus === 'delivered');
+
+        const isDineInFinished =
+          (inc.type === 'dine_in' || existing.type === 'dine_in') &&
+          isPaid &&
+          (currentOrIncStatus === 'served' || currentOrIncStatus === 'completed' || currentOrExistingStatus === 'served' || currentOrExistingStatus === 'completed');
+
+        const isTakeawayFinished =
+          (inc.type === 'takeaway' || existing.type === 'takeaway') &&
+          isPaid &&
+          (currentOrIncStatus === 'taken' || currentOrIncStatus === 'completed' || currentOrExistingStatus === 'taken' || currentOrExistingStatus === 'completed');
+
         const isOrderFinished =
-          (inc.status as string) === 'delivered' ||
-          inc.status === 'completed' ||
-          existing.status === 'completed' ||
-          resolvedRiderStatus === 'delivered' ||
-          ((isLocallyPaid || inc.paymentStatus === 'paid' || Boolean(inc.paymentCollected)) &&
-            (existing.status === 'served' || inc.status === 'served' || existing.status === 'ready' || inc.status === 'ready' || inc.type === 'dine_in' || existing.type === 'dine_in' || inc.type === 'takeaway' || existing.type === 'takeaway'));
+          currentOrIncStatus === 'completed' ||
+          currentOrExistingStatus === 'completed' ||
+          isDeliveryFinished ||
+          isDineInFinished ||
+          isTakeawayFinished;
 
         const finalStatus: OrderStatus = isOrderFinished ? 'completed' : resolvedStatus;
         const finalRiderStatus: Order['riderStatus'] = (isOrderFinished && inc.type === 'delivery') ? 'delivered' : resolvedRiderStatus;
@@ -167,12 +186,29 @@ export const ordersSlice = createSlice({
     },
     upsertOrder: (state, action: PayloadAction<Order>) => {
       let ord = action.payload;
+      const isPaid = ord.paymentStatus === 'paid' || Boolean(ord.paymentCollected);
+      const ordStatus = ord.status as string;
+
+      const isDeliveryFinished =
+        ord.type === 'delivery' &&
+        isPaid &&
+        (ordStatus === 'delivered' || ordStatus === 'completed' || ord.riderStatus === 'delivered');
+
+      const isDineInFinished =
+        ord.type === 'dine_in' &&
+        isPaid &&
+        (ordStatus === 'served' || ordStatus === 'completed');
+
+      const isTakeawayFinished =
+        ord.type === 'takeaway' &&
+        isPaid &&
+        (ordStatus === 'taken' || ordStatus === 'completed');
+
       const isOrderFinished =
-        (ord.status as string) === 'delivered' ||
-        ord.status === 'completed' ||
-        ord.riderStatus === 'delivered' ||
-        ((ord.paymentStatus === 'paid' || Boolean(ord.paymentCollected)) &&
-          (ord.status === 'served' || ord.status === 'ready' || ord.type === 'dine_in' || ord.type === 'takeaway'));
+        ordStatus === 'completed' ||
+        isDeliveryFinished ||
+        isDineInFinished ||
+        isTakeawayFinished;
 
       if (isOrderFinished) {
         ord = {

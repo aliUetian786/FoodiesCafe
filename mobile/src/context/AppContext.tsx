@@ -935,18 +935,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 const existingStatus = existing?.status as string | undefined;
                 const inFlightStatus = inFlight?.status as string | undefined;
 
+                const isDeliveryFinished =
+                  (inc.type === 'delivery' || existing?.type === 'delivery') &&
+                  isLocallyPaid &&
+                  (incStatus === 'delivered' || incStatus === 'completed' || existingStatus === 'completed' || inc.riderStatus === 'delivered' || inFlight?.riderStatus === 'delivered');
+
+                const isDineInFinished =
+                  (inc.type === 'dine_in' || existing?.type === 'dine_in') &&
+                  isLocallyPaid &&
+                  (incStatus === 'served' || incStatus === 'completed' || existingStatus === 'served' || existingStatus === 'completed');
+
+                const isTakeawayFinished =
+                  (inc.type === 'takeaway' || existing?.type === 'takeaway') &&
+                  isLocallyPaid &&
+                  (incStatus === 'taken' || incStatus === 'completed' || existingStatus === 'taken' || existingStatus === 'completed');
+
                 const isTerminalSettled =
                   incStatus === 'completed' ||
-                  incStatus === 'delivered' ||
                   existingStatus === 'completed' ||
                   inFlightStatus === 'completed' ||
-                  inc.riderStatus === 'delivered' ||
-                  inFlight?.riderStatus === 'delivered' ||
-                  (isLocallyPaid && (
-                    (inc.type === 'delivery' || existing?.type === 'delivery') ||
-                    ((inc.type === 'dine_in' || existing?.type === 'dine_in') && (existingStatus === 'served' || incStatus === 'served' || existingStatus === 'ready' || incStatus === 'ready')) ||
-                    ((inc.type === 'takeaway' || existing?.type === 'takeaway') && (existingStatus === 'ready' || incStatus === 'ready' || existingStatus === 'taken' || incStatus === 'taken'))
-                  ));
+                  isDeliveryFinished ||
+                  isDineInFinished ||
+                  isTakeawayFinished;
 
                 if (existing) {
                   const existingRank = STATUS_RANK[existing.status] || 0;

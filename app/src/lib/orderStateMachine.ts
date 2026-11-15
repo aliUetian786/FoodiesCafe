@@ -396,12 +396,10 @@ export function formatOrderRow(row: any) {
   // Normalization: When an order is delivered, paid and served, or staff marks it paid, it is terminal COMPLETED
   const isPaidSettled = rawPaymentStatus === 'paid' || rawPaymentCollected;
   if (
-    status === 'delivered' ||
     status === 'completed' ||
-    rawRiderStatus === 'delivered' ||
-    (row.type === 'delivery' && isPaidSettled && (status === 'out_for_delivery' || status === 'delivered')) ||
-    (row.type === 'dine_in' && isPaidSettled && (status === 'served' || status === 'ready' || status === 'completed')) ||
-    (row.type === 'takeaway' && isPaidSettled && (status === 'ready' || status === 'taken' || status === 'completed'))
+    (row.type === 'delivery' && isPaidSettled && (status === 'delivered' || rawRiderStatus === 'delivered')) ||
+    (row.type === 'dine_in' && isPaidSettled && (status === 'served' || status === 'completed')) ||
+    (row.type === 'takeaway' && isPaidSettled && (status === 'taken' || status === 'completed'))
   ) {
     status = 'completed';
   }

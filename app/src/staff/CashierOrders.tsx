@@ -151,31 +151,16 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
 
       const isPaidOrSettled = o.paymentStatus === 'paid' || Boolean(o.paymentCollected);
 
-      // 1. Any terminal completed order belongs in history
+      // 1. Terminal finished or delivered orders move to history
       const isTerminalFinished =
         o.status === 'completed' ||
-        o.status === 'delivered' ||
-        o.riderStatus === 'delivered' ||
-        (o as any).status === 'taken';
+        (o.type === 'delivery' && isPaidOrSettled && (o.status === 'delivered' || o.riderStatus === 'delivered')) ||
+        (o.type === 'dine_in' && isPaidOrSettled && o.status === 'served') ||
+        (o.type === 'takeaway' && isPaidOrSettled && (o as any).status === 'taken');
 
       if (isTerminalFinished) return false;
 
-      // 2. CRITICAL: Any Dine-In order where payment has been received/collected MUST NOT remain in Order Hub!
-      if (o.type === 'dine_in' && isPaidOrSettled) {
-        return false; // Served/Collected AND paid -> moves to order history, NEVER comes back to Order Hub
-      }
-
-      // 3. Any delivery order where payment has been collected and delivered moves to history
-      if (o.type === 'delivery' && isPaidOrSettled && (o.status === 'out_for_delivery' || o.status === 'delivered')) {
-        return false;
-      }
-
-      // 4. Any takeaway order where payment has been collected and food handed over moves to history
-      if (o.type === 'takeaway' && isPaidOrSettled && (o.status === 'ready' || (o as any).status === 'taken')) {
-        return false;
-      }
-
-      // Active kitchen/service stages (unpaid, cooking, waiting to serve) remain in Orders Hub
+      // 2. Active kitchen/service stages (cooking, preparation, waiting for serve/pickup, or en route) remain in Orders Hub
       const isActiveCookingOrReady =
         o.status === 'placed' ||
         o.status === 'accepted' ||
@@ -185,7 +170,7 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
 
       if (isActiveCookingOrReady) return true;
 
-      // If served at table (dining): keep in order hub ONLY until payment is marked
+      // 3. If served at table (dining): keep in order hub ONLY until payment is marked
       if (o.status === 'served') {
         if (isPaidOrSettled) return false;
         return true;

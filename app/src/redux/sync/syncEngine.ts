@@ -141,13 +141,31 @@ export async function runSync(options?: { full?: boolean; force?: boolean }): Pr
         const sanitizeOrder = (o: any) => {
           const existing = byId.get(o.id) || (o.orderNumber ? byId.get(o.orderNumber) : undefined);
           const isLocallyPaid = existing ? (existing.paymentStatus === 'paid' || existing.paymentCollected === true) : Boolean(o.paymentStatus === 'paid' || o.paymentCollected === true);
+          const isPaid = isLocallyPaid || o.paymentStatus === 'paid' || Boolean(o.paymentCollected);
+          const existingStatus = existing?.status as string | undefined;
+          const oStatus = o.status as string;
+
+          const isDeliveryFinished =
+            (o.type === 'delivery' || existing?.type === 'delivery') &&
+            isPaid &&
+            (oStatus === 'delivered' || oStatus === 'completed' || existingStatus === 'completed' || o.riderStatus === 'delivered' || existing?.riderStatus === 'delivered');
+
+          const isDineInFinished =
+            (o.type === 'dine_in' || existing?.type === 'dine_in') &&
+            isPaid &&
+            (oStatus === 'served' || oStatus === 'completed' || existingStatus === 'served' || existingStatus === 'completed');
+
+          const isTakeawayFinished =
+            (o.type === 'takeaway' || existing?.type === 'takeaway') &&
+            isPaid &&
+            (oStatus === 'taken' || oStatus === 'completed' || existingStatus === 'taken' || existingStatus === 'completed');
+
           const isOrderFinished =
-            o.status === 'delivered' ||
-            o.status === 'completed' ||
-            o.riderStatus === 'delivered' ||
-            existing?.status === 'completed' ||
-            ((isLocallyPaid || o.paymentStatus === 'paid' || o.paymentCollected === true) &&
-              (existing?.status === 'served' || o.status === 'served' || existing?.status === 'ready' || o.status === 'ready' || o.type === 'dine_in' || existing?.type === 'dine_in' || o.type === 'takeaway' || existing?.type === 'takeaway'));
+            oStatus === 'completed' ||
+            existingStatus === 'completed' ||
+            isDeliveryFinished ||
+            isDineInFinished ||
+            isTakeawayFinished;
 
           if (!existing) {
             return isOrderFinished
