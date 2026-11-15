@@ -141,8 +141,8 @@ export const CashierScreen: React.FC = () => {
   const cashierOrders = useMemo(() => {
     return orders.filter((o) => {
       if (o.branchId && o.branchId !== currentBranch.id && normalizeBranchId(o.branchId) !== normalizeBranchId(currentBranch.id)) return false;
-      // Allow all takeaway orders and any walk-in/desk orders
-      const isDeskOrder = o.type === 'takeaway' || Boolean(o.cashierId) || Boolean(o.isWalkIn);
+      // Allow all takeaway orders, dine-in table orders, table QR orders, and any walk-in/desk orders
+      const isDeskOrder = o.type === 'takeaway' || o.type === 'dine_in' || Boolean(o.isTableQr) || Boolean(o.cashierId) || Boolean(o.isWalkIn);
       if (!isDeskOrder) return false;
       // Keep all active orders (placed, accepted, preparing, ready, served) visible so they never disappear mid-session, plus today's completed/paid
       const isRecentOrActive = (!['completed', 'cancelled'].includes(o.status)) || isToday(o.createdAt);

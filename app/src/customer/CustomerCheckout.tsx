@@ -84,10 +84,23 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
 
   // Dine-In Seating Sheet (half screen sheet)
   const [seatingSheetOpen, setSeatingSheetOpen] = useState(false);
-  const [selectedTableNumber, setSelectedTableNumber] = useState<string>('T-01');
+  const [selectedTableNumber, setSelectedTableNumber] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const p = new URLSearchParams(window.location.search);
+      const val = p.get('tableQr') || p.get('table');
+      if (val) return val.toUpperCase().startsWith('T-') ? val.toUpperCase() : `T-${val.padStart(2, '0')}`;
+    }
+    return 'T-01';
+  });
 
-  // Track fulfillment mode locally
-  const [orderType, setLocalOrderType] = useState<OrderType>(globalOrderType || 'delivery');
+  // Track fulfillment mode locally (defaults to dine_in if tableQr query param is present)
+  const [orderType, setLocalOrderType] = useState<OrderType>(() => {
+    if (typeof window !== 'undefined') {
+      const p = new URLSearchParams(window.location.search);
+      if (p.get('tableQr') || p.get('table')) return 'dine_in';
+    }
+    return globalOrderType || 'delivery';
+  });
   const [showModeSwitcher, setShowModeSwitcher] = useState<boolean>(false);
   const [showCheckoutOsmPicker, setShowCheckoutOsmPicker] = useState<boolean>(false);
   const [saveCheckoutPin, setSaveCheckoutPin] = useState<boolean>(false);
@@ -379,6 +392,8 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
         notes: notes.trim() || undefined,
         paymentStatus: 'unpaid',
         paymentCollected: false,
+        isTableQr: Boolean(orderType === 'dine_in' && selectedTableNumber),
+        isWalkIn: false,
         customerCoordinates:
           orderType === 'delivery'
             ? customerCoordinates || { lat: 31.5204, lng: 74.3587 }

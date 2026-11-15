@@ -36,9 +36,17 @@ interface MenuScreenProps {
   onNavigate: (view: string) => void;
   onOpenCart: () => void;
   onProceedToCheckout?: () => void;
+  isTableQrMode?: boolean;
+  initialTableNumber?: string;
 }
 
-export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart, onProceedToCheckout }) => {
+export const CustomerMenu: React.FC<MenuScreenProps> = ({
+  onNavigate,
+  onOpenCart,
+  onProceedToCheckout,
+  isTableQrMode,
+  initialTableNumber,
+}) => {
   const {
     currentBranch,
     tables,
@@ -189,7 +197,56 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
     }
   }, [selectedDeliveryAddress]);
 
-  const [selectedTableNumber, setSelectedTableNumber] = useState(activeTableSession?.tableNumber || 'T-01');
+  const isTableQr = useMemo(() => {
+    if (isTableQrMode) return true;
+    if (typeof window !== 'undefined') {
+      const p = new URLSearchParams(window.location.search);
+      if (p.get('tableQr') || p.get('table') || p.get('token')) return true;
+    }
+    return false;
+  }, [isTableQrMode]);
+
+  const tableFromUrl = useMemo(() => {
+    if (initialTableNumber) return initialTableNumber;
+    if (typeof window !== 'undefined') {
+      const p = new URLSearchParams(window.location.search);
+      const val = p.get('tableQr') || p.get('table');
+      if (val) {
+        return val.toUpperCase().startsWith('T-') ? val.toUpperCase() : `T-${val.padStart(2, '0')}`;
+      }
+    }
+    return undefined;
+  }, [initialTableNumber]);
+
+  const [selectedTableNumber, setSelectedTableNumber] = useState<string>(() => {
+    if (initialTableNumber) return initialTableNumber;
+    if (typeof window !== 'undefined') {
+      const p = new URLSearchParams(window.location.search);
+      const val = p.get('tableQr') || p.get('table');
+      if (val) {
+        return val.toUpperCase().startsWith('T-') ? val.toUpperCase() : `T-${val.padStart(2, '0')}`;
+      }
+    }
+    return activeTableSession?.tableNumber || 'T-01';
+  });
+
+  // When in Table QR mode, lock into dine-in order type and assign table immediately
+  useEffect(() => {
+    if (isTableQr) {
+      setOrderType('dine_in');
+      setHasConfirmedOrderType(true);
+      if (tableFromUrl) {
+        setSelectedTableNumber(tableFromUrl);
+      }
+      if (typeof window !== 'undefined') {
+        const p = new URLSearchParams(window.location.search);
+        const branchParam = p.get('branch');
+        if (branchParam && setCurrentBranchId) {
+          setCurrentBranchId(branchParam);
+        }
+      }
+    }
+  }, [isTableQr, tableFromUrl, setOrderType, setHasConfirmedOrderType, setCurrentBranchId]);
 
   // Screen width detection for screen-adaptive checkout (desktop 2-column vs mobile drawer)
   const [isDesktop, setIsDesktop] = useState(true);
@@ -243,6 +300,7 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
   }, [branchTables, selectedFloor]);
 
   useEffect(() => {
+    if (isTableQr && (tableFromUrl || selectedTableNumber)) return;
     if (floorTables.length > 0) {
       const match = floorTables.find((t) => t.number === selectedTableNumber);
       if (!match) {
@@ -250,7 +308,7 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
         if (firstAvail) setSelectedTableNumber(firstAvail.number);
       }
     }
-  }, [floorTables, selectedTableNumber]);
+  }, [floorTables, selectedTableNumber, isTableQr, tableFromUrl]);
 
   const isCustomerLoggedIn = Boolean(
     currentUser &&
@@ -753,7 +811,8 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
     const effectiveCustomerPhone = customerPhone || activeCustomer?.phone || '';
     const effectiveCustomerEmail = activeCustomer?.email || undefined;
 
-    const effectiveType = orderType || 'delivery';
+    const effectiveType = isTableQr ? 'dine_in' : (orderType || 'delivery');
+    const effectiveTableNumber = effectiveType === 'dine_in' ? (tableFromUrl || selectedTableNumber || 'T-01') : undefined;
     const effectivePaymentMethod = effectiveType === 'delivery'
       ? 'Cash on Delivery (COD)'
       : effectiveType === 'dine_in'
@@ -763,7 +822,7 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
     try {
       const placed = placeOrder(
         effectiveType,
-        effectiveType === 'dine_in' ? selectedTableNumber : undefined,
+        effectiveTableNumber,
         undefined, // tablePin
         effectiveType === 'takeaway' ? '15-25 mins' : undefined,
         effectiveType === 'delivery' ? deliveryAddress : undefined,
@@ -774,9 +833,11 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
           customerName: effectiveCustomerName,
           customerPhone: effectiveCustomerPhone,
           customerEmail: effectiveCustomerEmail,
-          notes: specialInstructions.trim() || undefined,
+          notes: specialInstructions.trim() || (isTableQr ? 'Table QR Order' : undefined),
           paymentStatus: 'unpaid',
           paymentCollected: false,
+          isTableQr: isTableQr || Boolean(effectiveType === 'dine_in' && effectiveTableNumber),
+          isWalkIn: false,
         }
       );
 
@@ -1329,63 +1390,84 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
             ))}
           </div>
 
-          {/* Menu Search Box (Right Side of Category Bar) */}
-          <div
-            className="foodies-menu-search-box"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px',
-              backgroundColor: 'var(--bg-card)',
-              border: '1.5px solid var(--border-color)',
-              borderRadius: 'var(--radius-full)',
-              padding: '7px 14px',
-              width: '260px',
-              minWidth: '200px',
-              flexShrink: 0,
-              boxShadow: 'var(--shadow-sm)',
-              boxSizing: 'border-box',
-              transition: 'border-color 0.15s ease',
-            }}
-          >
-            <Search size={15} color="var(--primary)" style={{ flexShrink: 0 }} />
-            <input
-              type="text"
-              value={menuSearchQuery}
-              onChange={(e) => setMenuSearchQuery(e.target.value)}
-              placeholder="Search dishes..."
+          {/* Menu Search Box (Right Side of Category Bar) — Hidden in Table QR mode */}
+          {!isTableQr ? (
+            <div
+              className="foodies-menu-search-box"
               style={{
-                border: 'none',
-                outline: 'none',
-                backgroundColor: 'transparent',
-                fontSize: '13px',
-                color: 'var(--text-main)',
-                width: '100%',
-                fontFamily: 'inherit',
-                fontWeight: 650,
-                padding: 0,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                backgroundColor: 'var(--bg-card)',
+                border: '1.5px solid var(--border-color)',
+                borderRadius: 'var(--radius-full)',
+                padding: '7px 14px',
+                width: '260px',
+                minWidth: '200px',
+                flexShrink: 0,
+                boxShadow: 'var(--shadow-sm)',
+                boxSizing: 'border-box',
+                transition: 'border-color 0.15s ease',
               }}
-            />
-            {menuSearchQuery && (
-              <button
-                type="button"
-                onClick={() => setMenuSearchQuery('')}
+            >
+              <Search size={15} color="var(--primary)" style={{ flexShrink: 0 }} />
+              <input
+                type="text"
+                value={menuSearchQuery}
+                onChange={(e) => setMenuSearchQuery(e.target.value)}
+                placeholder="Search dishes..."
                 style={{
-                  background: 'none',
                   border: 'none',
+                  outline: 'none',
+                  backgroundColor: 'transparent',
+                  fontSize: '13px',
+                  color: 'var(--text-main)',
+                  width: '100%',
+                  fontFamily: 'inherit',
+                  fontWeight: 650,
                   padding: 0,
-                  cursor: 'pointer',
-                  color: 'var(--text-muted)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  flexShrink: 0,
                 }}
-                aria-label="Clear search"
-              >
-                <X size={14} />
-              </button>
-            )}
-          </div>
+              />
+              {menuSearchQuery && (
+                <button
+                  type="button"
+                  onClick={() => setMenuSearchQuery('')}
+                  style={{
+                    background: 'none',
+                    border: 'none',
+                    padding: 0,
+                    cursor: 'pointer',
+                    color: 'var(--text-muted)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    flexShrink: 0,
+                  }}
+                  aria-label="Clear search"
+                >
+                  <X size={14} />
+                </button>
+              )}
+            </div>
+          ) : (
+            <div
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: '8px',
+                backgroundColor: 'rgba(194, 65, 12, 0.08)',
+                border: '1.5px solid rgba(194, 65, 12, 0.25)',
+                borderRadius: 'var(--radius-full)',
+                padding: '7px 14px',
+                flexShrink: 0,
+                boxSizing: 'border-box',
+              }}
+            >
+              <Utensils size={15} color="#C2410C" />
+              <span style={{ fontSize: '13px', fontWeight: 850, color: '#C2410C' }}>
+                Dine-In • Table {tableFromUrl || selectedTableNumber} Assigned
+              </span>
+            </div>
+          )}
         </div>
       </div>
       )}
@@ -3427,6 +3509,14 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
           .foodies-mobile-checkout-bar {
             display: flex !important;
           }
+          .foodies-dish-card {
+            border-radius: 16px !important;
+          }
+          .foodies-dish-card .dish-img-wrap {
+            height: 105px !important;
+            min-height: 105px !important;
+            max-height: 105px !important;
+          }
           .foodies-dish-card .dish-cat-badge {
             display: none !important;
           }
@@ -3437,10 +3527,12 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
             display: none !important;
           }
           .foodies-dish-card .dish-content {
-            padding: 10px 12px 12px !important;
+            padding: 8px 10px !important;
           }
           .foodies-dish-card .dish-title {
-            font-size: 13.5px !important;
+            font-size: 12px !important;
+            font-weight: 850 !important;
+            line-height: 1.25 !important;
           }
           .foodies-dish-card .dish-action-row {
             display: flex !important;
@@ -3498,8 +3590,13 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
             grid-template-columns: repeat(2, minmax(0, 1fr)) !important;
             gap: 8px !important;
           }
+          .foodies-dish-card {
+            border-radius: 16px !important;
+          }
           .foodies-dish-card .dish-img-wrap {
-            height: 115px !important;
+            height: 105px !important;
+            min-height: 105px !important;
+            max-height: 105px !important;
           }
           /* Remove all extra text other than name */
           .foodies-dish-card .dish-cat-badge {
@@ -3512,13 +3609,13 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
             display: none !important;
           }
           .foodies-dish-card .dish-content {
-            padding: 6px 8px 8px !important;
+            padding: 8px 10px !important;
             gap: 3px !important;
           }
           .foodies-dish-card .dish-title {
             font-size: 12px !important;
-            line-height: 1.2 !important;
-            font-weight: 750 !important;
+            line-height: 1.25 !important;
+            font-weight: 850 !important;
             margin: 0 !important;
             display: -webkit-box;
             -webkit-line-clamp: 2;

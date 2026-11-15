@@ -513,11 +513,6 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
                             quantity: 1,
                             size: dish.sizes?.[0]?.name || 'Standard',
                           });
-                          addToast({
-                            type: 'success',
-                            title: 'Added to Cart',
-                            message: `${dish.name} added to your order.`,
-                          });
                         }}
                         style={{
                           display: 'flex',
@@ -588,8 +583,8 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
           </button>
         </div>
 
-        {/* Deals List */}
-        <div style={{ display: 'grid', gridTemplateColumns: isDesktop ? 'repeat(auto-fit, minmax(280px, 1fr))' : '1fr', gap: isDesktop ? '16px' : '12px' }}>
+        {/* Deals List (Matches Signature Specials 4 cols on desktop, 2 cols on mobile) */}
+        <div style={{ display: 'grid', gridTemplateColumns: isDesktop ? 'repeat(4, 1fr)' : 'repeat(2, 1fr)', gap: isDesktop ? '16px' : '12px', width: '100%' }}>
           {(() => {
             const homeDealsList = [
               {
@@ -632,22 +627,23 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
                 style={{
                   backgroundColor: 'var(--bg-card, #FFFFFF)',
                   borderRadius: '16px',
-                  padding: '14px',
-                  border: '1.2px solid var(--border-color, #E2E8F0)',
+                  overflow: 'hidden',
+                  border: '1px solid var(--border-color, #E2E8F0)',
                   boxShadow: 'var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.04))',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '10px',
+                  width: '100%',
+                  boxSizing: 'border-box',
                 }}
               >
                 <div
                   style={{
                     width: '100%',
-                    height: '140px',
-                    borderRadius: '12px',
+                    height: isDesktop ? '145px' : '105px',
+                    minHeight: isDesktop ? '145px' : '105px',
+                    position: 'relative',
                     overflow: 'hidden',
                     backgroundColor: '#F8FAFC',
-                    position: 'relative',
                   }}
                 >
                   <img
@@ -665,7 +661,7 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
                       gap: '4px',
                       backgroundColor: 'var(--primary)',
                       color: '#FFFFFF',
-                      padding: '3px 8px',
+                      padding: '2px 7px',
                       borderRadius: '6px',
                       fontSize: '9.5px',
                       fontWeight: 850,
@@ -678,64 +674,83 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
-                  <div style={{ fontSize: '14.5px', fontWeight: 850, color: 'var(--text-main, #1E293B)', lineHeight: 1.3 }}>
-                    {d.title}
+                <div style={{ padding: isDesktop ? '11px 13px' : '8px 10px', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, justifyContent: 'space-between' }}>
+                  <div style={{ minHeight: 0 }}>
+                    <div
+                      style={{
+                        fontSize: isDesktop ? '13.5px' : '12px',
+                        fontWeight: 850,
+                        color: 'var(--text-main, #1E293B)',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                      title={d.title}
+                    >
+                      {d.title}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: '11px',
+                        color: 'var(--text-muted, #64748B)',
+                        marginTop: '3px',
+                        lineHeight: '14px',
+                        maxHeight: '28px',
+                        overflow: 'hidden',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                      }}
+                    >
+                      {d.description}
+                    </div>
                   </div>
-                  <div style={{ fontSize: '11.5px', color: 'var(--text-muted, #64748B)', lineHeight: '16px' }}>
-                    {d.description}
-                  </div>
-                </div>
 
-                <div
-                  style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'space-between',
-                    paddingTop: '8px',
-                    borderTop: '1px solid var(--border-color, #F1F5F9)',
-                    marginTop: 'auto',
-                  }}
-                >
-                  <span style={{ fontSize: '15px', fontWeight: 900, color: 'var(--primary)' }}>
-                    Rs. {d.price.toLocaleString()}
-                  </span>
-
-                  <button
-                    type="button"
-                    onClick={() => {
-                      addToCart({
-                        id: `cart-${d.id}-${Date.now()}`,
-                        menuItemId: d.id,
-                        name: d.title,
-                        unitPrice: d.price,
-                        quantity: 1,
-                        size: 'Deal Special',
-                      });
-                      addToast({
-                        type: 'success',
-                        title: 'Deal Added to Cart 🎉',
-                        message: `${d.title} added to your order.`,
-                      });
-                    }}
+                  <div
                     style={{
-                      display: 'inline-flex',
+                      display: 'flex',
                       alignItems: 'center',
-                      gap: '5px',
-                      backgroundColor: 'var(--primary)',
-                      color: '#FFFFFF',
-                      padding: '6px 14px',
-                      borderRadius: '10px',
-                      border: 'none',
-                      fontSize: '12px',
-                      fontWeight: 800,
-                      cursor: 'pointer',
-                      boxShadow: '0 2px 6px var(--primary-glow)',
+                      justifyContent: 'space-between',
+                      paddingTop: '8px',
+                      borderTop: '1px solid var(--border-color, #F1F5F9)',
+                      marginTop: '8px',
+                      flexShrink: 0,
                     }}
                   >
-                    <Plus size={13} color="#FFFFFF" />
-                    <span>Order Deal</span>
-                  </button>
+                    <span style={{ fontSize: isDesktop ? '13px' : '11.5px', fontWeight: 850, color: 'var(--text-main, #1E293B)' }}>
+                      Rs. {d.price.toLocaleString()}
+                    </span>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        addToCart({
+                          id: `cart-${d.id}-${Date.now()}`,
+                          menuItemId: d.id,
+                          name: d.title,
+                          unitPrice: d.price,
+                          quantity: 1,
+                          size: 'Deal Special',
+                        });
+                      }}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '3px',
+                        backgroundColor: 'rgba(217, 101, 40, 0.08)',
+                        color: 'var(--primary)',
+                        padding: '3px 8px',
+                        borderRadius: '7px',
+                        border: '1px solid rgba(217, 101, 40, 0.25)',
+                        fontSize: '11px',
+                        fontWeight: 750,
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <Plus size={11} />
+                      <span>Order</span>
+                    </button>
+                  </div>
                 </div>
               </div>
             ));
@@ -750,19 +765,20 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
           backgroundColor: 'var(--bg-card, #FFFFFF)',
           border: '1.2px solid var(--border-color, #E2E8F0)',
           borderRadius: isDesktop ? '20px' : '14px',
-          padding: isDesktop ? '36px 32px 24px' : '14px 12px 10px',
+          padding: isDesktop ? '36px 32px 24px' : '14px 14px 10px',
           boxShadow: 'var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.04))',
           boxSizing: 'border-box',
-          overflowX: 'auto',
+          overflowX: 'hidden',
+          width: '100%',
         }}
       >
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: isDesktop ? 'repeat(4, 1fr)' : 'repeat(4, minmax(125px, 1fr))',
-            gap: isDesktop ? '32px' : '10px',
+            gridTemplateColumns: isDesktop ? 'repeat(4, 1fr)' : 'repeat(auto-fit, minmax(130px, 1fr))',
+            gap: isDesktop ? '32px' : '12px',
             marginBottom: isDesktop ? '28px' : '10px',
-            minWidth: isDesktop ? 'auto' : '520px',
+            width: '100%',
           }}
         >
           {/* Col 1: Brand Info & Halal Assurance */}
@@ -806,46 +822,48 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
             </div>
           </div>
 
-          {/* Col 2: Quick Navigation */}
-          <div>
-            <h4 style={{ fontSize: isDesktop ? '15px' : '11px', fontWeight: isDesktop ? 850 : 700, marginBottom: isDesktop ? '14px' : '6px', color: 'var(--text-main, #1E293B)' }}>
-              Quick Navigation
-            </h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: isDesktop ? '9px' : '4px', fontSize: isDesktop ? '13px' : '9.5px', color: 'var(--text-secondary, #475569)', fontWeight: 450 }}>
-              <span
-                onClick={() => onNavigate('home')}
-                style={{ cursor: 'pointer', transition: 'color 0.15s' }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--primary)')}
-                onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary, #475569)')}
-              >
-                🏠 Home & Highlights
-              </span>
-              <span
-                onClick={() => onNavigate('menu')}
-                style={{ cursor: 'pointer', transition: 'color 0.15s' }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--primary)')}
-                onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary, #475569)')}
-              >
-                🍽️ Browse Full Menu
-              </span>
-              <span
-                onClick={() => onNavigate('table-qr')}
-                style={{ cursor: 'pointer', transition: 'color 0.15s' }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--primary)')}
-                onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary, #475569)')}
-              >
-                📷 Scan Table QR
-              </span>
-              <span
-                onClick={() => onNavigate('order-history')}
-                style={{ cursor: 'pointer', transition: 'color 0.15s' }}
-                onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--primary)')}
-                onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary, #475569)')}
-              >
-                📜 Order History
-              </span>
+          {/* Col 2: Quick Navigation (Displayed ONLY on Desktop, removed for mobile phones per requirement) */}
+          {isDesktop && (
+            <div>
+              <h4 style={{ fontSize: '15px', fontWeight: 850, marginBottom: '14px', color: 'var(--text-main, #1E293B)' }}>
+                Quick Navigation
+              </h4>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '9px', fontSize: '13px', color: 'var(--text-secondary, #475569)', fontWeight: 450 }}>
+                <span
+                  onClick={() => onNavigate('home')}
+                  style={{ cursor: 'pointer', transition: 'color 0.15s' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--primary)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary, #475569)')}
+                >
+                  🏠 Home & Highlights
+                </span>
+                <span
+                  onClick={() => onNavigate('menu')}
+                  style={{ cursor: 'pointer', transition: 'color 0.15s' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--primary)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary, #475569)')}
+                >
+                  🍽️ Browse Full Menu
+                </span>
+                <span
+                  onClick={() => onNavigate('table-qr')}
+                  style={{ cursor: 'pointer', transition: 'color 0.15s' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--primary)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary, #475569)')}
+                >
+                  📷 Scan Table QR
+                </span>
+                <span
+                  onClick={() => onNavigate('order-history')}
+                  style={{ cursor: 'pointer', transition: 'color 0.15s' }}
+                  onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--primary)')}
+                  onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary, #475569)')}
+                >
+                  📜 Order History
+                </span>
+              </div>
             </div>
-          </div>
+          )}
 
           {/* Col 3: Branch Locations */}
           <div>

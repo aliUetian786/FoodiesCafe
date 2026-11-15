@@ -140,16 +140,16 @@ export default function CustomerMainPage() {
     switch (currentView) {
       case 'home':
         return <MarketingHome onNavigate={setCurrentView} onOpenItemModal={() => setCurrentView('menu')} />;
+      case 'table-qr':
       case 'menu':
         return (
           <CustomerMenu
             onNavigate={setCurrentView}
             onOpenCart={handleOpenCart}
             onProceedToCheckout={handleProceedToCheckout}
+            isTableQrMode={currentView === 'table-qr'}
           />
         );
-      case 'table-qr':
-        return <CustomerTableQR onNavigate={setCurrentView} />;
       case 'order-tracking':
         return <CustomerTracking onNavigate={setCurrentView} />;
       case 'order-history':

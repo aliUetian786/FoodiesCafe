@@ -1084,7 +1084,7 @@ export const OrderTrackingScreen: React.FC<OrderTrackingScreenProps> = ({ onNavi
                         style={{ border: 0, display: 'block' }}
                         loading="lazy"
                         src={`https://maps.google.com/maps?q=${Number(orderBranch?.latitude) || 31.5126},${Number(orderBranch?.longitude) || 74.3436}&z=16&output=embed`}
-                        title="Google Maps Branch Location"
+                        title="Branch Location"
                       />
                     </div>
                   ) : (
