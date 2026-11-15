@@ -205,11 +205,9 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
     () =>
       branchDineInOrders.filter(
         (o) =>
-          o.status === 'served' ||
-          o.status === 'completed' ||
-          o.status === 'taken' ||
           o.paymentStatus === 'paid' ||
-          Boolean(o.paymentCollected)
+          Boolean(o.paymentCollected) ||
+          o.status === 'completed'
       ),
     [branchDineInOrders]
   );
@@ -241,19 +239,22 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
   const totalCashCollected = useMemo(
     () =>
       filteredServedOrders
-        .filter((o) => (o.paymentMethod || '').includes('Cash') || (o.paymentMethod || '').includes('COD'))
+        .filter((o) => (o.paymentStatus === 'paid' || Boolean(o.paymentCollected)) && ((o.paymentMethod || '').includes('Cash') || (o.paymentMethod || '').includes('COD') || !o.paymentMethod))
         .reduce((sum, o) => sum + (Number(o.total) || 0), 0),
     [filteredServedOrders]
   );
   const totalOnlinePaid = useMemo(
     () =>
       filteredServedOrders
-        .filter((o) => !(o.paymentMethod || '').includes('Cash') && !(o.paymentMethod || '').includes('COD'))
+        .filter((o) => (o.paymentStatus === 'paid' || Boolean(o.paymentCollected)) && !(o.paymentMethod || '').includes('Cash') && !(o.paymentMethod || '').includes('COD'))
         .reduce((sum, o) => sum + (Number(o.total) || 0), 0),
     [filteredServedOrders]
   );
   const totalSettledValue = useMemo(
-    () => filteredServedOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0),
+    () =>
+      filteredServedOrders
+        .filter((o) => o.paymentStatus === 'paid' || Boolean(o.paymentCollected))
+        .reduce((sum, o) => sum + (Number(o.total) || 0), 0),
     [filteredServedOrders]
   );
 
@@ -434,7 +435,7 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
       // Orders where payment was collected / received
       const paidOrdersToday = waiterOrders.filter(
         (o) =>
-          (o.paymentCollected === true || o.paymentStatus === 'paid' || o.status === 'completed') &&
+          (o.paymentCollected === true || o.paymentStatus === 'paid') &&
           isDateToday(o.completedAt || o.deliveredAt || o.createdAt)
       );
 

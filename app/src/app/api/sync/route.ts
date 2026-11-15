@@ -4,6 +4,7 @@ import { query } from '@/lib/db';
 import { cacheGet, cacheSet } from '@/lib/redis';
 import { INITIAL_MENU, INITIAL_CATEGORIES } from '@/database/embeddedSeed';
 import { getAuthFromRequest } from '@/lib/auth';
+import { formatOrderRow } from '@/lib/orderStateMachine';
 import {
   ensureNotificationsTable,
   getNotificationSettings,
@@ -393,18 +394,7 @@ export async function GET(request: Request) {
 
     const notifications = (notificationsRes.rows || []).map(mapNotificationRow);
 
-    const orders = ordersRes.rows.map((o: any) => ({
-      ...o,
-      items: typeof o.items === 'string' ? JSON.parse(o.items) : (o.items || []),
-      customerCoordinates:
-        typeof o.customerCoordinates === 'string'
-          ? JSON.parse(o.customerCoordinates)
-          : o.customerCoordinates,
-      originalSubtotal: Number(o.originalSubtotal || 0),
-      addOnSubtotal: Number(o.addOnSubtotal || 0),
-      tax: Number(o.tax || 0),
-      total: Number(o.total || 0),
-    }));
+    const orders = ordersRes.rows.map(formatOrderRow).filter(Boolean);
 
     const shifts = shiftsRes.rows.map((s: any) => ({
       ...s,

@@ -110,8 +110,8 @@ export const ordersSlice = createSlice({
           inc.status === 'completed' ||
           existing.status === 'completed' ||
           resolvedRiderStatus === 'delivered' ||
-          ((isLocallyPaid || inc.paymentStatus === 'paid') &&
-            (existing.status === 'served' || inc.status === 'served' || existing.status === 'ready' || inc.status === 'ready' || inc.type === 'dine_in'));
+          ((isLocallyPaid || inc.paymentStatus === 'paid' || Boolean(inc.paymentCollected)) &&
+            (existing.status === 'served' || inc.status === 'served' || existing.status === 'ready' || inc.status === 'ready' || inc.type === 'dine_in' || existing.type === 'dine_in' || inc.type === 'takeaway' || existing.type === 'takeaway'));
 
         const finalStatus: OrderStatus = isOrderFinished ? 'completed' : resolvedStatus;
         const finalRiderStatus: Order['riderStatus'] = (isOrderFinished && inc.type === 'delivery') ? 'delivered' : resolvedRiderStatus;
@@ -172,7 +172,7 @@ export const ordersSlice = createSlice({
         ord.status === 'completed' ||
         ord.riderStatus === 'delivered' ||
         ((ord.paymentStatus === 'paid' || Boolean(ord.paymentCollected)) &&
-          (ord.status === 'served' || ord.status === 'ready' || ord.type === 'dine_in'));
+          (ord.status === 'served' || ord.status === 'ready' || ord.type === 'dine_in' || ord.type === 'takeaway'));
 
       if (isOrderFinished) {
         ord = {

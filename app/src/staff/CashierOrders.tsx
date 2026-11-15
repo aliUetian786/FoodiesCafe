@@ -1516,8 +1516,8 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                       <span>Cancel</span>
                     </button>
 
-                    {/* Quick Accept Payment for Takeaway Unpaid */}
-                    {ord.type === 'takeaway' && ord.paymentStatus === 'unpaid' && (
+                    {/* Quick Accept Payment for Takeaway or Counter Dine-In Unpaid */}
+                    {(ord.type === 'takeaway' || ord.type === 'dine_in') && ord.paymentStatus === 'unpaid' && (
                       <button
                         type="button"
                         onClick={() => recordCashPayment(ord.id, ord.total)}
@@ -1534,6 +1534,7 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                           alignItems: 'center',
                           gap: '3px',
                         }}
+                        title={ord.type === 'dine_in' ? 'Collect Dine-In Counter Payment' : 'Collect Takeaway Cash Payment'}
                       >
                         <Banknote size={11} />
                         <span>Pay 💵</span>
@@ -1932,8 +1933,8 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                   </button>
                 )}
 
-                {/* Takeaway cash collection */}
-                {selectedOrderDetail.status !== 'cancelled' && selectedOrderDetail.paymentStatus === 'unpaid' && selectedOrderDetail.type === 'takeaway' && (
+                {/* Takeaway & Counter Dine-In cash collection */}
+                {selectedOrderDetail.status !== 'cancelled' && selectedOrderDetail.paymentStatus === 'unpaid' && (selectedOrderDetail.type === 'takeaway' || selectedOrderDetail.type === 'dine_in') && (
                   <button
                     type="button"
                     onClick={() => {

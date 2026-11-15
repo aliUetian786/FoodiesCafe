@@ -140,14 +140,14 @@ export async function runSync(options?: { full?: boolean; force?: boolean }): Pr
 
         const sanitizeOrder = (o: any) => {
           const existing = byId.get(o.id) || (o.orderNumber ? byId.get(o.orderNumber) : undefined);
-          const isLocallyPaid = existing ? (existing.paymentStatus === 'paid' || existing.paymentCollected === true) : false;
+          const isLocallyPaid = existing ? (existing.paymentStatus === 'paid' || existing.paymentCollected === true) : Boolean(o.paymentStatus === 'paid' || o.paymentCollected === true);
           const isOrderFinished =
             o.status === 'delivered' ||
             o.status === 'completed' ||
             o.riderStatus === 'delivered' ||
             existing?.status === 'completed' ||
-            ((isLocallyPaid || o.paymentStatus === 'paid') &&
-              (existing?.status === 'served' || o.status === 'served' || existing?.status === 'ready' || o.status === 'ready' || o.type === 'dine_in'));
+            ((isLocallyPaid || o.paymentStatus === 'paid' || o.paymentCollected === true) &&
+              (existing?.status === 'served' || o.status === 'served' || existing?.status === 'ready' || o.status === 'ready' || o.type === 'dine_in' || existing?.type === 'dine_in' || o.type === 'takeaway' || existing?.type === 'takeaway'));
 
           if (!existing) {
             return isOrderFinished

@@ -925,7 +925,28 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 const existing = matchedId ? map.get(matchedId) : undefined;
                 const targetKey = inc.id || existing?.id || '';
                 const inFlight = inFlightOrdersRef.current.get(targetKey) || (inc.orderNumber ? inFlightOrdersRef.current.get(inc.orderNumber) : undefined);
-                const isLocallyPaid = (existing && (existing.paymentStatus === 'paid' || existing.paymentCollected)) || (inFlight && inFlight.paymentStatus === 'paid');
+                const isLocallyPaid =
+                  Boolean(existing && (existing.paymentStatus === 'paid' || existing.paymentCollected === true)) ||
+                  Boolean(inFlight && (inFlight.paymentStatus === 'paid' || inFlight.paymentCollected === true)) ||
+                  inc.paymentStatus === 'paid' ||
+                  Boolean(inc.paymentCollected);
+
+                const incStatus = inc.status as string;
+                const existingStatus = existing?.status as string | undefined;
+                const inFlightStatus = inFlight?.status as string | undefined;
+
+                const isTerminalSettled =
+                  incStatus === 'completed' ||
+                  incStatus === 'delivered' ||
+                  existingStatus === 'completed' ||
+                  inFlightStatus === 'completed' ||
+                  inc.riderStatus === 'delivered' ||
+                  inFlight?.riderStatus === 'delivered' ||
+                  (isLocallyPaid && (
+                    (inc.type === 'delivery' || existing?.type === 'delivery') ||
+                    ((inc.type === 'dine_in' || existing?.type === 'dine_in') && (existingStatus === 'served' || incStatus === 'served' || existingStatus === 'ready' || incStatus === 'ready')) ||
+                    ((inc.type === 'takeaway' || existing?.type === 'takeaway') && (existingStatus === 'ready' || incStatus === 'ready' || existingStatus === 'taken' || incStatus === 'taken'))
+                  ));
 
                 if (existing) {
                   const existingRank = STATUS_RANK[existing.status] || 0;
@@ -937,18 +958,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                       inc.status !== 'cancelled' &&
                       existingRank > incomingRank);
 
-                  const isDeliveryFinished =
-                    inc.status === 'delivered' ||
-                    inc.status === 'completed' ||
-                    inc.riderStatus === 'delivered' ||
-                    inFlight?.riderStatus === 'delivered' ||
-                    inFlight?.status === 'completed' ||
-                    inFlight?.status === 'delivered' ||
-                    (inc.type === 'delivery' && (isLocallyPaid || inc.paymentStatus === 'paid'));
-
                   const resolvedStatus = isLocalCancelled
                     ? 'cancelled'
-                    : isDeliveryFinished
+                    : isTerminalSettled
                       ? ('completed' as OrderStatus)
                       : inFlight?.status || (preserveLocal ? existing.status : inc.status);
 
@@ -959,27 +971,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                     ...inc,
                     id: targetKey,
                     status: resolvedStatus,
-                    paymentStatus: isLocallyPaid || inc.paymentStatus === 'paid' ? 'paid' : (inc.paymentStatus || existing.paymentStatus),
-                    paymentCollected: Boolean(existing.paymentCollected || inc.paymentCollected || isLocallyPaid),
+                    paymentStatus: (isTerminalSettled || isLocallyPaid) && inc.paymentStatus !== 'refunded' ? 'paid' : (inc.paymentStatus || existing.paymentStatus),
+                    paymentCollected: Boolean(isTerminalSettled || isLocallyPaid || existing.paymentCollected || inc.paymentCollected),
                     sentToKitchen: existing.sentToKitchen || inc.sentToKitchen,
                     sentToKitchenAt: inc.sentToKitchenAt || existing.sentToKitchenAt,
                     preparationStartedAt: inc.preparationStartedAt || existing.preparationStartedAt,
-                    completedAt: isDeliveryFinished ? (inc.completedAt || new Date().toISOString()) : (inc.completedAt || existing.completedAt),
-                    deliveredAt: isDeliveryFinished ? (inc.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
+                    completedAt: isTerminalSettled ? (inc.completedAt || existing.completedAt || new Date().toISOString()) : (inc.completedAt || existing.completedAt),
+                    deliveredAt: isTerminalSettled ? (inc.deliveredAt || existing.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
                     assignedRiderId: inc.assignedRiderId || existing.assignedRiderId,
                     assignedRiderName: inc.assignedRiderName || existing.assignedRiderName,
                     assignedWaiterId: inc.assignedWaiterId || existing.assignedWaiterId,
                     assignedWaiterName: inc.assignedWaiterName || existing.assignedWaiterName,
-                    riderStatus: isDeliveryFinished ? 'delivered' : (inFlight?.riderStatus || inc.riderStatus || existing.riderStatus),
+                    riderStatus: (isTerminalSettled && (inc.type === 'delivery' || existing?.type === 'delivery')) ? 'delivered' : (inFlight?.riderStatus || inc.riderStatus || existing.riderStatus),
                   });
                 } else {
-                  map.set(inc.id, {
+                  map.set(inc.id, isTerminalSettled ? {
                     ...inc,
-                    status: inFlight?.status || inc.status,
-                    paymentStatus: (inFlight?.paymentStatus === 'paid') ? 'paid' : inc.paymentStatus,
-                    paymentCollected: Boolean(inc.paymentCollected || inFlight?.paymentCollected),
-                    riderStatus: inFlight?.riderStatus || inc.riderStatus,
-                  });
+                    status: 'completed',
+                    riderStatus: inc.type === 'delivery' ? 'delivered' : inc.riderStatus,
+                    paymentStatus: 'paid',
+                    paymentCollected: true,
+                    completedAt: inc.completedAt || new Date().toISOString(),
+                    deliveredAt: inc.deliveredAt || new Date().toISOString(),
+                  } : inc);
                 }
               });
               const merged = Array.from(map.values()).sort(

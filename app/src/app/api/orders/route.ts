@@ -8,6 +8,7 @@ import {
   isWithinOpeningHours,
   recalculateOrderItemsOnServer,
   recordOrderHistory,
+  formatOrderRow,
 } from '@/lib/orderStateMachine';
 import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
 import { writeAuditLog, getAuthFromRequest } from '@/lib/auth';
@@ -23,87 +24,6 @@ function normalizeBranchId(id?: string): string {
   if (id === 'branch-f7' || id.includes('f7') || id.includes('islamabad')) return 'f7-islamabad';
   if (id === 'branch-clifton' || id.includes('clifton') || id.includes('karachi')) return 'clifton-karachi';
   return id;
-}
-
-function formatOrderRow(row: any) {
-  if (!row) return null;
-  const rawItems = row.items;
-  const parsedItems = Array.isArray(rawItems)
-    ? rawItems
-    : typeof rawItems === 'string'
-    ? JSON.parse(rawItems || '[]')
-    : [];
-  let status = row.status || 'placed';
-  const rawPaymentStatus = row.paymentStatus ?? row.payment_status ?? 'unpaid';
-  const rawPaymentCollected = Boolean(row.paymentCollected ?? row.payment_collected);
-  const rawRiderStatus = row.riderStatus ?? row.rider_status ?? undefined;
-
-  // Normalization: When an order is delivered, paid and served, or staff marks it paid, it is terminal COMPLETED
-  const isPaidSettled = rawPaymentStatus === 'paid' || rawPaymentCollected;
-  if (
-    status === 'delivered' ||
-    status === 'completed' ||
-    rawRiderStatus === 'delivered' ||
-    (row.type === 'delivery' && isPaidSettled && (status === 'out_for_delivery' || status === 'delivered')) ||
-    (row.type === 'dine_in' && isPaidSettled && (status === 'served' || status === 'ready' || status === 'completed')) ||
-    (row.type === 'takeaway' && isPaidSettled && (status === 'ready' || status === 'taken' || status === 'completed'))
-  ) {
-    status = 'completed';
-  }
-
-  const sentToKitchenRaw = row.sentToKitchen ?? row.sent_to_kitchen;
-  return {
-    id: row.id,
-    orderNumber: row.orderNumber ?? row.order_number,
-    branchId: row.branchId ?? row.branch_id,
-    customerId: row.customerId ?? row.customer_id,
-    customerName: row.customerName ?? row.customer_name,
-    customerPhone: row.customerPhone ?? row.customer_phone,
-    customerEmail: row.customerEmail ?? row.customer_email ?? undefined,
-    type: row.type,
-    tableNumber: row.tableNumber ?? row.table_number ?? undefined,
-    tablePin: row.tablePin ?? row.table_pin ?? undefined,
-    pickupTime: row.pickupTime ?? row.pickup_time ?? undefined,
-    status,
-    paymentStatus: (status === 'completed' || isPaidSettled) && rawPaymentStatus !== 'refunded' ? 'paid' : rawPaymentStatus,
-    paymentMethod: row.paymentMethod ?? row.payment_method ?? 'Cash',
-    items: parsedItems.map((it: any) => ({
-      ...it,
-      unitPrice: Number(it.unitPrice) || 0,
-      quantity: Number(it.quantity) || 1,
-    })),
-    originalSubtotal: Number(row.originalSubtotal ?? row.original_subtotal) || 0,
-    addOnSubtotal: Number(row.addOnSubtotal ?? row.add_on_subtotal) || 0,
-    tax: Number(row.tax) || 0,
-    total: Number(row.total) || 0,
-    createdAt: row.createdAt ?? row.created_at,
-    preparationStartedAt: row.preparationStartedAt ?? row.preparation_started_at ?? undefined,
-    readyTimeEstimated: row.readyTimeEstimated ?? row.ready_time_estimated ?? undefined,
-    completedAt: row.completedAt ?? row.completed_at ?? undefined,
-    notes: row.notes ?? undefined,
-    deliveryAddress: row.deliveryAddress ?? row.delivery_address ?? undefined,
-    version: Number(row.version) || 1,
-    sentToKitchen: sentToKitchenRaw !== undefined ? Boolean(sentToKitchenRaw) : status !== 'placed',
-    sentToKitchenAt: row.sentToKitchenAt ?? row.sent_to_kitchen_at ?? null,
-    forwardToKitchenAt: row.forwardToKitchenAt ?? row.forward_to_kitchen_at ?? null,
-    autoForwardCustomMin:
-      (row.autoForwardCustomMin ?? row.auto_forward_custom_min)
-        ? Number(row.autoForwardCustomMin ?? row.auto_forward_custom_min)
-        : undefined,
-    cashierId: row.cashierId ?? row.cashier_id ?? undefined,
-    cashierName: row.cashierName ?? row.cashier_name ?? undefined,
-    isWalkIn: Boolean(row.isWalkIn ?? row.is_walk_in),
-    assignedRiderId: row.assignedRiderId ?? row.assigned_rider_id ?? undefined,
-    assignedRiderName: row.assignedRiderName ?? row.assigned_rider_name ?? undefined,
-    riderStatus: row.riderStatus ?? row.rider_status ?? undefined,
-    deliveredAt: row.deliveredAt ?? row.delivered_at ?? undefined,
-    paymentCollected: Boolean(row.paymentCollected ?? row.payment_collected),
-    customerCoordinates: row.customerCoordinates ?? row.customer_coordinates ?? undefined,
-    assignedWaiterId: row.assignedWaiterId ?? row.assigned_waiter_id ?? undefined,
-    assignedWaiterName: row.assignedWaiterName ?? row.assigned_waiter_name ?? undefined,
-    isTableQr: Boolean(row.isTableQr ?? row.is_table_qr),
-    waiterNotified: Boolean(row.waiterNotified ?? row.waiter_notified),
-  };
 }
 
 export async function GET(request: Request) {

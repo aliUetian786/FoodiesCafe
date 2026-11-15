@@ -1868,11 +1868,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const now = Date.now();
             event.data.payload.forEach((inc: Order) => {
               const existing = map.get(inc.id) || (inc.orderNumber ? map.get(inc.orderNumber) : undefined);
+              const inFlight = inFlightStatusRef.current.get(inc.id) || (inc.orderNumber ? inFlightStatusRef.current.get(inc.orderNumber) : undefined);
+              const isRecentInFlight = Boolean(inFlight && (now - inFlight.timestamp < 20000));
+
+              const isLocallyPaid =
+                Boolean(existing && (existing.paymentStatus === 'paid' || existing.paymentCollected === true)) ||
+                Boolean(inFlight && (inFlight.paymentStatus === 'paid' || inFlight.paymentCollected === true)) ||
+                inc.paymentStatus === 'paid' ||
+                Boolean(inc.paymentCollected);
+
+              const existingStatus = existing?.status as string | undefined;
+              const incStatus = inc.status as string;
+              const inFlightStatus = inFlight?.status as string | undefined;
+
+              const isTerminalSettled =
+                incStatus === 'completed' ||
+                incStatus === 'delivered' ||
+                existingStatus === 'completed' ||
+                inFlightStatus === 'completed' ||
+                inc.riderStatus === 'delivered' ||
+                inFlight?.riderStatus === 'delivered' ||
+                (isLocallyPaid && (
+                  (inc.type === 'delivery' || existing?.type === 'delivery') ||
+                  ((inc.type === 'dine_in' || existing?.type === 'dine_in') && (existingStatus === 'served' || incStatus === 'served' || existingStatus === 'ready' || incStatus === 'ready')) ||
+                  ((inc.type === 'takeaway' || existing?.type === 'takeaway') && (existingStatus === 'ready' || incStatus === 'ready' || existingStatus === 'taken' || incStatus === 'taken'))
+                ));
+
               if (existing) {
                 const existingRank = STATUS_RANK[existing.status] || 0;
                 const incomingRank = STATUS_RANK[inc.status] || 0;
-                const inFlight = inFlightStatusRef.current.get(inc.id) || inFlightStatusRef.current.get(inc.orderNumber);
-                const isRecentInFlight = inFlight && (now - inFlight.timestamp < 15000);
 
                 const isLocalCancelled = existing.status === 'cancelled' || (isRecentInFlight && inFlight?.status === 'cancelled');
                 const preserveLocal =
@@ -1880,24 +1904,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   (existing.status !== 'cancelled' && inc.status !== 'cancelled' && existingRank > incomingRank) ||
                   (isRecentInFlight && inFlight?.status !== inc.status && (inFlight?.status ? (STATUS_RANK[inFlight.status] || 0) : 0) >= incomingRank);
 
-                const isDeliveryFinished =
-                  inc.status === 'delivered' ||
-                  inc.status === 'completed' ||
-                  inc.riderStatus === 'delivered' ||
-                  inFlight?.riderStatus === 'delivered' ||
-                  inFlight?.status === 'completed' ||
-                  inFlight?.status === 'delivered' ||
-                  ((inc.type === 'delivery' || existing.type === 'delivery') &&
-                    (inc.paymentStatus === 'paid' ||
-                      Boolean(inc.paymentCollected) ||
-                      inFlight?.paymentStatus === 'paid' ||
-                      Boolean(inFlight?.paymentCollected) ||
-                      existing.paymentStatus === 'paid' ||
-                      Boolean(existing.paymentCollected)));
-
                 const resolvedStatus = isLocalCancelled
                   ? 'cancelled'
-                  : isDeliveryFinished
+                  : isTerminalSettled
                     ? 'completed'
                     : preserveLocal
                       ? (isRecentInFlight && inFlight?.status ? inFlight.status : existing.status)
@@ -1906,28 +1915,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 map.set(inc.id, {
                   ...inc,
                   status: resolvedStatus,
-                  paymentStatus: isDeliveryFinished ? 'paid' : (inc.paymentStatus || existing.paymentStatus),
-                  paymentCollected: isDeliveryFinished ? true : Boolean(inc.paymentCollected || existing.paymentCollected),
+                  paymentStatus: (isTerminalSettled || isLocallyPaid) && inc.paymentStatus !== 'refunded' ? 'paid' : (inc.paymentStatus || existing.paymentStatus),
+                  paymentCollected: Boolean(isTerminalSettled || isLocallyPaid || inc.paymentCollected || existing.paymentCollected),
                   sentToKitchen: existing.sentToKitchen || inc.sentToKitchen || inFlight?.sentToKitchen,
                   sentToKitchenAt: inc.sentToKitchenAt || existing.sentToKitchenAt,
                   preparationStartedAt: inc.preparationStartedAt || existing.preparationStartedAt,
-                  completedAt: isDeliveryFinished ? (inc.completedAt || new Date().toISOString()) : (inc.completedAt || existing.completedAt),
-                  deliveredAt: isDeliveryFinished ? (inc.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
+                  completedAt: isTerminalSettled ? (inc.completedAt || existing.completedAt || new Date().toISOString()) : (inc.completedAt || existing.completedAt),
+                  deliveredAt: isTerminalSettled ? (inc.deliveredAt || existing.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
                   assignedRiderId: inc.assignedRiderId || existing.assignedRiderId || inFlight?.assignedRiderId,
                   assignedRiderName: inc.assignedRiderName || existing.assignedRiderName || inFlight?.assignedRiderName,
                   assignedWaiterId: inc.assignedWaiterId || existing.assignedWaiterId || inFlight?.assignedWaiterId,
                   assignedWaiterName: inc.assignedWaiterName || existing.assignedWaiterName || inFlight?.assignedWaiterName,
-                  riderStatus: isDeliveryFinished ? 'delivered' : (inc.riderStatus || existing.riderStatus || inFlight?.riderStatus),
+                  riderStatus: (isTerminalSettled && (inc.type === 'delivery' || existing.type === 'delivery')) ? 'delivered' : (inc.riderStatus || existing.riderStatus || inFlight?.riderStatus),
                 });
               } else {
-                const isDeliveryFinished =
-                  inc.status === 'delivered' ||
-                  inc.status === 'completed' ||
-                  inc.riderStatus === 'delivered';
-                map.set(inc.id, isDeliveryFinished ? {
+                map.set(inc.id, isTerminalSettled ? {
                   ...inc,
                   status: 'completed',
-                  riderStatus: 'delivered',
+                  riderStatus: inc.type === 'delivery' ? 'delivered' : inc.riderStatus,
                   paymentStatus: 'paid',
                   paymentCollected: true,
                   completedAt: inc.completedAt || new Date().toISOString(),
@@ -2028,14 +2033,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   existing.status !== 'cancelled' &&
                   inc.status !== 'cancelled' &&
                   (existingRank > incomingRank || (isRecentInFlight && inFlight?.status && (STATUS_RANK[inFlight.status] || 0) >= incomingRank));
-                const isLocallyPaid = (existing && (existing.paymentStatus === 'paid' || existing.paymentCollected)) || (inFlight && inFlight.paymentStatus === 'paid') || inc.paymentStatus === 'paid';
+                const isLocallyPaid =
+                  Boolean(existing && (existing.paymentStatus === 'paid' || existing.paymentCollected === true)) ||
+                  Boolean(inFlight && (inFlight.paymentStatus === 'paid' || inFlight.paymentCollected === true)) ||
+                  inc.paymentStatus === 'paid' ||
+                  Boolean(inc.paymentCollected);
+
+                const existingStatus = existing?.status as string | undefined;
+                const incStatus = inc.status as string;
+                const inFlightStatus = inFlight?.status as string | undefined;
+
                 const isOrderFinished =
-                  inc.status === 'delivered' ||
-                  inc.status === 'completed' ||
-                  existing.status === 'completed' ||
-                  inFlight?.status === 'completed' ||
+                  incStatus === 'completed' ||
+                  incStatus === 'delivered' ||
+                  existingStatus === 'completed' ||
+                  inFlightStatus === 'completed' ||
                   inc.riderStatus === 'delivered' ||
-                  (isLocallyPaid && (existing.status === 'served' || inc.status === 'served' || existing.status === 'ready' || inc.status === 'ready'));
+                  inFlight?.riderStatus === 'delivered' ||
+                  (isLocallyPaid && (
+                    (inc.type === 'delivery' || existing?.type === 'delivery') ||
+                    ((inc.type === 'dine_in' || existing?.type === 'dine_in') && (existingStatus === 'served' || incStatus === 'served' || existingStatus === 'ready' || incStatus === 'ready')) ||
+                    ((inc.type === 'takeaway' || existing?.type === 'takeaway') && (existingStatus === 'ready' || incStatus === 'ready' || existingStatus === 'taken' || incStatus === 'taken'))
+                  ));
                 return {
                   ...inc,
                   status: isOrderFinished
@@ -2052,7 +2071,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   assignedRiderName: inc.assignedRiderName || existing.assignedRiderName || inFlight?.assignedRiderName,
                   assignedWaiterId: inc.assignedWaiterId || existing.assignedWaiterId || inFlight?.assignedWaiterId,
                   assignedWaiterName: inc.assignedWaiterName || existing.assignedWaiterName || inFlight?.assignedWaiterName,
-                  paymentStatus: (isOrderFinished || isLocallyPaid) ? 'paid' : (inc.paymentStatus || existing.paymentStatus),
+                  riderStatus: (isOrderFinished && (inc.type === 'delivery' || existing?.type === 'delivery')) ? 'delivered' : (inc.riderStatus || existing.riderStatus || inFlight?.riderStatus),
+                  paymentStatus: (isOrderFinished || isLocallyPaid) && inc.paymentStatus !== 'refunded' ? 'paid' : (inc.paymentStatus || existing.paymentStatus),
                   paymentCollected: Boolean(isOrderFinished || isLocallyPaid || existing.paymentCollected || inc.paymentCollected),
                 } as Order;
               });
@@ -2216,11 +2236,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                     ? inc.id
                     : (inc.orderNumber && orderNumToId.get(inc.orderNumber)) || undefined;
                   const existing = matchedId ? map.get(matchedId) : undefined;
+                  const inFlight = inFlightStatusRef.current.get(inc.id) || inFlightStatusRef.current.get(inc.orderNumber);
+                  const isRecentInFlight = inFlight && (now - inFlight.timestamp < 20000);
+
+                  const isLocallyPaid =
+                    Boolean(existing && (existing.paymentStatus === 'paid' || existing.paymentCollected === true)) ||
+                    Boolean(inFlight && (inFlight.paymentStatus === 'paid' || inFlight.paymentCollected === true)) ||
+                    inc.paymentStatus === 'paid' ||
+                    Boolean(inc.paymentCollected);
+
+                  const existingStatus = existing?.status as string | undefined;
+                  const incStatus = inc.status as string;
+                  const inFlightStatus = inFlight?.status as string | undefined;
+
+                  const isOrderTerminalSettled =
+                    incStatus === 'completed' ||
+                    incStatus === 'delivered' ||
+                    existingStatus === 'completed' ||
+                    inFlightStatus === 'completed' ||
+                    inc.riderStatus === 'delivered' ||
+                    inFlight?.riderStatus === 'delivered' ||
+                    (isLocallyPaid && (
+                      (inc.type === 'delivery' || existing?.type === 'delivery') ||
+                      ((inc.type === 'dine_in' || existing?.type === 'dine_in') && (existingStatus === 'served' || incStatus === 'served' || existingStatus === 'ready' || incStatus === 'ready')) ||
+                      ((inc.type === 'takeaway' || existing?.type === 'takeaway') && (existingStatus === 'ready' || incStatus === 'ready' || existingStatus === 'taken' || incStatus === 'taken'))
+                    ));
+
                   if (existing) {
                     const existingRank = STATUS_RANK[existing.status] || 0;
                     const incomingRank = STATUS_RANK[inc.status] || 0;
-                    const inFlight = inFlightStatusRef.current.get(inc.id) || inFlightStatusRef.current.get(inc.orderNumber);
-                    const isRecentInFlight = inFlight && (now - inFlight.timestamp < 15000);
 
                     const isLocalCancelled = existing.status === 'cancelled' || (isRecentInFlight && inFlight?.status === 'cancelled');
                     const preserveLocalStatus =
@@ -2228,24 +2272,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                       (existing.status !== 'cancelled' && inc.status !== 'cancelled' && existingRank > incomingRank) ||
                       (isRecentInFlight && inFlight?.status !== inc.status && (inFlight?.status ? (STATUS_RANK[inFlight.status] || 0) : 0) >= incomingRank);
 
-                    const isDeliveryFinished =
-                      inc.status === 'delivered' ||
-                      inc.status === 'completed' ||
-                      inc.riderStatus === 'delivered' ||
-                      inFlight?.riderStatus === 'delivered' ||
-                      inFlight?.status === 'completed' ||
-                      inFlight?.status === 'delivered' ||
-                      ((inc.type === 'delivery' || existing.type === 'delivery') &&
-                        (inc.paymentStatus === 'paid' ||
-                          Boolean(inc.paymentCollected) ||
-                          inFlight?.paymentStatus === 'paid' ||
-                          Boolean(inFlight?.paymentCollected) ||
-                          existing.paymentStatus === 'paid' ||
-                          Boolean(existing.paymentCollected)));
-
                     const resolvedStatus = isLocalCancelled
                       ? 'cancelled'
-                      : isDeliveryFinished
+                      : isOrderTerminalSettled
                         ? 'completed'
                         : preserveLocalStatus
                           ? (isRecentInFlight && inFlight?.status ? inFlight.status : existing.status)
@@ -2260,40 +2289,51 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                       ...inc,
                       id: targetKey,
                       status: resolvedStatus,
-                      paymentStatus: isDeliveryFinished
+                      paymentStatus: (isOrderTerminalSettled || isLocallyPaid) && inc.paymentStatus !== 'refunded'
                         ? 'paid'
                         : (isRecentInFlight && inFlight?.paymentStatus)
                           ? inFlight.paymentStatus
-                          : existing.paymentStatus === 'paid' || inc.paymentStatus === 'paid'
-                            ? 'paid'
-                            : inc.paymentStatus || existing.paymentStatus,
+                          : inc.paymentStatus || existing.paymentStatus,
                       paymentCollected: Boolean(
-                        isDeliveryFinished ||
+                        isOrderTerminalSettled ||
+                        isLocallyPaid ||
                         (isRecentInFlight && inFlight?.paymentCollected) ||
                         existing.paymentCollected ||
-                        inc.paymentCollected ||
-                        (existing.paymentStatus === 'paid' || inc.paymentStatus === 'paid')
+                        inc.paymentCollected
                       ),
                       sentToKitchen: resolvedSentToKitchen,
                       sentToKitchenAt: inc.sentToKitchenAt || existing.sentToKitchenAt,
                       preparationStartedAt: inc.preparationStartedAt || existing.preparationStartedAt,
-                      completedAt: isDeliveryFinished ? (inc.completedAt || new Date().toISOString()) : (inc.completedAt || existing.completedAt),
-                      deliveredAt: isDeliveryFinished ? (inc.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
+                      completedAt: isOrderTerminalSettled ? (inc.completedAt || existing.completedAt || new Date().toISOString()) : (inc.completedAt || existing.completedAt),
+                      deliveredAt: isOrderTerminalSettled ? (inc.deliveredAt || existing.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
                       assignedRiderId: inc.assignedRiderId || existing.assignedRiderId || inFlight?.assignedRiderId,
                       assignedRiderName: inc.assignedRiderName || existing.assignedRiderName || inFlight?.assignedRiderName,
                       assignedWaiterId: inc.assignedWaiterId || existing.assignedWaiterId || inFlight?.assignedWaiterId,
                       assignedWaiterName: inc.assignedWaiterName || existing.assignedWaiterName || inFlight?.assignedWaiterName,
-                      riderStatus: isDeliveryFinished ? 'delivered' : (inc.riderStatus || existing.riderStatus || inFlight?.riderStatus),
+                      riderStatus: (isOrderTerminalSettled && (inc.type === 'delivery' || existing.type === 'delivery')) ? 'delivered' : (inc.riderStatus || existing.riderStatus || inFlight?.riderStatus),
                     });
                   } else {
-                    const isDeliveryFinished =
-                      inc.status === 'delivered' ||
-                      inc.status === 'completed' ||
-                      inc.riderStatus === 'delivered';
-                    map.set(inc.id, isDeliveryFinished ? {
+                    const isLocallyPaid =
+                      Boolean(inFlight && (inFlight.paymentStatus === 'paid' || inFlight.paymentCollected === true)) ||
+                      inc.paymentStatus === 'paid' ||
+                      Boolean(inc.paymentCollected);
+                    const incStatus = inc.status as string;
+                    const inFlightStatus = inFlight?.status as string | undefined;
+                    const isOrderTerminalSettled =
+                      incStatus === 'completed' ||
+                      incStatus === 'delivered' ||
+                      inFlightStatus === 'completed' ||
+                      inc.riderStatus === 'delivered' ||
+                      inFlight?.riderStatus === 'delivered' ||
+                      (isLocallyPaid && (
+                        inc.type === 'delivery' ||
+                        (inc.type === 'dine_in' && (incStatus === 'served' || incStatus === 'ready')) ||
+                        (inc.type === 'takeaway' && (incStatus === 'ready' || incStatus === 'taken'))
+                      ));
+                    map.set(inc.id, isOrderTerminalSettled ? {
                       ...inc,
                       status: 'completed',
-                      riderStatus: 'delivered',
+                      riderStatus: inc.type === 'delivery' ? 'delivered' : inc.riderStatus,
                       paymentStatus: 'paid',
                       paymentCollected: true,
                       completedAt: inc.completedAt || new Date().toISOString(),
@@ -3915,12 +3955,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // 1. Immediately record in-flight payment lock to prevent race conditions from background polling
     inFlightStatusRef.current.set(orderId, {
+      status: 'completed',
       paymentStatus: 'paid',
       paymentCollected: true,
       timestamp: Date.now(),
     });
     if (ord?.orderNumber) {
       inFlightStatusRef.current.set(ord.orderNumber, {
+        status: 'completed',
         paymentStatus: 'paid',
         paymentCollected: true,
         timestamp: Date.now(),
@@ -3947,6 +3989,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         localStorage.setItem('foodies_orders_live', JSON.stringify(updated));
       } catch (e) { }
+      store.dispatch(setReduxOrders(updated));
       return updated;
     });
 
@@ -4645,6 +4688,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           : o
       );
       broadcastOrders(next);
+      try {
+        localStorage.setItem('foodies_orders_live', JSON.stringify(next));
+      } catch (e) { }
+      store.dispatch(setReduxOrders(next));
       return next;
     });
 
@@ -4716,6 +4763,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           : o
       );
       broadcastOrders(next);
+      try {
+        localStorage.setItem('foodies_orders_live', JSON.stringify(next));
+      } catch (e) { }
+      store.dispatch(setReduxOrders(next));
       return next;
     });
 
@@ -4781,6 +4832,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           : o
       );
       broadcastOrders(next);
+      try {
+        localStorage.setItem('foodies_orders_live', JSON.stringify(next));
+      } catch (e) { }
+      store.dispatch(setReduxOrders(next));
       return next;
     });
 
@@ -4856,6 +4911,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           : o
       );
       broadcastOrders(next);
+      try {
+        localStorage.setItem('foodies_orders_live', JSON.stringify(next));
+      } catch (e) { }
+      store.dispatch(setReduxOrders(next));
       return next;
     });
 
@@ -4914,6 +4973,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           : o
       );
       broadcastOrders(next);
+      try {
+        localStorage.setItem('foodies_orders_live', JSON.stringify(next));
+      } catch (e) { }
+      store.dispatch(setReduxOrders(next));
       return next;
     });
 

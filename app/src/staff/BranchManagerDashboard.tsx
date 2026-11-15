@@ -291,15 +291,9 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
       const matchBranch = !o.branchId || o.branchId === currentBranch.id || normalizeBranchId(o.branchId) === normCurrentBranchId;
       if (!matchBranch) return false;
       if (o.status === 'cancelled') return false;
-      return (
-        isDateToday(o.createdAt) &&
-        (o.paymentStatus === 'paid' ||
-          o.paymentCollected === true ||
-          o.status === 'completed' ||
-          o.status === 'delivered' ||
-          o.status === 'served' ||
-          o.status === 'taken')
-      );
+      const isPaid = o.paymentStatus === 'paid' || Boolean(o.paymentCollected);
+      if (!isPaid) return false;
+      return isDateToday(o.completedAt || o.deliveredAt || o.createdAt);
     });
 
     const isOrderCash = (o: Order) => {
@@ -338,7 +332,7 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
           if (o.type !== 'dine_in') return false;
           if (o.assignedWaiterId === user.id) return true;
           if (user.name && o.assignedWaiterName && o.assignedWaiterName.toLowerCase().includes(user.name.toLowerCase())) return true;
-          if (user.assignedTableNumbers && o.tableNumber && user.assignedTableNumbers.includes(String(o.tableNumber))) return true;
+          if (!o.assignedWaiterId && !o.assignedWaiterName && user.assignedTableNumbers && o.tableNumber && user.assignedTableNumbers.includes(String(o.tableNumber))) return true;
           return false;
         });
       }

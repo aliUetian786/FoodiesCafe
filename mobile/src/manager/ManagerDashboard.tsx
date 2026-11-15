@@ -84,7 +84,8 @@ export function ManagerDashboard({
   const isOrderPaid = (o: any) => {
     if (o.paymentStatus === 'paid') return true;
     if (o.paymentCollected === true) return true;
-    if (o.status === 'completed' || o.status === 'delivered') return true;
+    if (o.status === 'completed') return true;
+    if (o.status === 'delivered' && (o.paymentStatus === 'paid' || o.paymentCollected === true)) return true;
     const method = (o.paymentMethod || '').toLowerCase();
     if (
       method.includes('jazzcash') ||
@@ -220,7 +221,7 @@ export function ManagerDashboard({
           if (o.type !== 'dine_in') return false;
           if (o.assignedWaiterId === user.id) return true;
           if (user.name && o.assignedWaiterName && o.assignedWaiterName.toLowerCase().includes(user.name.toLowerCase())) return true;
-          if (user.assignedTableNumbers && o.tableNumber && user.assignedTableNumbers.includes(String(o.tableNumber))) return true;
+          if (!o.assignedWaiterId && !o.assignedWaiterName && user.assignedTableNumbers && o.tableNumber && user.assignedTableNumbers.includes(String(o.tableNumber))) return true;
           return false;
         });
       }
@@ -463,12 +464,12 @@ export function ManagerDashboard({
               {collectionsStaffFilter === 'all'
                 ? 'All Staff'
                 : collectionsStaffFilter === 'cashier'
-                ? 'Cashiers'
-                : collectionsStaffFilter === 'rider'
-                ? 'Riders'
-                : collectionsStaffFilter === 'waiter'
-                ? 'Waiters'
-                : 'Specific'}
+                  ? 'Cashiers'
+                  : collectionsStaffFilter === 'rider'
+                    ? 'Riders'
+                    : collectionsStaffFilter === 'waiter'
+                      ? 'Waiters'
+                      : 'Specific'}
             </Text>
             <ChevronDown size={13} color="#1E40AF" />
           </TouchableOpacity>
@@ -552,8 +553,8 @@ export function ManagerDashboard({
                 item.roleCategory === 'cashier'
                   ? { bg: '#DCFCE7', text: '#15803D', label: '💵 CASHIER' }
                   : item.roleCategory === 'rider'
-                  ? { bg: '#FFEDD5', text: '#C2410C', label: '🛵 RIDER' }
-                  : { bg: '#F3E8FF', text: '#7E22CE', label: '🍽️ WAITER' };
+                    ? { bg: '#FFEDD5', text: '#C2410C', label: '🛵 RIDER' }
+                    : { bg: '#F3E8FF', text: '#7E22CE', label: '🍽️ WAITER' };
 
               return (
                 <View key={item.user.id} style={styles.staffCollectionCard}>
