@@ -69,7 +69,7 @@ export async function runSync(options?: { full?: boolean; force?: boolean }): Pr
             custPhoneParam = `&customerPhone=${encodeURIComponent(u.phone)}`;
           }
         }
-      } catch {}
+      } catch { }
     }
     if (currentUser?.phone && !custPhoneParam) {
       custPhoneParam = `&customerPhone=${encodeURIComponent(currentUser.phone)}`;
@@ -80,7 +80,7 @@ export async function runSync(options?: { full?: boolean; force?: boolean }): Pr
         if (Array.isArray(myIds) && myIds.length > 0) {
           orderIdsParam = `&orderIds=${encodeURIComponent(myIds.slice(0, 30).join(','))}`;
         }
-      } catch {}
+      } catch { }
     }
   }
 
@@ -170,14 +170,14 @@ export async function runSync(options?: { full?: boolean; force?: boolean }): Pr
           if (!existing) {
             return isOrderFinished
               ? {
-                  ...o,
-                  status: 'completed',
-                  riderStatus: o.type === 'delivery' ? 'delivered' : o.riderStatus,
-                  paymentStatus: 'paid',
-                  paymentCollected: true,
-                  completedAt: o.completedAt || new Date().toISOString(),
-                  deliveredAt: o.deliveredAt || new Date().toISOString(),
-                }
+                ...o,
+                status: 'completed',
+                riderStatus: o.type === 'delivery' ? 'delivered' : o.riderStatus,
+                paymentStatus: 'paid',
+                paymentCollected: true,
+                completedAt: o.completedAt || new Date().toISOString(),
+                deliveredAt: o.deliveredAt || new Date().toISOString(),
+              }
               : o;
           }
 
@@ -362,7 +362,7 @@ export async function runSync(options?: { full?: boolean; force?: boolean }): Pr
  * Initialize background synchronization engine (SSE primary + 25s exponential backoff polling fallback)
  */
 export function initSyncEngine(): () => void {
-  if (typeof window === 'undefined') return () => {};
+  if (typeof window === 'undefined') return () => { };
 
   // 1. Initial immediate full sync
   runSync({ full: true });
@@ -382,7 +382,7 @@ export function initSyncEngine(): () => void {
         }, 400);
       }
     };
-  } catch {}
+  } catch { }
 
   // 3. Setup Server-Sent Events (SSE) with Last-Event-ID replay & jittered exponential reconnect backoff
   let eventSource: EventSource | null = null;
@@ -434,7 +434,7 @@ export function initSyncEngine(): () => void {
           if (parsed?.data && parsed.data.id && parsed.data.orderNumber) {
             store.dispatch(upsertOrder(parsed.data));
           }
-        } catch {}
+        } catch { }
         runSync({ force: true });
       };
 
@@ -443,7 +443,7 @@ export function initSyncEngine(): () => void {
         try {
           const parsed = JSON.parse(e.data);
           if (parsed?.id) lastReceivedEventId = parsed.id;
-        } catch {}
+        } catch { }
         runSync({ force: true, full: fullSync });
       };
 
@@ -459,23 +459,23 @@ export function initSyncEngine(): () => void {
             const updated = currentBranches.map((b: any) =>
               b.id === branchData.id || b.id === branchData.branchId || normalizeBranchId(b.id) === targetNorm
                 ? {
-                    ...b,
-                    ...branchData,
-                    paymentSettings: branchData.paymentSettings || branchData.payment_settings || b.paymentSettings,
-                    isOpen: branchData.isOpen ?? branchData.is_open ?? b.isOpen,
-                    isBusy: branchData.isBusy ?? branchData.is_busy ?? b.isBusy,
-                    deliveryEnabled: branchData.deliveryEnabled ?? branchData.delivery_enabled ?? b.deliveryEnabled,
-                  }
+                  ...b,
+                  ...branchData,
+                  paymentSettings: branchData.paymentSettings || branchData.payment_settings || b.paymentSettings,
+                  isOpen: branchData.isOpen ?? branchData.is_open ?? b.isOpen,
+                  isBusy: branchData.isBusy ?? branchData.is_busy ?? b.isBusy,
+                  deliveryEnabled: branchData.deliveryEnabled ?? branchData.delivery_enabled ?? b.deliveryEnabled,
+                }
                 : b
             );
             store.dispatch(setBranches(updated));
             if (typeof window !== 'undefined') {
               try {
                 localStorage.setItem('foodies_branches_live', JSON.stringify(updated));
-              } catch {}
+              } catch { }
             }
           }
-        } catch {}
+        } catch { }
         runSync({ force: true, full: true });
       };
 
@@ -487,7 +487,7 @@ export function initSyncEngine(): () => void {
           if (parsed?.data && parsed.data.id && parsed.data.title) {
             store.dispatch(addNotificationInStore(parsed.data));
           }
-        } catch {}
+        } catch { }
         runSync({ force: true });
       };
 
@@ -507,7 +507,7 @@ export function initSyncEngine(): () => void {
         if (eventSource) {
           try {
             eventSource.close();
-          } catch {}
+          } catch { }
           eventSource = null;
         }
         if (isDisposed) return;
@@ -517,7 +517,7 @@ export function initSyncEngine(): () => void {
         if (sseReconnectTimer) clearTimeout(sseReconnectTimer);
         sseReconnectTimer = setTimeout(connectSse, baseDelay + jitter);
       };
-    } catch {}
+    } catch { }
   };
 
   connectSse();
@@ -566,12 +566,12 @@ export function initSyncEngine(): () => void {
     if (eventSource) {
       try {
         eventSource.close();
-      } catch {}
+      } catch { }
     }
     if (broadcastChannel) {
       try {
         broadcastChannel.close();
-      } catch {}
+      } catch { }
     }
     window.removeEventListener('visibilitychange', handleVisibilityChange);
     window.removeEventListener('focus', handleFocus);
@@ -588,5 +588,5 @@ export function broadcastStateMutation(action: string, payload?: any) {
       bc.postMessage({ type: 'STATE_MUTATION', action, payload, timestamp: Date.now() });
       bc.close();
     }
-  } catch {}
+  } catch { }
 }
