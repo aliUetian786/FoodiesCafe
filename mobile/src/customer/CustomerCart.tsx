@@ -128,7 +128,7 @@ export function CustomerCart({ visible, onClose, onOrderPlaced }: CustomerCartPr
         if (savedName && !customerName) setCustomerName(savedName);
         if (savedPhone && !customerPhone) setCustomerPhone(savedPhone.replace(/^(\+92|0)/, ''));
       })
-      .catch(() => {});
+      .catch(() => { });
 
     if (currentUser?.name && currentUser.name !== 'Guest Customer' && !customerName) {
       setCustomerName(currentUser.name);
@@ -412,10 +412,10 @@ export function CustomerCart({ visible, onClose, onOrderPlaced }: CustomerCartPr
 
     // Update user profile and AsyncStorage with latest name & phone
     if (customerName.trim()) {
-      AsyncStorage.setItem('foodies_saved_customer_name', customerName.trim()).catch(() => {});
+      AsyncStorage.setItem('foodies_saved_customer_name', customerName.trim()).catch(() => { });
     }
     if (formattedPhone) {
-      AsyncStorage.setItem('foodies_saved_customer_phone', formattedPhone).catch(() => {});
+      AsyncStorage.setItem('foodies_saved_customer_phone', formattedPhone).catch(() => { });
     }
     if (updateCurrentUser) {
       updateCurrentUser({

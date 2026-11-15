@@ -103,9 +103,9 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
       o.type === 'delivery' &&
       o.assignedRiderId === riderId &&
       (o.status === 'out_for_delivery' ||
-       o.riderStatus === 'on_trip' ||
-       o.riderStatus === 'en_route' ||
-       o.riderStatus === 'picked_up') &&
+        o.riderStatus === 'on_trip' ||
+        o.riderStatus === 'en_route' ||
+        o.riderStatus === 'picked_up') &&
       o.status !== 'completed' &&
       o.status !== 'delivered' &&
       o.status !== 'cancelled'
@@ -143,21 +143,39 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
 
   // Cashier Orders Hub: Active Takeaway, Delivery, and Dine-In orders
   // Cashier Orders Hub: Active Takeaway, Delivery, and Dine-In orders
-  // Rule: Active kitchen/dispatch orders remain in hub; served dine-in orders remain until paid/settled, then move to history
+  // Rule: Terminal finished or settled & paid orders move to history; active unpaid orders remain in hub
   const branchOrders = useMemo(() => {
     return orders.filter((o) => {
       if (o.branchId && normalizeBranchId(o.branchId) !== normalizeBranchId(currentBranch.id)) return false;
       if (o.status === 'cancelled') return false;
 
+      const isPaidOrSettled = o.paymentStatus === 'paid' || Boolean(o.paymentCollected);
+
+      // 1. Any terminal completed order belongs in history
       const isTerminalFinished =
         o.status === 'completed' ||
         o.status === 'delivered' ||
-        o.riderStatus === 'delivered';
+        o.riderStatus === 'delivered' ||
+        (o as any).status === 'taken';
 
-      // If it is terminal finished, it moves to history
       if (isTerminalFinished) return false;
 
-      // Active kitchen/service stages must ALWAYS remain in Orders Hub
+      // 2. CRITICAL: Any Dine-In order where payment has been received/collected MUST NOT remain in Order Hub!
+      if (o.type === 'dine_in' && isPaidOrSettled) {
+        return false; // Served/Collected AND paid -> moves to order history, NEVER comes back to Order Hub
+      }
+
+      // 3. Any delivery order where payment has been collected and delivered moves to history
+      if (o.type === 'delivery' && isPaidOrSettled && (o.status === 'out_for_delivery' || o.status === 'delivered')) {
+        return false;
+      }
+
+      // 4. Any takeaway order where payment has been collected and food handed over moves to history
+      if (o.type === 'takeaway' && isPaidOrSettled && (o.status === 'ready' || (o as any).status === 'taken')) {
+        return false;
+      }
+
+      // Active kitchen/service stages (unpaid, cooking, waiting to serve) remain in Orders Hub
       const isActiveCookingOrReady =
         o.status === 'placed' ||
         o.status === 'accepted' ||
@@ -167,10 +185,9 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
 
       if (isActiveCookingOrReady) return true;
 
-      // If served (dining): keep in order hub until payment is marked and settled
+      // If served at table (dining): keep in order hub ONLY until payment is marked
       if (o.status === 'served') {
-        const isSettled = (o.paymentStatus === 'paid' || Boolean(o.paymentCollected));
-        if (isSettled) return false; // Served AND paid -> moves to order history
+        if (isPaidOrSettled) return false;
         return true;
       }
 
@@ -188,9 +205,9 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
         (t) =>
           (!t.branchId || normalizeBranchId(t.branchId) === normalizeBranchId(currentBranch.id)) &&
           (String(t.number) === String(ord.tableNumber) ||
-           String(t.id) === String(ord.tableNumber) ||
-           t.number.replace(/\D/g, '') === String(ord.tableNumber).replace(/\D/g, '') ||
-           `t-${t.number.replace(/\D/g, '')}` === String(ord.tableNumber).toLowerCase().replace(/\s/g, ''))
+            String(t.id) === String(ord.tableNumber) ||
+            t.number.replace(/\D/g, '') === String(ord.tableNumber).replace(/\D/g, '') ||
+            `t-${t.number.replace(/\D/g, '')}` === String(ord.tableNumber).toLowerCase().replace(/\s/g, ''))
       );
 
       if (tableObj?.assignedWaiterId) {
@@ -229,12 +246,12 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
             o.id !== ord.id &&
             o.assignedRiderId === r.id &&
             (o.riderStatus === 'accepted' ||
-             o.riderStatus === 'en_route' ||
-             o.riderStatus === 'picked_up' ||
-             (o.riderStatus as string) === 'on_trip' ||
-             o.status === 'out_for_delivery' ||
-             o.status === 'preparing' ||
-             o.status === 'accepted') &&
+              o.riderStatus === 'en_route' ||
+              o.riderStatus === 'picked_up' ||
+              (o.riderStatus as string) === 'on_trip' ||
+              o.status === 'out_for_delivery' ||
+              o.status === 'preparing' ||
+              o.status === 'accepted') &&
             o.status !== 'completed' &&
             o.status !== 'delivered' &&
             o.status !== 'cancelled'
@@ -331,7 +348,7 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
           date: d.toLocaleDateString([], { month: 'short', day: 'numeric' }),
         };
       }
-    } catch {}
+    } catch { }
     return { time: dateStr, date: '' };
   };
 
@@ -904,14 +921,14 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                           ord.type === 'dine_in'
                             ? 'rgba(234, 88, 12, 0.12)'
                             : ord.type === 'takeaway'
-                            ? 'rgba(16, 185, 129, 0.12)'
-                            : 'rgba(59, 130, 246, 0.12)',
+                              ? 'rgba(16, 185, 129, 0.12)'
+                              : 'rgba(59, 130, 246, 0.12)',
                         color:
                           ord.type === 'dine_in'
                             ? '#EA580C'
                             : ord.type === 'takeaway'
-                            ? '#059669'
-                            : '#2563EB',
+                              ? '#059669'
+                              : '#2563EB',
                         padding: '2px 7px',
                         borderRadius: '4px',
                         flexShrink: 0,
@@ -920,8 +937,8 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                       {ord.type === 'dine_in'
                         ? `🍽️ Dine-In ${ord.tableNumber ? `(Table #${ord.tableNumber})` : ''}`
                         : ord.type === 'takeaway'
-                        ? '🛍️ Takeaway'
-                        : '🛵 Delivery'}
+                          ? '🛍️ Takeaway'
+                          : '🛵 Delivery'}
                     </span>
 
                     {/* Channel badge: QR vs Walk-in vs Online */}
@@ -932,22 +949,21 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                         backgroundColor: ord.isTableQr
                           ? '#FDF2F8'
                           : ord.isWalkIn
-                          ? '#F1F5F9'
-                          : '#EFF6FF',
+                            ? '#F1F5F9'
+                            : '#EFF6FF',
                         color: ord.isTableQr
                           ? '#BE185D'
                           : ord.isWalkIn
-                          ? '#475569'
-                          : '#1D4ED8',
+                            ? '#475569'
+                            : '#1D4ED8',
                         padding: '1px 5px',
                         borderRadius: '3px',
-                        border: `1px solid ${
-                          ord.isTableQr
-                            ? '#FBCFE8'
-                            : ord.isWalkIn
+                        border: `1px solid ${ord.isTableQr
+                          ? '#FBCFE8'
+                          : ord.isWalkIn
                             ? '#CBD5E1'
                             : '#BFDBFE'
-                        }`,
+                          }`,
                         flexShrink: 0,
                       }}
                     >
@@ -1115,10 +1131,10 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                       const isRiderAccepted = Boolean(
                         ord.assignedRiderId &&
                         (ord.riderStatus === 'accepted' ||
-                         ord.riderStatus === 'en_route' ||
-                         ord.riderStatus === 'picked_up' ||
-                         (ord.riderStatus as string) === 'on_trip' ||
-                         ord.status === 'out_for_delivery')
+                          ord.riderStatus === 'en_route' ||
+                          ord.riderStatus === 'picked_up' ||
+                          (ord.riderStatus as string) === 'on_trip' ||
+                          ord.status === 'out_for_delivery')
                       );
 
                       if (isRiderAccepted) {
@@ -1176,12 +1192,12 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                             o.id !== ord.id &&
                             o.assignedRiderId === r.id &&
                             (o.riderStatus === 'accepted' ||
-                             o.riderStatus === 'en_route' ||
-                             o.riderStatus === 'picked_up' ||
-                             (o.riderStatus as string) === 'on_trip' ||
-                             o.status === 'out_for_delivery' ||
-                             o.status === 'preparing' ||
-                             o.status === 'accepted') &&
+                              o.riderStatus === 'en_route' ||
+                              o.riderStatus === 'picked_up' ||
+                              (o.riderStatus as string) === 'on_trip' ||
+                              o.status === 'out_for_delivery' ||
+                              o.status === 'preparing' ||
+                              o.status === 'accepted') &&
                             o.status !== 'completed' &&
                             o.status !== 'delivered' &&
                             o.status !== 'cancelled'
@@ -1316,9 +1332,9 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                         (t) =>
                           (!t.branchId || normalizeBranchId(t.branchId) === normalizeBranchId(currentBranch.id)) &&
                           (String(t.number) === String(ord.tableNumber) ||
-                           String(t.id) === String(ord.tableNumber) ||
-                           t.number.replace(/\D/g, '') === String(ord.tableNumber).replace(/\D/g, '') ||
-                           `t-${t.number.replace(/\D/g, '')}` === String(ord.tableNumber).toLowerCase().replace(/\s/g, ''))
+                            String(t.id) === String(ord.tableNumber) ||
+                            t.number.replace(/\D/g, '') === String(ord.tableNumber).replace(/\D/g, '') ||
+                            `t-${t.number.replace(/\D/g, '')}` === String(ord.tableNumber).toLowerCase().replace(/\s/g, ''))
                       );
 
                       const resolvedWaiterId =
@@ -1590,14 +1606,14 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                       selectedOrderDetail.type === 'dine_in'
                         ? 'rgba(234, 88, 12, 0.12)'
                         : selectedOrderDetail.type === 'takeaway'
-                        ? 'rgba(16, 185, 129, 0.12)'
-                        : 'rgba(59, 130, 246, 0.12)',
+                          ? 'rgba(16, 185, 129, 0.12)'
+                          : 'rgba(59, 130, 246, 0.12)',
                     color:
                       selectedOrderDetail.type === 'dine_in'
                         ? '#EA580C'
                         : selectedOrderDetail.type === 'takeaway'
-                        ? '#059669'
-                        : '#2563EB',
+                          ? '#059669'
+                          : '#2563EB',
                   }}
                 >
                   {selectedOrderDetail.type.toUpperCase()}
@@ -1611,27 +1627,26 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                     backgroundColor: selectedOrderDetail.isTableQr
                       ? '#FDF2F8'
                       : selectedOrderDetail.isWalkIn
-                      ? '#F1F5F9'
-                      : '#EFF6FF',
+                        ? '#F1F5F9'
+                        : '#EFF6FF',
                     color: selectedOrderDetail.isTableQr
                       ? '#BE185D'
                       : selectedOrderDetail.isWalkIn
-                      ? '#475569'
-                      : '#1D4ED8',
-                    border: `1px solid ${
-                      selectedOrderDetail.isTableQr
-                        ? '#FBCFE8'
-                        : selectedOrderDetail.isWalkIn
+                        ? '#475569'
+                        : '#1D4ED8',
+                    border: `1px solid ${selectedOrderDetail.isTableQr
+                      ? '#FBCFE8'
+                      : selectedOrderDetail.isWalkIn
                         ? '#CBD5E1'
                         : '#BFDBFE'
-                    }`,
+                      }`,
                   }}
                 >
                   {selectedOrderDetail.isTableQr
                     ? '📱 Table QR'
                     : selectedOrderDetail.isWalkIn
-                    ? '🚶 Walk-in Order'
-                    : '🌐 Online Order'}
+                      ? '🚶 Walk-in Order'
+                      : '🌐 Online Order'}
                 </span>
               </div>
 
@@ -1704,8 +1719,8 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                     {selectedOrderDetail.type === 'delivery'
                       ? (selectedOrderDetail.deliveryAddress || 'Gulberg III, Lahore')
                       : selectedOrderDetail.type === 'dine_in'
-                      ? `Dine-In (Table #${selectedOrderDetail.tableNumber || 'N/A'})`
-                      : 'Takeaway (Counter Pickup)'}
+                        ? `Dine-In (Table #${selectedOrderDetail.tableNumber || 'N/A'})`
+                        : 'Takeaway (Counter Pickup)'}
                   </div>
                 </div>
               </div>

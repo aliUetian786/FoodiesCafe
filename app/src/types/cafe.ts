@@ -350,26 +350,26 @@ export interface AuditLog {
   actorRole: string;
   branchId?: string;
   action:
-    | 'price_change'
-    | 'refund_approved'
-    | 'refund_rejected'
-    | 'role_change'
-    | 'order_cancelled'
-    | 'timing_settings'
-    | 'table_override'
-    | 'account_suspended'
-    | 'account_activated'
-    | 'account_deactivated'
-    | 'account_created'
-    | 'account_deleted'
-    | 'account_updated'
-    | 'busy_mode_toggled'
-    | 'shift_verified'
-    | 'manager_access_requested'
-    | 'manager_access_granted'
-    | 'manager_access_rejected'
-    | 'manager_access_revoked'
-    | string;
+  | 'price_change'
+  | 'refund_approved'
+  | 'refund_rejected'
+  | 'role_change'
+  | 'order_cancelled'
+  | 'timing_settings'
+  | 'table_override'
+  | 'account_suspended'
+  | 'account_activated'
+  | 'account_deactivated'
+  | 'account_created'
+  | 'account_deleted'
+  | 'account_updated'
+  | 'busy_mode_toggled'
+  | 'shift_verified'
+  | 'manager_access_requested'
+  | 'manager_access_granted'
+  | 'manager_access_rejected'
+  | 'manager_access_revoked'
+  | string;
   details: string;
   oldValue?: string;
   newValue?: string;

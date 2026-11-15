@@ -100,7 +100,7 @@ export async function apiFetch<T = any>(
     let token: string | null = null;
     try {
       token = await getSecureAuthToken();
-    } catch {}
+    } catch { }
 
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), 6000);
@@ -836,7 +836,7 @@ export async function fetchLiveSyncData(
         receiverNotificationSettingsMap: d.receiverNotificationSettingsMap || {},
       };
     }
-  } catch (_err) {}
+  } catch (_err) { }
 
   const fallbackMenu = SEED_MENU_ITEMS.map((m) => ({
     ...m,

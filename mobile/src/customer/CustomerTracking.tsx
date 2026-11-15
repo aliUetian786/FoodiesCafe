@@ -113,9 +113,9 @@ export function CustomerTracking({ onBackToMenu, onViewHistory }: CustomerTracki
       const matchesId = (customerUser?.id && o.customerId === customerUser.id) || (currentUser?.id && currentUser.id !== 'guest' && o.customerId === currentUser.id);
       const matchesPhone = cleanPhone && normalizePhone(o.customerPhone) === cleanPhone;
       const matchesEmail = (customerUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === customerUser.email.toLowerCase()) ||
-                           (currentUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === currentUser.email.toLowerCase());
+        (currentUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === currentUser.email.toLowerCase());
       const matchesName = (customerUser?.name && o.customerName === customerUser.name) ||
-                          (currentUser?.name && currentUser.name !== 'Guest Customer' && o.customerName === currentUser.name);
+        (currentUser?.name && currentUser.name !== 'Guest Customer' && o.customerName === currentUser.name);
       return matchesId || matchesPhone || matchesEmail || matchesName;
     });
 
@@ -129,9 +129,9 @@ export function CustomerTracking({ onBackToMenu, onViewHistory }: CustomerTracki
         const matchesId = (customerUser?.id && o.customerId === customerUser.id) || (currentUser?.id && currentUser.id !== 'guest' && o.customerId === currentUser.id);
         const matchesPhone = cleanPhone && normalizePhone(o.customerPhone) === cleanPhone;
         const matchesEmail = (customerUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === customerUser.email.toLowerCase()) ||
-                             (currentUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === currentUser.email.toLowerCase());
+          (currentUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === currentUser.email.toLowerCase());
         const matchesName = (customerUser?.name && o.customerName === customerUser.name) ||
-                            (currentUser?.name && currentUser.name !== 'Guest Customer' && o.customerName === currentUser.name);
+          (currentUser?.name && currentUser.name !== 'Guest Customer' && o.customerName === currentUser.name);
         return matchesId || matchesPhone || matchesEmail || matchesName;
       })
       .sort((a, b) => parseOrderTimeMs(b.createdAt) - parseOrderTimeMs(a.createdAt));
@@ -447,10 +447,10 @@ export function CustomerTracking({ onBackToMenu, onViewHistory }: CustomerTracki
           const displayStatus = isOutForDelivery
             ? 'ON THE WAY'
             : isReady
-            ? 'READY'
-            : isPreparing
-            ? 'PREPARING'
-            : 'PLACED';
+              ? 'READY'
+              : isPreparing
+                ? 'PREPARING'
+                : 'PLACED';
 
           const canCancel =
             ord.status === 'placed' &&
@@ -481,8 +481,8 @@ export function CustomerTracking({ onBackToMenu, onViewHistory }: CustomerTracki
             ord.type === 'dine_in'
               ? 'Served'
               : ord.type === 'takeaway'
-              ? 'Taken'
-              : 'Delivered';
+                ? 'Taken'
+                : 'Delivered';
 
           return (
             <View
@@ -533,8 +533,8 @@ export function CustomerTracking({ onBackToMenu, onViewHistory }: CustomerTracki
                     {ord.type === 'dine_in'
                       ? `Dishes are READY! Floor waiter is serving to ${tableNumberText}.`
                       : ord.type === 'takeaway'
-                      ? `Order is READY! Please show Order #${ord.orderNumber} to counter cashier to collect.`
-                      : `Order is READY! Assigned rider will hand over at your doorstep.`}
+                        ? `Order is READY! Please show Order #${ord.orderNumber} to counter cashier to collect.`
+                        : `Order is READY! Assigned rider will hand over at your doorstep.`}
                   </Text>
                 </View>
               )}
@@ -613,9 +613,9 @@ export function CustomerTracking({ onBackToMenu, onViewHistory }: CustomerTracki
                       ord.type === 'delivery' && (ord.customerCoordinates || customerCoordinates)
                         ? (ord.customerCoordinates || customerCoordinates)
                         : {
-                            lat: Number(orderBranch.latitude) || 31.5126,
-                            lng: Number(orderBranch.longitude) || 74.3436,
-                          }
+                          lat: Number(orderBranch.latitude) || 31.5126,
+                          lng: Number(orderBranch.longitude) || 74.3436,
+                        }
                     }
                     zoom={13}
                     height={195}
@@ -629,31 +629,31 @@ export function CustomerTracking({ onBackToMenu, onViewHistory }: CustomerTracki
                       },
                       ...(ord.type === 'delivery' && (ord.customerCoordinates || customerCoordinates)
                         ? [
-                            {
-                              id: `mob-track-cust-${ord.id}`,
-                              lat: (ord.customerCoordinates || customerCoordinates).lat,
-                              lng: (ord.customerCoordinates || customerCoordinates).lng,
-                              title: 'Delivery Pin',
-                              kind: 'customer' as const,
-                            },
-                          ]
+                          {
+                            id: `mob-track-cust-${ord.id}`,
+                            lat: (ord.customerCoordinates || customerCoordinates).lat,
+                            lng: (ord.customerCoordinates || customerCoordinates).lng,
+                            title: 'Delivery Pin',
+                            kind: 'customer' as const,
+                          },
+                        ]
                         : []),
                     ]}
                     routeLine={
                       ord.type === 'delivery' && (ord.customerCoordinates || customerCoordinates)
                         ? {
-                            from: {
-                              lat: Number(orderBranch.latitude) || 31.5126,
-                              lng: Number(orderBranch.longitude) || 74.3436,
-                            },
-                            to: ord.customerCoordinates || customerCoordinates,
-                            label: `${calculateHaversineKm(
-                              Number(orderBranch.latitude) || 31.5126,
-                              Number(orderBranch.longitude) || 74.3436,
-                              (ord.customerCoordinates || customerCoordinates).lat,
-                              (ord.customerCoordinates || customerCoordinates).lng
-                            )} km`,
-                          }
+                          from: {
+                            lat: Number(orderBranch.latitude) || 31.5126,
+                            lng: Number(orderBranch.longitude) || 74.3436,
+                          },
+                          to: ord.customerCoordinates || customerCoordinates,
+                          label: `${calculateHaversineKm(
+                            Number(orderBranch.latitude) || 31.5126,
+                            Number(orderBranch.longitude) || 74.3436,
+                            (ord.customerCoordinates || customerCoordinates).lat,
+                            (ord.customerCoordinates || customerCoordinates).lng
+                          )} km`,
+                        }
                         : null
                     }
                     showSearch={false}
@@ -666,9 +666,9 @@ export function CustomerTracking({ onBackToMenu, onViewHistory }: CustomerTracki
                     externalDirectionsOrigin={
                       ord.type === 'delivery'
                         ? {
-                            lat: Number(orderBranch.latitude) || 31.5126,
-                            lng: Number(orderBranch.longitude) || 74.3436,
-                          }
+                          lat: Number(orderBranch.latitude) || 31.5126,
+                          lng: Number(orderBranch.longitude) || 74.3436,
+                        }
                         : customerCoordinates
                     }
                   />

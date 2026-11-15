@@ -38,11 +38,15 @@ function formatOrderRow(row: any) {
   const rawPaymentCollected = Boolean(row.paymentCollected ?? row.payment_collected);
   const rawRiderStatus = row.riderStatus ?? row.rider_status ?? undefined;
 
-  // Normalization: When an order is delivered or rider marks it paid, it is terminal COMPLETED
+  // Normalization: When an order is delivered, paid and served, or staff marks it paid, it is terminal COMPLETED
+  const isPaidSettled = rawPaymentStatus === 'paid' || rawPaymentCollected;
   if (
     status === 'delivered' ||
+    status === 'completed' ||
     rawRiderStatus === 'delivered' ||
-    (row.type === 'delivery' && (rawPaymentStatus === 'paid' || rawPaymentCollected) && (status === 'out_for_delivery' || status === 'delivered'))
+    (row.type === 'delivery' && isPaidSettled && (status === 'out_for_delivery' || status === 'delivered')) ||
+    (row.type === 'dine_in' && isPaidSettled && (status === 'served' || status === 'ready' || status === 'completed')) ||
+    (row.type === 'takeaway' && isPaidSettled && (status === 'ready' || status === 'taken' || status === 'completed'))
   ) {
     status = 'completed';
   }
@@ -61,7 +65,7 @@ function formatOrderRow(row: any) {
     tablePin: row.tablePin ?? row.table_pin ?? undefined,
     pickupTime: row.pickupTime ?? row.pickup_time ?? undefined,
     status,
-    paymentStatus: status === 'completed' && (row.type === 'delivery' || rawPaymentCollected) ? 'paid' : rawPaymentStatus,
+    paymentStatus: (status === 'completed' || isPaidSettled) && rawPaymentStatus !== 'refunded' ? 'paid' : rawPaymentStatus,
     paymentMethod: row.paymentMethod ?? row.payment_method ?? 'Cash',
     items: parsedItems.map((it: any) => ({
       ...it,
