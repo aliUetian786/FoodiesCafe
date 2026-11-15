@@ -288,6 +288,36 @@ export async function recalculateOrderItemsOnServer(
 /**
  * Records an immutable row in order_history inside the active transaction.
  */
+export async function ensureOrderHistoryTable(client: PoolClient): Promise<void> {
+  try {
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS order_history (
+        id VARCHAR(64) PRIMARY KEY,
+        order_id VARCHAR(64) NOT NULL,
+        order_number VARCHAR(50) NOT NULL,
+        branch_id VARCHAR(64) NOT NULL,
+        actor_id VARCHAR(64) NOT NULL DEFAULT 'system',
+        actor_name VARCHAR(255) NOT NULL DEFAULT 'System',
+        actor_role VARCHAR(50) NOT NULL DEFAULT 'system',
+        change_type VARCHAR(50) NOT NULL,
+        old_status VARCHAR(30),
+        new_status VARCHAR(30),
+        old_payment_status VARCHAR(30),
+        new_payment_status VARCHAR(30),
+        old_total NUMERIC(10, 2),
+        new_total NUMERIC(10, 2),
+        version INT NOT NULL DEFAULT 1,
+        details TEXT,
+        payload JSONB,
+        created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+      );
+    `);
+  } catch {}
+}
+
+/**
+ * Record an immutable audit log entry of order state changes.
+ */
 export async function recordOrderHistory(
   client: PoolClient,
   entry: {
@@ -309,9 +339,10 @@ export async function recordOrderHistory(
     payload?: any;
   }
 ) {
-  const historyId = `oh-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-  await client
-    .query(
+  try {
+    await ensureOrderHistoryTable(client);
+    const historyId = `oh-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
+    await client.query(
       `INSERT INTO order_history (
         id, order_id, order_number, branch_id,
         actor_id, actor_name, actor_role, change_type,
@@ -342,9 +373,10 @@ export async function recordOrderHistory(
         entry.details || null,
         entry.payload ? JSON.stringify(entry.payload) : null,
       ]
-    )
-    .catch(() => {
-      // Non-fatal if order_history table hasn't been migrated yet on an unmigrated local DB
-    });
+    );
+  } catch (err) {
+    // Non-fatal if order_history logging encounters an issue; order status update must never be aborted
+    console.warn('[recordOrderHistory] Non-fatal history write warning:', err);
+  }
 }
 

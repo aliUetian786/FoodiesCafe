@@ -21,11 +21,18 @@ export const KitchenQueueScreen: React.FC = () => {
     currentRole === 'platform_owner' ||
     currentUser?.role === 'platform_owner';
 
+  // Live timer tick for accurate forwardToKitchenAt countdown transitions in kitchen queue
+  const [tick, setTick] = React.useState(0);
+  React.useEffect(() => {
+    const timer = setInterval(() => setTick((t) => (t + 1) % 10000), 1000);
+    return () => clearInterval(timer);
+  }, []);
+
   // Filter orders strictly for current branch and categorize only into Arrived & Ready to Serve
   const { arrivedOrders, readyToServeOrders } = useMemo(() => {
     const isOrderDispatchedToKitchen = (o: Order) => {
       if (o.sentToKitchen) return true;
-      if (o.status === 'preparing' || o.status === 'ready' || o.status === 'served') return true;
+      if (o.status === 'accepted' || o.status === 'preparing' || o.status === 'ready' || o.status === 'served') return true;
       if (o.forwardToKitchenAt && Date.now() >= new Date(o.forwardToKitchenAt).getTime()) return true;
       return false;
     };
@@ -58,7 +65,7 @@ export const KitchenQueueScreen: React.FC = () => {
       arrivedOrders: arrived,
       readyToServeOrders: readyToServe,
     };
-  }, [orders, currentBranch.id, footerSettings?.orderRoutingSupportFirst]);
+  }, [orders, currentBranch.id, footerSettings?.orderRoutingSupportFirst, tick]);
 
   const handleMarkOrderReceived = (orderId: string) => {
     if (isManager) {

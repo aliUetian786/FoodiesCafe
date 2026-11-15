@@ -217,6 +217,7 @@ interface AppContextType {
       cashierId?: string;
       cashierName?: string;
       isWalkIn?: boolean;
+      isTableQr?: boolean;
       notes?: string;
       customerCoordinates?: { lat: number; lng: number };
       paymentStatus?: 'paid' | 'unpaid';
@@ -2017,7 +2018,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         try {
           const parsed = JSON.parse(e.newValue);
           if (Array.isArray(parsed)) {
-            setOrders(parsed);
+            setOrders((prev) => {
+              const map = new Map<string, Order>();
+              prev.forEach((o) => {
+                if (o.id) map.set(o.id, o);
+                if (o.orderNumber) map.set(o.orderNumber, o);
+              });
+              const now = Date.now();
+              const merged = parsed.map((inc: Order) => {
+                const existing = map.get(inc.id) || (inc.orderNumber ? map.get(inc.orderNumber) : undefined);
+                if (!existing) return inc;
+                const existingRank = STATUS_RANK[existing.status] || 0;
+                const incomingRank = STATUS_RANK[inc.status] || 0;
+                const inFlight = inFlightStatusRef.current.get(inc.id) || (inc.orderNumber ? inFlightStatusRef.current.get(inc.orderNumber) : undefined);
+                const isRecentInFlight = inFlight && (now - inFlight.timestamp < 20000);
+                const preserveLocal =
+                  existing.status !== 'cancelled' &&
+                  inc.status !== 'cancelled' &&
+                  (existingRank > incomingRank || (isRecentInFlight && inFlight?.status && (STATUS_RANK[inFlight.status] || 0) >= incomingRank));
+                const isDeliveryFinished =
+                  inc.status === 'delivered' || inc.status === 'completed' || inc.riderStatus === 'delivered';
+                return {
+                  ...inc,
+                  status: isDeliveryFinished
+                    ? 'completed'
+                    : preserveLocal
+                    ? (isRecentInFlight && inFlight?.status ? inFlight.status : existing.status)
+                    : inc.status,
+                  sentToKitchen: existing.sentToKitchen || inc.sentToKitchen || Boolean(inFlight?.sentToKitchen),
+                  sentToKitchenAt: inc.sentToKitchenAt || existing.sentToKitchenAt,
+                  preparationStartedAt: inc.preparationStartedAt || existing.preparationStartedAt,
+                  completedAt: inc.completedAt || existing.completedAt,
+                  paymentStatus: (existing.paymentStatus === 'paid' || inc.paymentStatus === 'paid') ? 'paid' : (inc.paymentStatus || existing.paymentStatus),
+                  paymentCollected: Boolean(existing.paymentCollected || inc.paymentCollected),
+                } as Order;
+              });
+              return merged;
+            });
           }
         } catch (err) { }
       }
@@ -2699,6 +2736,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       cashierId?: string;
       cashierName?: string;
       isWalkIn?: boolean;
+      isTableQr?: boolean;
       notes?: string;
       customerCoordinates?: { lat: number; lng: number };
       paymentStatus?: PaymentStatus;
@@ -2722,10 +2760,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const autoMin = footerSettings.autoForwardKitchenMin ?? 3;
     const forwardTime = new Date(Date.now() + Math.max(1, autoMin) * 60 * 1000).toISOString();
 
-    const isStaffOrCashier = currentRole === 'cashier' || currentRole === 'branch_manager' || Boolean(options?.cashierId) || Boolean(options?.isWalkIn);
+    const isStaffOrCashier = currentRole === 'cashier' || currentRole === 'branch_manager' || currentRole === 'floor_staff' || Boolean(options?.cashierId) || Boolean(options?.isWalkIn);
     const cashierId = options?.cashierId || (currentRole === 'cashier' ? (currentUser.id || 'user-cashier') : undefined);
     const cashierName = options?.cashierName || (currentRole === 'cashier' ? (currentUser.name || 'Bilal Farooq') : undefined);
-    const isWalkIn = options?.isWalkIn ?? (currentRole === 'cashier' || Boolean(cashierId));
+    const isWalkIn = options?.isWalkIn ?? (currentRole === 'cashier' || currentRole === 'floor_staff' || Boolean(cashierId));
+    const isTableQr = options?.isTableQr ?? (type === 'dine_in' && Boolean(tableNumber) && !isWalkIn);
     const targetCustomerId = options?.customerId || (isStaffOrCashier ? 'cust-walkin' : (currentUser.id || 'user-guest'));
     const targetCustomerPhone = options?.customerPhone || (isStaffOrCashier ? '+92 300 0000000' : (currentUser.phone || '+92 300 0000000'));
     const targetCustomerEmail = options?.customerEmail || (!isStaffOrCashier ? currentUser.email : undefined);
@@ -2784,6 +2823,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       cashierId,
       cashierName,
       isWalkIn,
+      isTableQr,
       customerCoordinates: options?.customerCoordinates || customerCoordinates || undefined,
       assignedWaiterId,
       assignedWaiterName,
@@ -2928,6 +2968,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const sendOrderToKitchen = (orderId: string) => {
     let orderNum = '';
+    let targetBranchId = currentBranchId;
     inFlightStatusRef.current.set(orderId, {
       status: 'accepted',
       sentToKitchen: true,
@@ -2938,6 +2979,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = prev.map((ord) => {
         if (ord.id === orderId || ord.orderNumber === orderId) {
           orderNum = ord.orderNumber;
+          if (ord.branchId) targetBranchId = ord.branchId;
           inFlightStatusRef.current.set(ord.id, {
             status: 'accepted',
             sentToKitchen: true,
@@ -2973,8 +3015,25 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           status: 'accepted',
           sentToKitchen: true,
           sentToKitchenAt: new Date().toISOString(),
+          forwardToKitchenAt: null,
+          branchId: targetBranchId,
+          actorId: currentUser?.id || 'cashier',
+          actorName: currentUser?.name || 'Cashier',
+          actorRole: currentRole || 'cashier',
         }),
-      }).catch(() => { });
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            console.error('[sendOrderToKitchen] Server PATCH error:', res.status);
+          } else {
+            const data = await res.json().catch(() => ({}));
+            if (data?.order) {
+              store.dispatch(upsertReduxOrder(data.order));
+              broadcastStateMutation('SYNC_ORDERS', [data.order]);
+            }
+          }
+        })
+        .catch(() => { });
     } catch (e) { }
 
     addToast({
@@ -3244,12 +3303,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           actorId: currentUser?.id,
           actorName: currentUser?.name,
           actorRole: currentRole,
+          branchId: existingOrdForStatus?.branchId || currentBranchId,
           sentToKitchen: inKitchen ? true : undefined,
           sentToKitchenAt: inKitchen ? new Date().toISOString() : undefined,
+          forwardToKitchenAt: inKitchen ? null : undefined,
           preparationStartedAt: newStatus === 'preparing' ? new Date().toISOString() : undefined,
           completedAt: newStatus === 'completed' ? new Date().toISOString() : undefined,
         }),
-      }).catch(() => { });
+      })
+        .then(async (res) => {
+          if (!res.ok) {
+            console.error('[updateOrderStatus] Server PATCH error:', res.status);
+          } else {
+            const data = await res.json().catch(() => ({}));
+            if (data?.order) {
+              store.dispatch(upsertReduxOrder(data.order));
+              broadcastStateMutation('SYNC_ORDERS', [data.order]);
+            }
+          }
+        })
+        .catch(() => { });
     } catch (e) { }
 
     if (newStatus === 'completed' || newStatus === 'cancelled' || newStatus === 'delivered' || newStatus === 'taken') {

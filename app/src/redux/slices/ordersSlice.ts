@@ -127,6 +127,7 @@ export const ordersSlice = createSlice({
           assignedWaiterName: resolvedWaiterName,
           sentToKitchen: resolvedSentToKitchen,
           sentToKitchenAt: resolvedSentToKitchenAt,
+          forwardToKitchenAt: resolvedSentToKitchen ? undefined : inc.forwardToKitchenAt,
           preparationStartedAt: resolvedPrepStartedAt,
           completedAt: isDeliveryFinished ? (inc.completedAt || new Date().toISOString()) : resolvedCompletedAt,
           deliveredAt: isDeliveryFinished ? (inc.deliveredAt || new Date().toISOString()) : resolvedDeliveredAt,

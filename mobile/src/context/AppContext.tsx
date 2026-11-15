@@ -2241,6 +2241,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         ? Boolean((orderData as any).paymentCollected)
         : safePaymentStatus === 'paid';
 
+    const isOrderWalkIn = Boolean((orderData as any).isWalkIn);
+    const isOrderTableQr = (orderData as any).isTableQr !== undefined
+      ? Boolean((orderData as any).isTableQr)
+      : (orderData.type === 'dine_in' && Boolean(orderData.tableNumber) && !isOrderWalkIn);
+
     const newOrder: Order = {
       id,
       orderNumber,
@@ -2267,6 +2272,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       notes: orderData.notes || undefined,
       sentToKitchen: true,
       sentToKitchenAt: new Date().toISOString(),
+      isWalkIn: isOrderWalkIn,
+      isTableQr: isOrderTableQr,
       version: 1,
     };
 
@@ -2397,7 +2404,8 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       deliveryAddress: newOrder.deliveryAddress || null,
       customerCoordinates: newOrder.customerCoordinates || null,
       sentToKitchen: true, // Immediate kitchen queue visibility across web and mobile
-      isTableQr: Boolean(newOrder.tableNumber),
+      isTableQr: isOrderTableQr,
+      isWalkIn: isOrderWalkIn,
       version: 1,
     };
 

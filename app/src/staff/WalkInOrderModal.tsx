@@ -288,6 +288,9 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
       }
     }
 
+    // Dispatch directly to kitchen queue immediately (bypassing any hold timer)
+    sendOrderToKitchen(placed.id);
+
     addToast({
       type: 'success',
       title: 'Dispatched Directly to Kitchen 👨‍🍳',

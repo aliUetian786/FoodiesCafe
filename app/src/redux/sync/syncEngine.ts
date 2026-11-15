@@ -160,9 +160,22 @@ export async function runSync(options?: { full?: boolean; force?: boolean }): Pr
               : o;
           }
 
+          const existingRank = existing ? (STATUS_RANK[existing.status as OrderStatus] || 0) : 0;
+          const incomingRank = STATUS_RANK[o.status as OrderStatus] || 0;
+          const preserveStatus =
+            existing &&
+            existing.status !== 'cancelled' &&
+            o.status !== 'cancelled' &&
+            existingRank > incomingRank;
+          const resolvedStatus = isDeliveryFinished ? 'completed' : preserveStatus ? existing.status : o.status;
+          const resolvedSentToKitchen = existing ? (existing.sentToKitchen || o.sentToKitchen) : o.sentToKitchen;
+
           return {
             ...o,
-            status: isDeliveryFinished ? 'completed' : o.status,
+            status: resolvedStatus,
+            sentToKitchen: resolvedSentToKitchen,
+            sentToKitchenAt: o.sentToKitchenAt || existing.sentToKitchenAt,
+            preparationStartedAt: o.preparationStartedAt || existing.preparationStartedAt,
             riderStatus: isDeliveryFinished ? 'delivered' : (o.riderStatus || existing.riderStatus),
             paymentStatus: (isDeliveryFinished || isLocallyPaid) && o.paymentStatus !== 'refunded' ? 'paid' : o.paymentStatus,
             paymentCollected: isDeliveryFinished || isLocallyPaid || o.paymentCollected || o.paymentStatus === 'paid',

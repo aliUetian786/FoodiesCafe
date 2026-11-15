@@ -713,7 +713,7 @@ export const CashierScreen: React.FC = () => {
                     </div>
 
                     <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)' }}>
-                      Customer: <strong>{targetOrd?.customerName || 'Walk-in'}</strong> ({targetOrd?.customerPhone || 'N/A'})
+                      Customer: <strong>{targetOrd?.customerName || (targetOrd?.isWalkIn ? 'Walk-in' : 'Online Customer')}</strong> ({targetOrd?.customerPhone || 'N/A'})
                     </div>
 
                     <div style={{ fontSize: '12px', color: '#78350F', backgroundColor: '#FFFBEB', padding: '6px 10px', borderRadius: '4px' }}>

@@ -881,20 +881,34 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                         : '🛵 Delivery'}
                     </span>
 
-                    {/* Walk-in vs QR indicator */}
+                    {/* Channel badge: QR vs Walk-in vs Online */}
                     <span
                       style={{
                         fontSize: '9.5px',
                         fontWeight: 700,
-                        backgroundColor: ord.isTableQr ? '#FDF2F8' : 'var(--bg-card-subtle)',
-                        color: ord.isTableQr ? '#BE185D' : 'var(--text-muted)',
+                        backgroundColor: ord.isTableQr
+                          ? '#FDF2F8'
+                          : ord.isWalkIn
+                          ? '#F1F5F9'
+                          : '#EFF6FF',
+                        color: ord.isTableQr
+                          ? '#BE185D'
+                          : ord.isWalkIn
+                          ? '#475569'
+                          : '#1D4ED8',
                         padding: '1px 5px',
                         borderRadius: '3px',
-                        border: '1px solid var(--border-color)',
+                        border: `1px solid ${
+                          ord.isTableQr
+                            ? '#FBCFE8'
+                            : ord.isWalkIn
+                            ? '#CBD5E1'
+                            : '#BFDBFE'
+                        }`,
                         flexShrink: 0,
                       }}
                     >
-                      {ord.isTableQr ? '📱 QR' : '🚶 Walk-in'}
+                      {ord.isTableQr ? '📱 QR' : ord.isWalkIn ? '🚶 Walk-in' : '🌐 Online'}
                     </span>
                   </div>
 
@@ -1362,6 +1376,36 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                     }}
                     onClick={(e) => e.stopPropagation()}
                   >
+                    {/* Quick Send to Kitchen Button */}
+                    {!ord.sentToKitchen &&
+                      ord.status !== 'cancelled' &&
+                      ord.status !== 'completed' &&
+                      ord.status !== 'ready' &&
+                      ord.status !== 'delivered' &&
+                      ord.status !== 'served' && (
+                        <button
+                          type="button"
+                          onClick={() => sendOrderToKitchen(ord.id)}
+                          style={{
+                            padding: '3px 8px',
+                            borderRadius: '5px',
+                            border: '1px solid #86EFAC',
+                            backgroundColor: '#F0FDF4',
+                            color: '#15803D',
+                            fontSize: '11px',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '3px',
+                          }}
+                          title="Forward order directly to kitchen queue now"
+                        >
+                          <ChefHat size={11} />
+                          <span>To Kitchen</span>
+                        </button>
+                      )}
+
                     {/* Quick Notify Customer & Concerned Staff Button */}
                     {ord.status !== 'cancelled' && (
                       <button
@@ -1512,6 +1556,37 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                 >
                   {selectedOrderDetail.type.toUpperCase()}
                 </span>
+                <span
+                  style={{
+                    fontSize: '10.5px',
+                    fontWeight: 800,
+                    padding: '2px 8px',
+                    borderRadius: '4px',
+                    backgroundColor: selectedOrderDetail.isTableQr
+                      ? '#FDF2F8'
+                      : selectedOrderDetail.isWalkIn
+                      ? '#F1F5F9'
+                      : '#EFF6FF',
+                    color: selectedOrderDetail.isTableQr
+                      ? '#BE185D'
+                      : selectedOrderDetail.isWalkIn
+                      ? '#475569'
+                      : '#1D4ED8',
+                    border: `1px solid ${
+                      selectedOrderDetail.isTableQr
+                        ? '#FBCFE8'
+                        : selectedOrderDetail.isWalkIn
+                        ? '#CBD5E1'
+                        : '#BFDBFE'
+                    }`,
+                  }}
+                >
+                  {selectedOrderDetail.isTableQr
+                    ? '📱 Table QR'
+                    : selectedOrderDetail.isWalkIn
+                    ? '🚶 Walk-in Order'
+                    : '🌐 Online Order'}
+                </span>
               </div>
 
               <button
@@ -1563,7 +1638,8 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                 <div>
                   <div style={{ color: 'var(--text-muted)', fontWeight: 600 }}>Customer:</div>
                   <div style={{ fontWeight: 800, color: 'var(--text-main)', fontSize: '13px' }}>
-                    {selectedOrderDetail.customerName || 'Walk-in Guest'}
+                    {selectedOrderDetail.customerName ||
+                      (selectedOrderDetail.isWalkIn ? 'Walk-in Guest' : 'Online Customer')}
                   </div>
                   {selectedOrderDetail.customerPhone && (
                     <div style={{ color: 'var(--text-secondary)', fontSize: '11.5px', marginTop: '2px' }}>
@@ -1733,8 +1809,41 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                 )}
               </div>
 
-              {/* Right actions: Notify, Takeaway collection, Table Free & Print Slip */}
+              {/* Right actions: Kitchen Dispatch, Notify, Takeaway collection, Table Free & Print Slip */}
               <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                {/* Direct Action: Forward to Kitchen Now */}
+                {!selectedOrderDetail.sentToKitchen &&
+                  selectedOrderDetail.status !== 'cancelled' &&
+                  selectedOrderDetail.status !== 'completed' &&
+                  selectedOrderDetail.status !== 'ready' &&
+                  selectedOrderDetail.status !== 'delivered' &&
+                  selectedOrderDetail.status !== 'served' && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        sendOrderToKitchen(selectedOrderDetail.id);
+                        setSelectedOrderDetail(null);
+                      }}
+                      style={{
+                        padding: '8px 14px',
+                        borderRadius: 'var(--radius-md)',
+                        backgroundColor: '#DCFCE7',
+                        border: '1.5px solid #86EFAC',
+                        color: '#15803D',
+                        fontWeight: 800,
+                        fontSize: '12px',
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        boxShadow: '0 1px 3px rgba(22, 163, 74, 0.15)',
+                      }}
+                    >
+                      <ChefHat size={14} />
+                      <span>Send to Kitchen 👨‍🍳</span>
+                    </button>
+                  )}
+
                 {selectedOrderDetail.status !== 'cancelled' && (
                   <button
                     type="button"

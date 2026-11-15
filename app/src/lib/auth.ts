@@ -171,23 +171,21 @@ export function getAuthFromRequest(request: Request, body?: any): AuthContext {
     }
   }
 
-  // Development & local fallback: allow staff role header if valid staff role is present
-  if (process.env.NODE_ENV !== 'production') {
-    const devRole = (request.headers.get('x-foodies-staff-role') || body?.actorRole || body?.role) as StaffOrCustomerRole | null;
-    const devUserId = request.headers.get('x-foodies-user-id') || body?.actorId || body?.userId;
-    const devBranch = request.headers.get('x-foodies-branch-id') || body?.branchId;
-    if (
-      devRole &&
-      ['platform_owner', 'branch_manager', 'cashier', 'kitchen_staff', 'floor_staff', 'delivery_staff'].includes(devRole)
-    ) {
-      return {
-        userId: String(devUserId || `staff-${devRole}`),
-        userName: body?.actorName || devRole,
-        role: devRole,
-        branchId: devBranch ? normalizeBranchId(devBranch) : undefined,
-        authenticated: true,
-      };
-    }
+  // Staff role header fallback: allow staff role header if valid staff role is present
+  const clientStaffRole = (request.headers.get('x-foodies-staff-role') || body?.actorRole || body?.role) as StaffOrCustomerRole | null;
+  const clientStaffUserId = request.headers.get('x-foodies-user-id') || body?.actorId || body?.userId;
+  const clientStaffBranch = request.headers.get('x-foodies-branch-id') || body?.branchId;
+  if (
+    clientStaffRole &&
+    ['platform_owner', 'branch_manager', 'cashier', 'kitchen_staff', 'floor_staff', 'delivery_staff'].includes(clientStaffRole)
+  ) {
+    return {
+      userId: String(clientStaffUserId || `staff-${clientStaffRole}`),
+      userName: body?.actorName || clientStaffRole,
+      role: clientStaffRole,
+      branchId: clientStaffBranch ? normalizeBranchId(clientStaffBranch) : undefined,
+      authenticated: true,
+    };
   }
 
   // Unauthenticated caller: strictly role 'customer' with no staff privileges
