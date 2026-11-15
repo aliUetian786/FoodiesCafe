@@ -1,5 +1,5 @@
 import { store } from '../store';
-import { setOrders, upsertOrder } from '../slices/ordersSlice';
+import { setOrders, upsertOrder, mergeSingleOrderMonotonically } from '../slices/ordersSlice';
 import {
   setTables,
   setShifts,
@@ -17,7 +17,32 @@ import {
   addNotificationInStore,
 } from '../slices/cafeSlice';
 import { setCurrentRole, setCurrentUser, addToast } from '../slices/uiSlice';
-import { normalizeBranchId, STATUS_RANK, OrderStatus } from '@/types/cafe';
+import { normalizeBranchId, STATUS_RANK, OrderStatus, Order } from '@/types/cafe';
+
+const selfHealCooldown = new Map<string, number>();
+
+function buildSyncHeaders(extra?: Record<string, string>): Record<string, string> {
+  const headers: Record<string, string> = { ...(extra || {}) };
+  if (typeof window === 'undefined') return headers;
+  try {
+    const state = store.getState();
+    const role = state.ui.currentRole || 'customer';
+    const user = state.ui.currentUser;
+    const branchId = state.cafe.currentBranchId;
+    const sessionToken =
+      localStorage.getItem('foodies_staff_session') ||
+      localStorage.getItem('foodies_customer_session');
+    if (sessionToken) {
+      headers['Authorization'] = `Bearer ${sessionToken}`;
+    }
+    if (role && role !== 'customer') {
+      headers['x-foodies-staff-role'] = role;
+      if (user?.id) headers['x-foodies-user-id'] = user.id;
+      if (branchId) headers['x-foodies-branch-id'] = branchId;
+    }
+  } catch { }
+  return headers;
+}
 
 let isSyncing = false;
 let syncTimer: any = null;
@@ -94,13 +119,7 @@ export async function runSync(options?: { full?: boolean; force?: boolean }): Pr
     const sinceParam = !options?.force && lastSyncCursor ? `&since=${encodeURIComponent(lastSyncCursor)}` : '';
     const url = `/api/sync?scope=${scopeParam}&role=${encodeURIComponent(currentRole)}&branchId=${encodeURIComponent(branchId)}&older=${olderParam}${custIdParam}${custPhoneParam}${orderIdsParam}${sinceParam}`;
 
-    const headers: Record<string, string> = { 'Cache-Control': 'no-cache' };
-    const sessionToken =
-      localStorage.getItem('foodies_staff_session') ||
-      localStorage.getItem('foodies_customer_session');
-    if (sessionToken) {
-      headers['Authorization'] = `Bearer ${sessionToken}`;
-    }
+    const headers = buildSyncHeaders({ 'Cache-Control': 'no-cache' });
     if (!options?.force && !shouldFullSync && lastEtag) {
       headers['If-None-Match'] = lastEtag;
     }
@@ -132,125 +151,161 @@ export async function runSync(options?: { full?: boolean; force?: boolean }): Pr
 
       if (Array.isArray(data.orders)) {
         const existingOrders = store.getState().orders.orders;
-        const byId = new Map<string, any>();
-        existingOrders.forEach((o: any) => {
-          if (o.id) byId.set(o.id, o);
-          if (o.orderNumber) byId.set(o.orderNumber, o);
-        });
+        const byId = new Map<string, Order>();
+        const uniqueLocal = new Map<string, Order>();
 
-        const sanitizeOrder = (o: any) => {
-          const existing = byId.get(o.id) || (o.orderNumber ? byId.get(o.orderNumber) : undefined);
-          const isLocallyPaid = existing ? (existing.paymentStatus === 'paid' || existing.paymentCollected === true) : Boolean(o.paymentStatus === 'paid' || o.paymentCollected === true);
-          const isPaid = isLocallyPaid || o.paymentStatus === 'paid' || Boolean(o.paymentCollected);
-          const existingStatus = existing?.status as string | undefined;
-          const oStatus = o.status as string;
-
-          const isDeliveryFinished =
-            (o.type === 'delivery' || existing?.type === 'delivery') &&
-            isPaid &&
-            (oStatus === 'delivered' || oStatus === 'completed' || existingStatus === 'completed' || o.riderStatus === 'delivered' || existing?.riderStatus === 'delivered');
-
-          const isDineInFinished =
-            (o.type === 'dine_in' || existing?.type === 'dine_in') &&
-            isPaid &&
-            (oStatus === 'served' || oStatus === 'completed' || existingStatus === 'served' || existingStatus === 'completed');
-
-          const isTakeawayFinished =
-            (o.type === 'takeaway' || existing?.type === 'takeaway') &&
-            isPaid &&
-            (oStatus === 'taken' || oStatus === 'completed' || existingStatus === 'taken' || existingStatus === 'completed');
-
-          const isOrderFinished =
-            oStatus === 'completed' ||
-            existingStatus === 'completed' ||
-            isDeliveryFinished ||
-            isDineInFinished ||
-            isTakeawayFinished;
-
-          if (!existing) {
-            return isOrderFinished
-              ? {
-                ...o,
-                status: 'completed',
-                riderStatus: o.type === 'delivery' ? 'delivered' : o.riderStatus,
-                paymentStatus: 'paid',
-                paymentCollected: true,
-                completedAt: o.completedAt || new Date().toISOString(),
-                deliveredAt: o.deliveredAt || new Date().toISOString(),
-              }
-              : o;
+        const registerLocalOrder = (ord: Order) => {
+          if (!ord || !ord.id) return;
+          if (
+            String(ord.id).startsWith('ord-seed-') ||
+            ['FC-6744', 'FC-7819', 'FC-8812', 'FC-9021'].includes(ord.orderNumber)
+          ) {
+            return;
           }
-
-          const existingRank = existing ? (STATUS_RANK[existing.status as OrderStatus] || 0) : 0;
-          const incomingRank = STATUS_RANK[o.status as OrderStatus] || 0;
-          const preserveStatus =
-            existing &&
-            existing.status !== 'cancelled' &&
-            o.status !== 'cancelled' &&
-            existingRank > incomingRank;
-          const resolvedStatus = isOrderFinished ? 'completed' : preserveStatus ? existing.status : o.status;
-          const resolvedSentToKitchen = existing ? (existing.sentToKitchen || o.sentToKitchen) : o.sentToKitchen;
-
-          return {
-            ...o,
-            status: resolvedStatus,
-            sentToKitchen: resolvedSentToKitchen,
-            sentToKitchenAt: o.sentToKitchenAt || existing.sentToKitchenAt,
-            preparationStartedAt: o.preparationStartedAt || existing.preparationStartedAt,
-            riderStatus: isOrderFinished && o.type === 'delivery' ? 'delivered' : (o.riderStatus || existing.riderStatus),
-            paymentStatus: (isOrderFinished || isLocallyPaid) && o.paymentStatus !== 'refunded' ? 'paid' : o.paymentStatus,
-            paymentCollected: isOrderFinished || isLocallyPaid || o.paymentCollected || o.paymentStatus === 'paid',
-            completedAt: isOrderFinished ? (o.completedAt || existing.completedAt || new Date().toISOString()) : (o.completedAt || existing.completedAt),
-            deliveredAt: isOrderFinished ? (o.deliveredAt || existing.deliveredAt || new Date().toISOString()) : (o.deliveredAt || existing.deliveredAt),
-            cashierId: existing.cashierId || o.cashierId,
-            cashierName: existing.cashierName || o.cashierName,
-            shiftId: existing.shiftId || o.shiftId,
-            assignedWaiterId: existing.assignedWaiterId || o.assignedWaiterId,
-            assignedWaiterName: existing.assignedWaiterName || o.assignedWaiterName,
-          };
+          const prev = byId.get(ord.id) || (ord.orderNumber ? byId.get(ord.orderNumber) : undefined);
+          const merged = mergeSingleOrderMonotonically(prev, ord);
+          byId.set(merged.id, merged);
+          if (merged.orderNumber) byId.set(merged.orderNumber, merged);
+          uniqueLocal.set(merged.id, merged);
         };
 
-        const sanitizedPayload = data.orders.map(sanitizeOrder);
+        existingOrders.forEach(registerLocalOrder);
+        if (typeof window !== 'undefined') {
+          try {
+            const savedLive = localStorage.getItem('foodies_orders_live');
+            if (savedLive) {
+              const parsedLive = JSON.parse(savedLive);
+              if (Array.isArray(parsedLive)) parsedLive.forEach(registerLocalOrder);
+            }
+          } catch { }
+        }
 
-        // For customers, merge with any locally placed guest orders stored in localStorage
+        const serverByKey = new Map<string, Order>();
+        data.orders.forEach((o: Order) => {
+          if (o?.id) serverByKey.set(o.id, o);
+          if (o?.orderNumber) serverByKey.set(o.orderNumber, o);
+        });
+
+        const sanitizedPayload: Order[] = data.orders.map((o: Order) => {
+          const existing = byId.get(o.id) || (o.orderNumber ? byId.get(o.orderNumber) : undefined);
+          return mergeSingleOrderMonotonically(existing, o);
+        });
+
+        // Reconcile any local orders missing from server response (e.g. cold Vercel instance or offline placement)
+        const coveredKeys = new Set<string>();
+        sanitizedPayload.forEach((o) => {
+          if (o.id) coveredKeys.add(o.id);
+          if (o.orderNumber) coveredKeys.add(o.orderNumber);
+        });
+        const finalOrders: Order[] = [...sanitizedPayload];
+        uniqueLocal.forEach((localOrd) => {
+          if (
+            !coveredKeys.has(localOrd.id) &&
+            (!localOrd.orderNumber || !coveredKeys.has(localOrd.orderNumber))
+          ) {
+            coveredKeys.add(localOrd.id);
+            if (localOrd.orderNumber) coveredKeys.add(localOrd.orderNumber);
+            finalOrders.push(localOrd);
+          }
+        });
+        finalOrders.sort(
+          (a, b) => (new Date(b.createdAt).getTime() || 0) - (new Date(a.createdAt).getTime() || 0)
+        );
+        store.dispatch(setOrders(finalOrders));
+
+        // Background self-healing: push missing or out-of-date local order state to server instances
+        const nowTs = Date.now();
+        for (const [k, ts] of selfHealCooldown.entries()) {
+          if (nowTs - ts > 60000) selfHealCooldown.delete(k);
+        }
+        let myOrderIdsSet = new Set<string>();
         if (currentRole === 'customer' && typeof window !== 'undefined') {
           try {
-            const customerMap = new Map<string, any>();
-            existingOrders.forEach((o: any) => customerMap.set(o.id, o));
-            sanitizedPayload.forEach((o: any) => {
-              const existing = customerMap.get(o.id);
-              if (existing) {
-                const existingRank = STATUS_RANK[existing.status as OrderStatus] || 0;
-                const incomingRank = STATUS_RANK[o.status as OrderStatus] || 0;
-                const preserveLocal =
-                  existing.status !== 'cancelled' &&
-                  o.status !== 'cancelled' &&
-                  existingRank > incomingRank;
-                customerMap.set(o.id, {
-                  ...o,
-                  status: preserveLocal ? existing.status : o.status,
-                  sentToKitchen: existing.sentToKitchen || o.sentToKitchen,
-                  sentToKitchenAt: o.sentToKitchenAt || existing.sentToKitchenAt,
-                  preparationStartedAt: o.preparationStartedAt || existing.preparationStartedAt,
-                  completedAt: o.completedAt || existing.completedAt,
-                });
-              } else {
-                customerMap.set(o.id, o);
-              }
-            });
-            store.dispatch(
-              setOrders(
-                Array.from(customerMap.values()).sort(
-                  (a, b) => (new Date(b.createdAt).getTime() || 0) - (new Date(a.createdAt).getTime() || 0)
-                )
-              )
-            );
-          } catch {
-            store.dispatch(setOrders(sanitizedPayload));
-          }
-        } else {
-          store.dispatch(setOrders(sanitizedPayload));
+            const rawIds = JSON.parse(localStorage.getItem('foodies_customer_order_ids') || '[]');
+            if (Array.isArray(rawIds)) myOrderIdsSet = new Set(rawIds.map(String));
+          } catch { }
         }
+
+        const normSyncBranch = normalizeBranchId(branchId);
+        uniqueLocal.forEach((localOrd) => {
+          const createdMs = new Date(localOrd.createdAt).getTime();
+          if (isNaN(createdMs) || nowTs - createdMs > 12 * 60 * 60 * 1000 || nowTs - createdMs < 3500) {
+            return;
+          }
+          const lastHeal = selfHealCooldown.get(localOrd.id) || 0;
+          if (nowTs - lastHeal < 10000) return;
+
+          if (currentRole !== 'customer') {
+            if (branchId !== 'all' && normalizeBranchId(localOrd.branchId) !== normSyncBranch) {
+              return;
+            }
+          } else {
+            const isMine =
+              (currentUser?.id && currentUser.id !== 'user-guest' && localOrd.customerId === currentUser.id) ||
+              myOrderIdsSet.has(localOrd.id) ||
+              (localOrd.orderNumber && myOrderIdsSet.has(localOrd.orderNumber));
+            if (!isMine) return;
+          }
+
+          const serverOrd =
+            serverByKey.get(localOrd.id) ||
+            (localOrd.orderNumber ? serverByKey.get(localOrd.orderNumber) : undefined);
+
+          if (!serverOrd) {
+            if (data.orders.length < 200 || nowTs - createdMs < 30 * 60 * 1000) {
+              selfHealCooldown.set(localOrd.id, nowTs);
+              const idemKey = `idem-${localOrd.id}-${localOrd.orderNumber}`;
+              fetch('/api/orders', {
+                method: 'POST',
+                headers: buildSyncHeaders({
+                  'Content-Type': 'application/json',
+                  'Idempotency-Key': idemKey,
+                }),
+                body: JSON.stringify({ ...localOrd, idempotencyKey: idemKey }),
+              }).catch(() => { });
+            }
+            return;
+          }
+
+          if (currentRole !== 'customer') {
+            const localRank = STATUS_RANK[localOrd.status as OrderStatus] || 0;
+            const serverRank = STATUS_RANK[serverOrd.status as OrderStatus] || 0;
+            const localPaid = localOrd.paymentStatus === 'paid' || Boolean(localOrd.paymentCollected);
+            const serverPaid = serverOrd.paymentStatus === 'paid' || Boolean(serverOrd.paymentCollected);
+
+            const needsStatusSync =
+              localOrd.status === 'cancelled'
+                ? serverOrd.status !== 'cancelled'
+                : serverOrd.status !== 'cancelled' && localRank > serverRank;
+            const needsPaymentSync = localPaid && !serverPaid && serverOrd.paymentStatus !== 'refunded';
+            const needsKitchenSync = Boolean(localOrd.sentToKitchen) && !serverOrd.sentToKitchen;
+
+            if (needsStatusSync || needsPaymentSync || needsKitchenSync) {
+              selfHealCooldown.set(localOrd.id, nowTs);
+              fetch('/api/orders', {
+                method: 'PATCH',
+                headers: buildSyncHeaders({ 'Content-Type': 'application/json' }),
+                body: JSON.stringify({
+                  orderId: localOrd.id,
+                  type: localOrd.type,
+                  status: localOrd.status,
+                  paymentStatus: localOrd.paymentStatus,
+                  paymentCollected: localOrd.paymentCollected,
+                  assignedWaiterId: localOrd.assignedWaiterId,
+                  assignedWaiterName: localOrd.assignedWaiterName,
+                  assignedRiderId: localOrd.assignedRiderId,
+                  assignedRiderName: localOrd.assignedRiderName,
+                  riderStatus: localOrd.riderStatus,
+                  sentToKitchen: localOrd.sentToKitchen,
+                  actorId: currentUser?.id,
+                  actorName: currentUser?.name,
+                  actorRole: currentRole,
+                  orderSnapshot: localOrd,
+                }),
+              }).catch(() => { });
+            }
+          }
+        });
       }
       if (Array.isArray(data.tables)) {
         store.dispatch(setTables(data.tables));

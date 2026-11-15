@@ -75,6 +75,7 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
     users,
     currentUser,
     fetchOlderOrders,
+    hasLoadedOlderOrders,
     isFetchingOlderOrders,
     filterOrdersToToday,
     addTable,
@@ -117,7 +118,9 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
   useEffect(() => {
     if (viewMode === 'server_orders') {
       if (dateScope === 'today') {
-        filterOrdersToToday();
+        if (hasLoadedOlderOrders) {
+          filterOrdersToToday();
+        }
       } else {
         fetchOlderOrders(
           currentBranch.id,

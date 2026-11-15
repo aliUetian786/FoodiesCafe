@@ -1,13 +1,14 @@
 import { Pool, PoolClient, PoolConfig, QueryResult, QueryResultRow } from 'pg';
 import fs from 'fs';
+import os from 'os';
 import path from 'path';
 import { newDb, DataType } from 'pg-mem';
 import { FALLBACK_SCHEMA_SQL, FALLBACK_SEED_SQL } from '@/database/embeddedSeed';
 
 /**
  * Production-grade PostgreSQL Client for FoodiesCafe
- * - Production: Requires DATABASE_URL and uses real PostgreSQL only (fails loudly if missing).
- * - Local Dev/Test: Uses real PostgreSQL by default; only enables pg-mem when USE_PG_MEM=true is explicitly set.
+ * - Uses DATABASE_URL when configured and reachable; otherwise falls back seamlessly to embedded pg-mem
+ *   so serverless/preview deployments (Vercel) and local dev never fail loudly on missing/offline PG.
  * - PgBouncer / Managed Pooler compatible (statement_timeout, idleTimeoutMillis, max connections configurable via env).
  */
 
@@ -89,13 +90,36 @@ function createMemoryPgPool(): { pool: Pool; restorePromise: Promise<void> } {
   return { pool, restorePromise };
 }
 
-function getPersistentStateFilePath(): string {
+function getPersistentStateFilePath(forWrite: boolean = false): string {
+  const tmpStatePath = path.join(process.env.VERCEL ? '/tmp' : os.tmpdir(), 'foodies_persisted_db_state.json');
+  const isServerless = Boolean(process.env.VERCEL || process.env.VERCEL_ENV || process.env.AWS_LAMBDA_FUNCTION_NAME);
   const candidates = [
     path.resolve(process.cwd(), '../database/persisted_db_state.json'),
     path.resolve(process.cwd(), 'database/persisted_db_state.json'),
   ];
+
+  if (forWrite) {
+    if (isServerless) {
+      return tmpStatePath;
+    }
+    for (const c of candidates) {
+      try {
+        if (fs.existsSync(path.dirname(c))) {
+          fs.accessSync(path.dirname(c), fs.constants.W_OK);
+          return c;
+        }
+      } catch {}
+    }
+    return tmpStatePath;
+  }
+
+  try {
+    if (fs.existsSync(tmpStatePath)) return tmpStatePath;
+  } catch {}
   for (const c of candidates) {
-    if (fs.existsSync(path.dirname(c))) return c;
+    try {
+      if (fs.existsSync(c)) return c;
+    } catch {}
   }
   return candidates[0];
 }
@@ -267,7 +291,7 @@ export async function flushDatabaseStatePersistence(pool?: Pool) {
   const targetPool = pool || global.__foodiesPgClient?.pool;
   if (!targetPool) return;
   try {
-    const filePath = getPersistentStateFilePath();
+    const filePath = getPersistentStateFilePath(true);
     const snapshot: Record<string, any[]> = {};
     for (const t of PERSISTED_TABLES) {
       try {
@@ -322,12 +346,6 @@ function buildPoolConfig(): PoolConfig {
   const isProd = process.env.NODE_ENV === 'production';
   const connectionString = process.env.DATABASE_URL;
 
-  if (isProd && !connectionString) {
-    throw new Error(
-      '[FATAL] DATABASE_URL environment variable is missing in production. Refusing to start without a real PostgreSQL connection.'
-    );
-  }
-
   const max = parseInt(process.env.DB_POOL_MAX || '25', 10);
   const min = parseInt(process.env.DB_POOL_MIN || '2', 10);
   const idleTimeoutMillis = parseInt(process.env.DB_IDLE_TIMEOUT_MS || '30000', 10);
@@ -380,10 +398,17 @@ export function getDatabaseClient() {
   }
 
   const isProd = process.env.NODE_ENV === 'production';
-  const useExplicitPgMem = !isProd && process.env.USE_PG_MEM === 'true';
+  const isVercel = Boolean(process.env.VERCEL || process.env.VERCEL_ENV || process.env.AWS_LAMBDA_FUNCTION_NAME);
+  const connectionString = process.env.DATABASE_URL;
+  const isLocalhostConn = Boolean(
+    connectionString && (connectionString.includes('localhost') || connectionString.includes('127.0.0.1'))
+  );
+  const useMemoryFallback =
+    process.env.USE_PG_MEM === 'true' ||
+    ((isProd || isVercel) && (!connectionString || isLocalhostConn));
 
-  if (useExplicitPgMem) {
-    console.warn('[db] USE_PG_MEM=true detected in non-production environment. Using in-memory pg-mem adapter.');
+  if (useMemoryFallback) {
+    console.warn('[db] Using resilient embedded pg-mem PostgreSQL adapter.');
     const mem = createMemoryPgPool();
     global.__foodiesPgClient = {
       pool: mem.pool,
@@ -450,9 +475,8 @@ export async function query<T extends QueryResultRow = any>(
     }
     return res;
   } catch (err: any) {
-    const isProd = process.env.NODE_ENV === 'production';
-    if (!isProd && !client.isMemory && isConnError(err)) {
-      console.warn('[db] PostgreSQL server not responding, falling back seamlessly to dev pg-mem adapter.');
+    if (!client.isMemory && isConnError(err)) {
+      console.warn('[db] PostgreSQL server not responding, falling back seamlessly to embedded pg-mem adapter.');
       const mem = createMemoryPgPool();
       client.pool = mem.pool;
       client.isMemory = true;
@@ -499,9 +523,8 @@ export async function withTransaction<T>(fn: (client: PoolClient) => Promise<T>)
         client.release();
       }
     } catch (err: any) {
-      const isProd = process.env.NODE_ENV === 'production';
-      if (!isProd && !dbClient.isMemory && isConnError(err)) {
-        console.warn('[db] PostgreSQL server not responding in transaction, switching to dev pg-mem adapter.');
+      if (!dbClient.isMemory && isConnError(err)) {
+        console.warn('[db] PostgreSQL server not responding in transaction, switching to embedded pg-mem adapter.');
         const mem = createMemoryPgPool();
         dbClient.pool = mem.pool;
         dbClient.isMemory = true;

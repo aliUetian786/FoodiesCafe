@@ -46,6 +46,7 @@ import {
   upsertOrder as upsertReduxOrder,
   updateOrderStatusInStore as updateReduxOrderStatus,
   filterOrdersToToday as filterReduxOrdersToToday,
+  mergeSingleOrderMonotonically,
 } from '@/redux/slices/ordersSlice';
 import {
   setCart as setReduxCart,
@@ -137,6 +138,126 @@ export function isOrderDayEnded(createdAtStr?: string): boolean {
     (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() < now.getDate());
   const isOlder24h = now.getTime() - d.getTime() > 24 * 60 * 60 * 1000;
   return isPastDay || isOlder24h;
+}
+
+type InFlightOrderEntry = {
+  status?: OrderStatus;
+  paymentStatus?: PaymentStatus;
+  paymentCollected?: boolean;
+  sentToKitchen?: boolean;
+  assignedRiderId?: string;
+  assignedRiderName?: string;
+  riderStatus?: 'assigned' | 'accepted' | 'picked_up' | 'en_route' | 'delivered';
+  assignedWaiterId?: string;
+  assignedWaiterName?: string;
+  timestamp: number;
+};
+
+function mergeOrderListsMonotonically(
+  prev: Order[],
+  incoming: Order[],
+  inFlightMap?: Map<string, InFlightOrderEntry>,
+  preserveMissingFromPrev: boolean = true
+): Order[] {
+  const now = Date.now();
+  const prevByKey = new Map<string, Order>();
+  prev.forEach((o) => {
+    if (o.id) prevByKey.set(o.id, o);
+    if (o.orderNumber) prevByKey.set(o.orderNumber, o);
+  });
+
+  const applyInFlightOverlay = (
+    base: Order | undefined,
+    fallback: Order | undefined,
+    keyId: string,
+    keyNum?: string
+  ): Order | undefined => {
+    const seed = base || fallback;
+    if (!inFlightMap || !seed) return base;
+    const inFlight = inFlightMap.get(keyId) || (keyNum ? inFlightMap.get(keyNum) : undefined);
+    if (!inFlight || now - inFlight.timestamp >= 20000) return base;
+    const inFlightPatch: Order = {
+      ...seed,
+      ...(inFlight.status ? { status: inFlight.status } : {}),
+      ...(inFlight.paymentStatus ? { paymentStatus: inFlight.paymentStatus } : {}),
+      ...(inFlight.paymentCollected !== undefined ? { paymentCollected: inFlight.paymentCollected } : {}),
+      ...(inFlight.sentToKitchen !== undefined ? { sentToKitchen: inFlight.sentToKitchen } : {}),
+      ...(inFlight.assignedRiderId !== undefined ? { assignedRiderId: inFlight.assignedRiderId } : {}),
+      ...(inFlight.assignedRiderName !== undefined ? { assignedRiderName: inFlight.assignedRiderName } : {}),
+      ...(inFlight.riderStatus !== undefined ? { riderStatus: inFlight.riderStatus } : {}),
+      ...(inFlight.assignedWaiterId !== undefined ? { assignedWaiterId: inFlight.assignedWaiterId } : {}),
+      ...(inFlight.assignedWaiterName !== undefined ? { assignedWaiterName: inFlight.assignedWaiterName } : {}),
+    };
+    return mergeSingleOrderMonotonically(base, inFlightPatch);
+  };
+
+  const resultMap = new Map<string, Order>();
+
+  if (preserveMissingFromPrev) {
+    prev.forEach((p) => {
+      if (!p || !p.id) return;
+      if (
+        String(p.id).startsWith('ord-seed-') ||
+        ['FC-6744', 'FC-7819', 'FC-8812', 'FC-9021'].includes(p.orderNumber)
+      ) {
+        return;
+      }
+      const protectedPrev = applyInFlightOverlay(p, undefined, p.id, p.orderNumber) || p;
+      resultMap.set(protectedPrev.id, protectedPrev);
+    });
+  }
+
+  incoming.forEach((inc) => {
+    if (!inc || !inc.id) return;
+    if (
+      String(inc.id).startsWith('ord-seed-') ||
+      ['FC-6744', 'FC-7819', 'FC-8812', 'FC-9021'].includes(inc.orderNumber)
+    ) {
+      return;
+    }
+    const existingRaw = prevByKey.get(inc.id) || (inc.orderNumber ? prevByKey.get(inc.orderNumber) : undefined);
+    const protectedExisting = applyInFlightOverlay(existingRaw, inc, inc.id, inc.orderNumber);
+    const merged = mergeSingleOrderMonotonically(protectedExisting, inc);
+
+    if (existingRaw && existingRaw.id !== merged.id) {
+      resultMap.delete(existingRaw.id);
+    }
+    resultMap.set(merged.id, merged);
+  });
+
+  return Array.from(resultMap.values()).sort(
+    (a, b) => (new Date(b.createdAt).getTime() || 0) - (new Date(a.createdAt).getTime() || 0)
+  );
+}
+
+function areOrderListsEquivalent(a: Order[], b: Order[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    const x = a[i];
+    const y = b[i];
+    if (x === y) continue;
+    if (
+      x.id !== y.id ||
+      x.status !== y.status ||
+      x.paymentStatus !== y.paymentStatus ||
+      Boolean(x.paymentCollected) !== Boolean(y.paymentCollected) ||
+      Boolean(x.sentToKitchen) !== Boolean(y.sentToKitchen) ||
+      (x.forwardToKitchenAt || '') !== (y.forwardToKitchenAt || '') ||
+      Number(x.total || 0) !== Number(y.total || 0) ||
+      (x.version || 1) !== (y.version || 1) ||
+      (x.assignedRiderId || '') !== (y.assignedRiderId || '') ||
+      (x.riderStatus || '') !== (y.riderStatus || '') ||
+      (x.assignedWaiterId || '') !== (y.assignedWaiterId || '') ||
+      (x.cashierId || '') !== (y.cashierId || '') ||
+      (x.tableNumber || '') !== (y.tableNumber || '') ||
+      (x.notes || '') !== (y.notes || '') ||
+      (x.items !== y.items && JSON.stringify(x.items) !== JSON.stringify(y.items))
+    ) {
+      return false;
+    }
+  }
+  return true;
 }
 
 interface Toast {
@@ -1350,8 +1471,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const broadcastOrders = (ordersList: Order[]) => {
     if (typeof window === 'undefined') return;
     try {
-      localStorage.setItem('foodies_orders_live', JSON.stringify(ordersList));
-      store.dispatch(setReduxOrders(ordersList));
+      const nextJson = JSON.stringify(ordersList);
+      if (localStorage.getItem('foodies_orders_live') !== nextJson) {
+        localStorage.setItem('foodies_orders_live', nextJson);
+      }
+      queueMicrotask(() => store.dispatch(setReduxOrders(ordersList)));
       // NOTE: Do not broadcastStateMutation('SYNC_ORDERS') here.
       // Remote tabs already receive the live payload instantly via foodies_system_live_sync below.
       // Calling broadcastStateMutation triggers premature runSync on /api/sync before asynchronous PATCH commits.
@@ -1863,96 +1987,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
         if (event.data?.type === 'SYNC_ORDERS' && Array.isArray(event.data.payload)) {
           setOrders((prev) => {
-            const map = new Map<string, Order>();
-            prev.forEach((o) => map.set(o.id, o));
-            const now = Date.now();
-            event.data.payload.forEach((inc: Order) => {
-              const existing = map.get(inc.id) || (inc.orderNumber ? map.get(inc.orderNumber) : undefined);
-              const inFlight = inFlightStatusRef.current.get(inc.id) || (inc.orderNumber ? inFlightStatusRef.current.get(inc.orderNumber) : undefined);
-              const isRecentInFlight = Boolean(inFlight && (now - inFlight.timestamp < 20000));
-
-              const isLocallyPaid =
-                Boolean(existing && (existing.paymentStatus === 'paid' || existing.paymentCollected === true)) ||
-                Boolean(inFlight && (inFlight.paymentStatus === 'paid' || inFlight.paymentCollected === true)) ||
-                inc.paymentStatus === 'paid' ||
-                Boolean(inc.paymentCollected);
-
-              const existingStatus = existing?.status as string | undefined;
-              const incStatus = inc.status as string;
-              const inFlightStatus = inFlight?.status as string | undefined;
-
-              const isDeliveryFinished =
-                (inc.type === 'delivery' || existing?.type === 'delivery') &&
-                isLocallyPaid &&
-                (incStatus === 'delivered' || incStatus === 'completed' || existingStatus === 'completed' || inc.riderStatus === 'delivered' || inFlight?.riderStatus === 'delivered');
-
-              const isDineInFinished =
-                (inc.type === 'dine_in' || existing?.type === 'dine_in') &&
-                isLocallyPaid &&
-                (incStatus === 'served' || incStatus === 'completed' || existingStatus === 'served' || existingStatus === 'completed');
-
-              const isTakeawayFinished =
-                (inc.type === 'takeaway' || existing?.type === 'takeaway') &&
-                isLocallyPaid &&
-                (incStatus === 'taken' || incStatus === 'completed' || existingStatus === 'taken' || existingStatus === 'completed');
-
-              const isTerminalSettled =
-                incStatus === 'completed' ||
-                existingStatus === 'completed' ||
-                inFlightStatus === 'completed' ||
-                isDeliveryFinished ||
-                isDineInFinished ||
-                isTakeawayFinished;
-
-              if (existing) {
-                const existingRank = STATUS_RANK[existing.status] || 0;
-                const incomingRank = STATUS_RANK[inc.status] || 0;
-
-                const isLocalCancelled = existing.status === 'cancelled' || (isRecentInFlight && inFlight?.status === 'cancelled');
-                const preserveLocal =
-                  isLocalCancelled ||
-                  (existing.status !== 'cancelled' && inc.status !== 'cancelled' && existingRank > incomingRank) ||
-                  (isRecentInFlight && inFlight?.status !== inc.status && (inFlight?.status ? (STATUS_RANK[inFlight.status] || 0) : 0) >= incomingRank);
-
-                const resolvedStatus = isLocalCancelled
-                  ? 'cancelled'
-                  : isTerminalSettled
-                    ? 'completed'
-                    : preserveLocal
-                      ? (isRecentInFlight && inFlight?.status ? inFlight.status : existing.status)
-                      : inc.status;
-
-                map.set(inc.id, {
-                  ...inc,
-                  status: resolvedStatus,
-                  paymentStatus: (isTerminalSettled || isLocallyPaid) && inc.paymentStatus !== 'refunded' ? 'paid' : (inc.paymentStatus || existing.paymentStatus),
-                  paymentCollected: Boolean(isTerminalSettled || isLocallyPaid || inc.paymentCollected || existing.paymentCollected),
-                  sentToKitchen: existing.sentToKitchen || inc.sentToKitchen || inFlight?.sentToKitchen,
-                  sentToKitchenAt: inc.sentToKitchenAt || existing.sentToKitchenAt,
-                  preparationStartedAt: inc.preparationStartedAt || existing.preparationStartedAt,
-                  completedAt: isTerminalSettled ? (inc.completedAt || existing.completedAt || new Date().toISOString()) : (inc.completedAt || existing.completedAt),
-                  deliveredAt: isTerminalSettled ? (inc.deliveredAt || existing.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
-                  assignedRiderId: inc.assignedRiderId || existing.assignedRiderId || inFlight?.assignedRiderId,
-                  assignedRiderName: inc.assignedRiderName || existing.assignedRiderName || inFlight?.assignedRiderName,
-                  assignedWaiterId: inc.assignedWaiterId || existing.assignedWaiterId || inFlight?.assignedWaiterId,
-                  assignedWaiterName: inc.assignedWaiterName || existing.assignedWaiterName || inFlight?.assignedWaiterName,
-                  riderStatus: (isTerminalSettled && (inc.type === 'delivery' || existing.type === 'delivery')) ? 'delivered' : (inc.riderStatus || existing.riderStatus || inFlight?.riderStatus),
-                });
-              } else {
-                map.set(inc.id, isTerminalSettled ? {
-                  ...inc,
-                  status: 'completed',
-                  riderStatus: inc.type === 'delivery' ? 'delivered' : inc.riderStatus,
-                  paymentStatus: 'paid',
-                  paymentCollected: true,
-                  completedAt: inc.completedAt || new Date().toISOString(),
-                  deliveredAt: inc.deliveredAt || new Date().toISOString(),
-                } : inc);
+            const merged = mergeOrderListsMonotonically(prev, event.data.payload, inFlightStatusRef.current, true);
+            if (areOrderListsEquivalent(prev, merged)) {
+              return prev;
+            }
+            try {
+              const nextJson = JSON.stringify(merged);
+              if (localStorage.getItem('foodies_orders_live') !== nextJson) {
+                localStorage.setItem('foodies_orders_live', nextJson);
               }
-            });
-            return Array.from(map.values()).sort(
-              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-            );
+            } catch { }
+            queueMicrotask(() => store.dispatch(setReduxOrders(merged)));
+            return merged;
           });
         }
         if (event.data?.type === 'SYNC_BRANCHES' && Array.isArray(event.data.payload)) {
@@ -2026,66 +2072,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const parsed = JSON.parse(e.newValue);
           if (Array.isArray(parsed)) {
             setOrders((prev) => {
-              const map = new Map<string, Order>();
-              prev.forEach((o) => {
-                if (o.id) map.set(o.id, o);
-                if (o.orderNumber) map.set(o.orderNumber, o);
-              });
-              const now = Date.now();
-              const merged = parsed.map((inc: Order) => {
-                const existing = map.get(inc.id) || (inc.orderNumber ? map.get(inc.orderNumber) : undefined);
-                if (!existing) return inc;
-                const existingRank = STATUS_RANK[existing.status] || 0;
-                const incomingRank = STATUS_RANK[inc.status] || 0;
-                const inFlight = inFlightStatusRef.current.get(inc.id) || (inc.orderNumber ? inFlightStatusRef.current.get(inc.orderNumber) : undefined);
-                const isRecentInFlight = inFlight && (now - inFlight.timestamp < 20000);
-                const preserveLocal =
-                  existing.status !== 'cancelled' &&
-                  inc.status !== 'cancelled' &&
-                  (existingRank > incomingRank || (isRecentInFlight && inFlight?.status && (STATUS_RANK[inFlight.status] || 0) >= incomingRank));
-                const isLocallyPaid =
-                  Boolean(existing && (existing.paymentStatus === 'paid' || existing.paymentCollected === true)) ||
-                  Boolean(inFlight && (inFlight.paymentStatus === 'paid' || inFlight.paymentCollected === true)) ||
-                  inc.paymentStatus === 'paid' ||
-                  Boolean(inc.paymentCollected);
-
-                const existingStatus = existing?.status as string | undefined;
-                const incStatus = inc.status as string;
-                const inFlightStatus = inFlight?.status as string | undefined;
-
-                const isOrderFinished =
-                  incStatus === 'completed' ||
-                  incStatus === 'delivered' ||
-                  existingStatus === 'completed' ||
-                  inFlightStatus === 'completed' ||
-                  inc.riderStatus === 'delivered' ||
-                  inFlight?.riderStatus === 'delivered' ||
-                  (isLocallyPaid && (
-                    (inc.type === 'delivery' || existing?.type === 'delivery') ||
-                    ((inc.type === 'dine_in' || existing?.type === 'dine_in') && (existingStatus === 'served' || incStatus === 'served' || existingStatus === 'ready' || incStatus === 'ready')) ||
-                    ((inc.type === 'takeaway' || existing?.type === 'takeaway') && (existingStatus === 'ready' || incStatus === 'ready' || existingStatus === 'taken' || incStatus === 'taken'))
-                  ));
-                return {
-                  ...inc,
-                  status: isOrderFinished
-                    ? 'completed'
-                    : preserveLocal
-                    ? (isRecentInFlight && inFlight?.status ? inFlight.status : existing.status)
-                    : inc.status,
-                  sentToKitchen: existing.sentToKitchen || inc.sentToKitchen || Boolean(inFlight?.sentToKitchen),
-                  sentToKitchenAt: inc.sentToKitchenAt || existing.sentToKitchenAt,
-                  preparationStartedAt: inc.preparationStartedAt || existing.preparationStartedAt,
-                  completedAt: isOrderFinished ? (inc.completedAt || existing.completedAt || new Date().toISOString()) : (inc.completedAt || existing.completedAt),
-                  deliveredAt: isOrderFinished ? (inc.deliveredAt || existing.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
-                  assignedRiderId: inc.assignedRiderId || existing.assignedRiderId || inFlight?.assignedRiderId,
-                  assignedRiderName: inc.assignedRiderName || existing.assignedRiderName || inFlight?.assignedRiderName,
-                  assignedWaiterId: inc.assignedWaiterId || existing.assignedWaiterId || inFlight?.assignedWaiterId,
-                  assignedWaiterName: inc.assignedWaiterName || existing.assignedWaiterName || inFlight?.assignedWaiterName,
-                  riderStatus: (isOrderFinished && (inc.type === 'delivery' || existing?.type === 'delivery')) ? 'delivered' : (inc.riderStatus || existing.riderStatus || inFlight?.riderStatus),
-                  paymentStatus: (isOrderFinished || isLocallyPaid) && inc.paymentStatus !== 'refunded' ? 'paid' : (inc.paymentStatus || existing.paymentStatus),
-                  paymentCollected: Boolean(isOrderFinished || isLocallyPaid || existing.paymentCollected || inc.paymentCollected),
-                } as Order;
-              });
+              const merged = mergeOrderListsMonotonically(prev, parsed, inFlightStatusRef.current, true);
+              if (areOrderListsEquivalent(prev, merged)) {
+                return prev;
+              }
+              queueMicrotask(() => store.dispatch(setReduxOrders(merged)));
               return merged;
             });
           }
@@ -2234,151 +2225,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             // Never blank out active orders on empty poll response to prevent orders temporarily vanishing.
             if (data.orders.length > 0) {
               setOrders((prev) => {
-                const map = new Map<string, Order>();
-                const orderNumToId = new Map<string, string>();
-                prev.forEach((o) => {
-                  map.set(o.id, o);
-                  if (o.orderNumber) orderNumToId.set(o.orderNumber, o.id);
-                });
-
-                data.orders.forEach((inc: Order) => {
-                  const matchedId = map.has(inc.id)
-                    ? inc.id
-                    : (inc.orderNumber && orderNumToId.get(inc.orderNumber)) || undefined;
-                  const existing = matchedId ? map.get(matchedId) : undefined;
-                  const inFlight = inFlightStatusRef.current.get(inc.id) || inFlightStatusRef.current.get(inc.orderNumber);
-                  const isRecentInFlight = inFlight && (now - inFlight.timestamp < 20000);
-
-                  const isLocallyPaid =
-                    Boolean(existing && (existing.paymentStatus === 'paid' || existing.paymentCollected === true)) ||
-                    Boolean(inFlight && (inFlight.paymentStatus === 'paid' || inFlight.paymentCollected === true)) ||
-                    inc.paymentStatus === 'paid' ||
-                    Boolean(inc.paymentCollected);
-
-                  const existingStatus = existing?.status as string | undefined;
-                  const incStatus = inc.status as string;
-                  const inFlightStatus = inFlight?.status as string | undefined;
-
-                  const isDeliveryFinished =
-                    (inc.type === 'delivery' || existing?.type === 'delivery') &&
-                    isLocallyPaid &&
-                    (incStatus === 'delivered' || incStatus === 'completed' || existingStatus === 'completed' || inc.riderStatus === 'delivered' || inFlight?.riderStatus === 'delivered');
-
-                  const isDineInFinished =
-                    (inc.type === 'dine_in' || existing?.type === 'dine_in') &&
-                    isLocallyPaid &&
-                    (incStatus === 'served' || incStatus === 'completed' || existingStatus === 'served' || existingStatus === 'completed');
-
-                  const isTakeawayFinished =
-                    (inc.type === 'takeaway' || existing?.type === 'takeaway') &&
-                    isLocallyPaid &&
-                    (incStatus === 'taken' || incStatus === 'completed' || existingStatus === 'taken' || existingStatus === 'completed');
-
-                  const isOrderTerminalSettled =
-                    incStatus === 'completed' ||
-                    existingStatus === 'completed' ||
-                    inFlightStatus === 'completed' ||
-                    isDeliveryFinished ||
-                    isDineInFinished ||
-                    isTakeawayFinished;
-
-                  if (existing) {
-                    const existingRank = STATUS_RANK[existing.status] || 0;
-                    const incomingRank = STATUS_RANK[inc.status] || 0;
-
-                    const isLocalCancelled = existing.status === 'cancelled' || (isRecentInFlight && inFlight?.status === 'cancelled');
-                    const preserveLocalStatus =
-                      isLocalCancelled ||
-                      (existing.status !== 'cancelled' && inc.status !== 'cancelled' && existingRank > incomingRank) ||
-                      (isRecentInFlight && inFlight?.status !== inc.status && (inFlight?.status ? (STATUS_RANK[inFlight.status] || 0) : 0) >= incomingRank);
-
-                    const resolvedStatus = isLocalCancelled
-                      ? 'cancelled'
-                      : isOrderTerminalSettled
-                        ? 'completed'
-                        : preserveLocalStatus
-                          ? (isRecentInFlight && inFlight?.status ? inFlight.status : existing.status)
-                          : inc.status;
-                    const resolvedSentToKitchen = existing.sentToKitchen || inc.sentToKitchen || (inFlight?.sentToKitchen);
-
-                    const targetKey = inc.id || existing.id;
-                    if (matchedId && matchedId !== targetKey) {
-                      map.delete(matchedId);
-                    }
-                    map.set(targetKey, {
-                      ...inc,
-                      id: targetKey,
-                      status: resolvedStatus,
-                      paymentStatus: (isOrderTerminalSettled || isLocallyPaid) && inc.paymentStatus !== 'refunded'
-                        ? 'paid'
-                        : (isRecentInFlight && inFlight?.paymentStatus)
-                          ? inFlight.paymentStatus
-                          : inc.paymentStatus || existing.paymentStatus,
-                      paymentCollected: Boolean(
-                        isOrderTerminalSettled ||
-                        isLocallyPaid ||
-                        (isRecentInFlight && inFlight?.paymentCollected) ||
-                        existing.paymentCollected ||
-                        inc.paymentCollected
-                      ),
-                      sentToKitchen: resolvedSentToKitchen,
-                      sentToKitchenAt: inc.sentToKitchenAt || existing.sentToKitchenAt,
-                      preparationStartedAt: inc.preparationStartedAt || existing.preparationStartedAt,
-                      completedAt: isOrderTerminalSettled ? (inc.completedAt || existing.completedAt || new Date().toISOString()) : (inc.completedAt || existing.completedAt),
-                      deliveredAt: isOrderTerminalSettled ? (inc.deliveredAt || existing.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
-                      assignedRiderId: inc.assignedRiderId || existing.assignedRiderId || inFlight?.assignedRiderId,
-                      assignedRiderName: inc.assignedRiderName || existing.assignedRiderName || inFlight?.assignedRiderName,
-                      assignedWaiterId: inc.assignedWaiterId || existing.assignedWaiterId || inFlight?.assignedWaiterId,
-                      assignedWaiterName: inc.assignedWaiterName || existing.assignedWaiterName || inFlight?.assignedWaiterName,
-                      riderStatus: (isOrderTerminalSettled && (inc.type === 'delivery' || existing.type === 'delivery')) ? 'delivered' : (inc.riderStatus || existing.riderStatus || inFlight?.riderStatus),
-                    });
-                  } else {
-                    const isLocallyPaid =
-                      Boolean(inFlight && (inFlight.paymentStatus === 'paid' || inFlight.paymentCollected === true)) ||
-                      inc.paymentStatus === 'paid' ||
-                      Boolean(inc.paymentCollected);
-                    const incStatus = inc.status as string;
-                    const inFlightStatus = inFlight?.status as string | undefined;
-
-                    const isDeliveryFinished =
-                      inc.type === 'delivery' &&
-                      isLocallyPaid &&
-                      (incStatus === 'delivered' || incStatus === 'completed' || inFlightStatus === 'completed' || inc.riderStatus === 'delivered' || inFlight?.riderStatus === 'delivered');
-
-                    const isDineInFinished =
-                      inc.type === 'dine_in' &&
-                      isLocallyPaid &&
-                      (incStatus === 'served' || incStatus === 'completed');
-
-                    const isTakeawayFinished =
-                      inc.type === 'takeaway' &&
-                      isLocallyPaid &&
-                      (incStatus === 'taken' || incStatus === 'completed');
-
-                    const isOrderTerminalSettled =
-                      incStatus === 'completed' ||
-                      inFlightStatus === 'completed' ||
-                      isDeliveryFinished ||
-                      isDineInFinished ||
-                      isTakeawayFinished;
-                    map.set(inc.id, isOrderTerminalSettled ? {
-                      ...inc,
-                      status: 'completed',
-                      riderStatus: inc.type === 'delivery' ? 'delivered' : inc.riderStatus,
-                      paymentStatus: 'paid',
-                      paymentCollected: true,
-                      completedAt: inc.completedAt || new Date().toISOString(),
-                      deliveredAt: inc.deliveredAt || new Date().toISOString(),
-                    } : inc);
-                  }
-                });
-
-                const merged = Array.from(map.values()).sort(
-                  (a, b) => (new Date(b.createdAt).getTime() || 0) - (new Date(a.createdAt).getTime() || 0)
-                );
+                const merged = mergeOrderListsMonotonically(prev, data.orders, inFlightStatusRef.current, true);
+                if (areOrderListsEquivalent(prev, merged)) {
+                  return prev;
+                }
                 try {
-                  localStorage.setItem('foodies_orders_live', JSON.stringify(merged));
+                  const nextJson = JSON.stringify(merged);
+                  if (localStorage.getItem('foodies_orders_live') !== nextJson) {
+                    localStorage.setItem('foodies_orders_live', nextJson);
+                  }
                 } catch (e) { }
+                queueMicrotask(() => store.dispatch(setReduxOrders(merged)));
                 return merged;
               });
             }
@@ -2468,7 +2325,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const state = store.getState();
 
       if (state.orders.orders !== prevReduxState.orders.orders) {
-        setOrders(state.orders.orders);
+        const nextReduxOrders = state.orders.orders;
+        setOrders((prev) => {
+          const merged = mergeOrderListsMonotonically(prev, nextReduxOrders, inFlightStatusRef.current, true);
+          if (areOrderListsEquivalent(prev, merged)) {
+            return prev;
+          }
+          if (!areOrderListsEquivalent(merged, nextReduxOrders)) {
+            queueMicrotask(() => store.dispatch(setReduxOrders(merged)));
+          }
+          return merged;
+        });
       }
       if (state.cart.items !== prevReduxState.cart.items) {
         setCart((current) => {
@@ -3399,11 +3266,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     }
     try {
+      const updatedSnapshot: Order | undefined = existingOrdForStatus
+        ? {
+            ...existingOrdForStatus,
+            status: newStatus,
+            sentToKitchen: inKitchen ? true : existingOrdForStatus.sentToKitchen,
+            sentToKitchenAt: inKitchen && !existingOrdForStatus.sentToKitchenAt ? new Date().toISOString() : existingOrdForStatus.sentToKitchenAt,
+            forwardToKitchenAt: inKitchen ? undefined : existingOrdForStatus.forwardToKitchenAt,
+            completedAt: newStatus === 'completed' ? new Date().toISOString() : existingOrdForStatus.completedAt,
+          }
+        : undefined;
       fetch('/api/orders', {
         method: 'PATCH',
         headers: getClientAuthHeaders(),
         body: JSON.stringify({
           orderId,
+          type: existingOrdForStatus?.type,
           status: newStatus,
           expectedVersion: existingOrdForStatus?.version,
           actorId: currentUser?.id,
@@ -3415,6 +3293,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           forwardToKitchenAt: inKitchen ? null : undefined,
           preparationStartedAt: newStatus === 'preparing' ? new Date().toISOString() : undefined,
           completedAt: newStatus === 'completed' ? new Date().toISOString() : undefined,
+          orderSnapshot: updatedSnapshot,
         }),
       })
         .then(async (res) => {
@@ -4050,20 +3929,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return item;
       });
       broadcastOrders(updated);
-      try {
-        localStorage.setItem('foodies_orders_live', JSON.stringify(updated));
-      } catch (e) { }
-      store.dispatch(setReduxOrders(updated));
       return updated;
     });
 
     // Asynchronously sync payment status, cashier attribution, and completion to PostgreSQL database
     try {
+      const cashSnapshot: Order | undefined = ord
+        ? {
+            ...ord,
+            paymentStatus: 'paid',
+            paymentCollected: true,
+            status: targetStatus as OrderStatus,
+            cashierId: currentUser.id,
+            cashierName: currentUser.name,
+            shiftId: targetShiftId,
+          }
+        : undefined;
       fetch('/api/orders', {
         method: 'PATCH',
         headers: getClientAuthHeaders(),
         body: JSON.stringify({
           orderId,
+          type: ord?.type,
           paymentStatus: 'paid',
           paymentCollected: true,
           status: targetStatus,
@@ -4073,6 +3960,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           actorName: currentUser.name,
           actorRole: currentRole || 'cashier',
           shiftId: targetShiftId,
+          orderSnapshot: cashSnapshot,
         }),
       }).catch(() => { });
     } catch (e) { }
@@ -4177,76 +4065,104 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateOrderPayment = (orderId: string, paymentStatus: PaymentStatus) => {
     const targetOrder = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
-    const isDeliveryOrder = targetOrder?.type === 'delivery' || targetOrder?.status === 'out_for_delivery' || targetOrder?.status === 'delivered';
-    const shouldCompleteDelivery = paymentStatus === 'paid' && isDeliveryOrder;
+    const isDeliveryFinished =
+      targetOrder?.type === 'delivery' &&
+      (targetOrder?.status === 'delivered' ||
+        targetOrder?.status === 'out_for_delivery' ||
+        targetOrder?.riderStatus === 'delivered');
+    const isFulfilledAndCompleted =
+      paymentStatus === 'paid' &&
+      (targetOrder?.status === 'served' ||
+        targetOrder?.status === 'taken' ||
+        targetOrder?.status === 'delivered' ||
+        targetOrder?.status === 'completed' ||
+        targetOrder?.riderStatus === 'delivered' ||
+        isDeliveryFinished);
+
+    const targetStatus: OrderStatus | undefined = isFulfilledAndCompleted
+      ? 'completed'
+      : paymentStatus === 'paid' && targetOrder?.status === 'placed'
+        ? 'accepted'
+        : undefined;
+    const targetRiderStatus =
+      isFulfilledAndCompleted && targetOrder?.type === 'delivery' ? ('delivered' as const) : undefined;
+    const nowIso = new Date().toISOString();
 
     inFlightStatusRef.current.set(orderId, {
       paymentStatus,
       paymentCollected: paymentStatus === 'paid',
-      status: shouldCompleteDelivery ? 'completed' : undefined,
-      riderStatus: shouldCompleteDelivery ? 'delivered' : undefined,
+      status: targetStatus,
+      riderStatus: targetRiderStatus,
       timestamp: Date.now(),
     });
     if (targetOrder?.orderNumber) {
       inFlightStatusRef.current.set(targetOrder.orderNumber, {
         paymentStatus,
         paymentCollected: paymentStatus === 'paid',
-        status: shouldCompleteDelivery ? 'completed' : undefined,
-        riderStatus: shouldCompleteDelivery ? 'delivered' : undefined,
+        status: targetStatus,
+        riderStatus: targetRiderStatus,
         timestamp: Date.now(),
       });
     }
 
     setOrders((prev) => {
-      const updated = prev.map((o) =>
-        o.id === orderId || o.orderNumber === orderId
-          ? {
-            ...o,
-            paymentStatus,
-            paymentCollected: paymentStatus === 'paid',
-            status:
-              paymentStatus === 'paid' && (o.type === 'delivery' || o.status === 'out_for_delivery' || o.status === 'delivered')
-                ? ('completed' as OrderStatus)
-                : paymentStatus === 'paid' && o.status === 'placed'
-                  ? ('accepted' as OrderStatus)
-                  : o.status,
-            riderStatus:
-              paymentStatus === 'paid' && (o.type === 'delivery' || o.status === 'out_for_delivery' || o.status === 'delivered')
-                ? ('delivered' as const)
-                : o.riderStatus,
-            completedAt:
-              paymentStatus === 'paid' && (o.type === 'delivery' || o.status === 'out_for_delivery' || o.status === 'delivered')
-                ? new Date().toISOString()
-                : o.completedAt,
-            deliveredAt:
-              paymentStatus === 'paid' && (o.type === 'delivery' || o.status === 'out_for_delivery' || o.status === 'delivered')
-                ? new Date().toISOString()
-                : o.deliveredAt,
-          }
-          : o
-      );
+      const updated = prev.map((o) => {
+        if (o.id !== orderId && o.orderNumber !== orderId) return o;
+        const itemFulfilled =
+          paymentStatus === 'paid' &&
+          (o.status === 'served' ||
+            o.status === 'taken' ||
+            o.status === 'delivered' ||
+            o.status === 'completed' ||
+            o.riderStatus === 'delivered' ||
+            (o.type === 'delivery' && o.status === 'out_for_delivery'));
+        return {
+          ...o,
+          paymentStatus,
+          paymentCollected: paymentStatus === 'paid',
+          status: itemFulfilled
+            ? ('completed' as OrderStatus)
+            : paymentStatus === 'paid' && o.status === 'placed'
+              ? ('accepted' as OrderStatus)
+              : o.status,
+          riderStatus:
+            itemFulfilled && o.type === 'delivery' ? ('delivered' as const) : o.riderStatus,
+          completedAt: itemFulfilled ? o.completedAt || nowIso : o.completedAt,
+          deliveredAt: itemFulfilled ? o.deliveredAt || nowIso : o.deliveredAt,
+        };
+      });
       broadcastOrders(updated);
-      try {
-        localStorage.setItem('foodies_orders_live', JSON.stringify(updated));
-      } catch (e) { }
       return updated;
     });
 
     try {
+      const paymentSnapshot: Order | undefined = targetOrder
+        ? {
+            ...targetOrder,
+            paymentStatus,
+            paymentCollected: paymentStatus === 'paid',
+            status: targetStatus || targetOrder.status,
+            riderStatus: targetRiderStatus || targetOrder.riderStatus,
+            completedAt: isFulfilledAndCompleted ? targetOrder.completedAt || nowIso : targetOrder.completedAt,
+            deliveredAt: isFulfilledAndCompleted ? targetOrder.deliveredAt || nowIso : targetOrder.deliveredAt,
+          }
+        : undefined;
       fetch('/api/orders', {
         method: 'PATCH',
         headers: getClientAuthHeaders(),
         body: JSON.stringify({
           orderId,
+          type: targetOrder?.type,
           paymentStatus,
           paymentCollected: paymentStatus === 'paid',
-          status: shouldCompleteDelivery ? 'completed' : undefined,
-          riderStatus: shouldCompleteDelivery ? 'delivered' : undefined,
-          completedAt: shouldCompleteDelivery ? new Date().toISOString() : undefined,
-          deliveredAt: shouldCompleteDelivery ? new Date().toISOString() : undefined,
+          status: targetStatus,
+          riderStatus: targetRiderStatus,
+          completedAt: isFulfilledAndCompleted ? nowIso : undefined,
+          deliveredAt: isFulfilledAndCompleted ? nowIso : undefined,
           actorId: currentUser?.id,
           actorName: currentUser?.name,
           actorRole: currentRole || 'floor_staff',
+          orderSnapshot: paymentSnapshot,
         }),
       }).catch(() => { });
     } catch (e) { }
@@ -4827,10 +4743,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           : o
       );
       broadcastOrders(next);
-      try {
-        localStorage.setItem('foodies_orders_live', JSON.stringify(next));
-      } catch (e) { }
-      store.dispatch(setReduxOrders(next));
       return next;
     });
 
@@ -4841,11 +4753,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     try {
+      const servedSnapshot: Order | undefined = target
+        ? {
+            ...target,
+            status: 'served',
+            deliveredAt: nowIso,
+            sentToKitchen: true,
+            assignedWaiterId: resolvedWaiterId || target.assignedWaiterId,
+            assignedWaiterName: resolvedWaiterName || target.assignedWaiterName,
+          }
+        : undefined;
       fetch('/api/orders', {
         method: 'PATCH',
         headers: getClientAuthHeaders(),
         body: JSON.stringify({
           orderId: targetOrderId,
+          type: target?.type || 'dine_in',
           status: 'served',
           deliveredAt: nowIso,
           assignedWaiterId: resolvedWaiterId,
@@ -4853,6 +4776,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           actorId: currentUser?.id,
           actorName: currentUser?.name,
           actorRole: currentRole || 'floor_staff',
+          orderSnapshot: servedSnapshot,
         }),
       }).catch(() => { });
     } catch (e) { }
@@ -4888,18 +4812,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             status: 'completed' as OrderStatus,
             completedAt: nowIso,
             deliveredAt: o.deliveredAt || nowIso,
-            paymentStatus: (cashCollected ? 'paid' : o.paymentStatus) as PaymentStatus,
-            paymentCollected: cashCollected ? true : o.paymentCollected,
+            paymentStatus: (cashCollected || o.paymentStatus === 'paid' ? 'paid' : o.paymentStatus) as PaymentStatus,
+            paymentCollected: Boolean(cashCollected || o.paymentCollected),
             assignedWaiterId: o.assignedWaiterId || (currentUser?.role === 'floor_staff' ? currentUser.id : undefined),
             assignedWaiterName: o.assignedWaiterName || (currentUser?.role === 'floor_staff' ? currentUser.name : undefined),
           }
           : o
       );
       broadcastOrders(next);
-      try {
-        localStorage.setItem('foodies_orders_live', JSON.stringify(next));
-      } catch (e) { }
-      store.dispatch(setReduxOrders(next));
       return next;
     });
 
@@ -4942,19 +4862,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
 
     try {
+      const doneSnapshot: Order | undefined = target
+        ? {
+            ...target,
+            status: 'completed',
+            paymentStatus: (cashCollected || target.paymentStatus === 'paid' ? 'paid' : target.paymentStatus) as PaymentStatus,
+            paymentCollected: Boolean(cashCollected || target.paymentCollected),
+            completedAt: nowIso,
+            deliveredAt: target.deliveredAt || nowIso,
+            sentToKitchen: true,
+          }
+        : undefined;
       fetch('/api/orders', {
         method: 'PATCH',
         headers: getClientAuthHeaders(),
         body: JSON.stringify({
           orderId: targetOrderId,
+          type: target?.type,
           status: 'completed',
-          paymentStatus: cashCollected ? 'paid' : target?.paymentStatus,
-          paymentCollected: cashCollected,
+          paymentStatus: cashCollected || target?.paymentStatus === 'paid' ? 'paid' : target?.paymentStatus,
+          paymentCollected: Boolean(cashCollected || target?.paymentCollected),
           completedAt: nowIso,
           deliveredAt: target?.deliveredAt || nowIso,
           actorId: currentUser?.id,
           actorName: currentUser?.name,
           actorRole: currentRole || 'floor_staff',
+          orderSnapshot: doneSnapshot,
         }),
       }).catch(() => { });
     } catch (e) { }
@@ -7141,18 +7074,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const data = await res.json();
         if (Array.isArray(data.orders)) {
           setOrders((prev) => {
-            const map = new Map<string, Order>();
-            data.orders.forEach((o: Order) => map.set(o.id, o));
-            prev.forEach((o: Order) => map.set(o.id, o));
-            const combined = Array.from(map.values()).sort(
-              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
-            );
-            return combined;
+            const combined = mergeOrderListsMonotonically(prev, data.orders, inFlightStatusRef.current, true);
+            try {
+              const nextJson = JSON.stringify(combined);
+              if (localStorage.getItem('foodies_orders_live') !== nextJson) {
+                localStorage.setItem('foodies_orders_live', nextJson);
+              }
+            } catch (e) { }
+            queueMicrotask(() => store.dispatch(setReduxOrders(combined)));
+            return areOrderListsEquivalent(prev, combined) ? prev : combined;
           });
           setHasLoadedOlderOrders(true);
-          try {
-            localStorage.setItem('foodies_orders_live', JSON.stringify(data.orders));
-          } catch (e) { }
         }
       }
     } catch (e) {
@@ -7173,18 +7105,35 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const url = bId && bId !== 'all'
         ? `/api/orders?branchId=${bId}&dateScope=today`
         : `/api/orders?dateScope=today`;
-      const res = await fetch(url);
+      const res = await fetch(url, { headers: getClientAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.orders)) {
           const cleanOrders = data.orders.filter(
             (o: Order) => !((o.status === 'cancelled' || (o.status as string) === 'canceled') && isOrderDayEnded(o.createdAt))
           );
-          setOrders(cleanOrders);
+          setOrders((prev) => {
+            const activeOrTodayPrev = prev.filter(
+              (o) =>
+                !isOrderDayEnded(o.createdAt) ||
+                ['placed', 'accepted', 'preparing', 'ready', 'served', 'out_for_delivery'].includes(o.status)
+            );
+            const merged = mergeOrderListsMonotonically(
+              activeOrTodayPrev,
+              cleanOrders,
+              inFlightStatusRef.current,
+              true
+            );
+            try {
+              const nextJson = JSON.stringify(merged);
+              if (localStorage.getItem('foodies_orders_live') !== nextJson) {
+                localStorage.setItem('foodies_orders_live', nextJson);
+              }
+            } catch (e) { }
+            queueMicrotask(() => store.dispatch(setReduxOrders(merged)));
+            return areOrderListsEquivalent(prev, merged) ? prev : merged;
+          });
           setHasLoadedOlderOrders(false);
-          try {
-            localStorage.setItem('foodies_orders_live', JSON.stringify(cleanOrders));
-          } catch (e) { }
           addToast({
             type: 'success',
             title: "Showing Today's Data 📅",

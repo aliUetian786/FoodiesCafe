@@ -81,12 +81,14 @@ export const createOrderSchema = z.object({
   actorId: z.string().nullable().optional(),
   actorName: z.string().nullable().optional(),
   actorRole: z.string().nullable().optional(),
+  orderSnapshot: z.any().optional(),
 });
 
 export const updateOrderSchema = z.object({
   id: z.string().optional(),
   orderId: z.string().optional(),
   branchId: z.string().optional(),
+  type: orderTypeSchema.optional(),
   status: orderStatusSchema.optional(),
   paymentStatus: paymentStatusSchema.optional(),
   paymentMethod: z.string().optional(),
@@ -126,4 +128,5 @@ export const updateOrderSchema = z.object({
   actorId: z.string().nullable().optional(),
   actorName: z.string().nullable().optional(),
   actorRole: z.string().nullable().optional(),
+  orderSnapshot: z.any().optional(),
 });

@@ -4,6 +4,7 @@ import { createOrderSchema, updateOrderSchema } from '@/lib/validations';
 import { broadcastRealtimeEvent } from '@/lib/realtime';
 import { cacheGet, cacheSet, cacheInvalidatePrefix } from '@/lib/redis';
 import {
+  ORDER_STATUS_RANK,
   validateStatusTransition,
   isWithinOpeningHours,
   recalculateOrderItemsOnServer,
@@ -759,12 +760,92 @@ export async function PATCH(request: Request) {
       actorRole,
     } = body;
 
+    const toValidIsoOrNull = (val: any): string | null => {
+      if (!val || typeof val !== 'string') return null;
+      const d = new Date(val);
+      return isNaN(d.getTime()) ? null : d.toISOString();
+    };
+
     const txResult = await withTransaction(async (client) => {
       // 1. Lock the order row (SELECT ... FOR UPDATE)
-      const existingRes = await client.query(
+      let existingRes = await client.query(
         `SELECT * FROM orders WHERE id = $1 OR order_number = $1 FOR UPDATE`,
         [orderId]
       );
+
+      // Self-heal cold serverless instances if the order snapshot arrived with this PATCH
+      if (existingRes.rows.length === 0 && body.orderSnapshot && body.orderSnapshot.id) {
+        const snap = body.orderSnapshot;
+        const snapBranchId = normalizeBranchId(snap.branchId || branchId || 'gulberg-lahore');
+        await client
+          .query(
+            `INSERT INTO orders (
+              id, order_number, branch_id, customer_id, customer_name, customer_phone, customer_email,
+              type, table_number, table_pin, pickup_time, status, payment_status,
+              payment_method, items, original_subtotal, add_on_subtotal, tax, total,
+              notes, delivery_address, version, sent_to_kitchen, sent_to_kitchen_at,
+              forward_to_kitchen_at, auto_forward_custom_min, cashier_id, cashier_name, is_walk_in,
+              assigned_rider_id, assigned_rider_name, rider_status, delivered_at, payment_collected, customer_coordinates,
+              assigned_waiter_id, assigned_waiter_name, is_table_qr, waiter_notified, created_at
+            ) VALUES (
+              $1, $2, $3, $4, $5, $6, $7,
+              $8, $9, $10, $11, $12, $13,
+              $14, $15::jsonb, $16, $17, $18, $19,
+              $20, $21, $22, $23, $24,
+              $25, $26, $27, $28, $29,
+              $30, $31, $32, $33, $34, CASE WHEN $35 IS NULL THEN NULL ELSE $35::jsonb END,
+              $36, $37, $38, $39, COALESCE($40::timestamptz, CURRENT_TIMESTAMP)
+            ) ON CONFLICT (id) DO NOTHING`,
+            [
+              snap.id,
+              snap.orderNumber || `FC-${Date.now().toString().slice(-4)}`,
+              snapBranchId,
+              snap.customerId || 'user-guest',
+              snap.customerName || 'Guest Customer',
+              snap.customerPhone || '+92 300 0000000',
+              snap.customerEmail || null,
+              snap.type || 'takeaway',
+              snap.tableNumber || null,
+              snap.tablePin || null,
+              snap.pickupTime || null,
+              snap.status || 'placed',
+              snap.paymentStatus || 'unpaid',
+              snap.paymentMethod || 'Cash',
+              JSON.stringify(Array.isArray(snap.items) ? snap.items : []),
+              Number(snap.originalSubtotal ?? snap.total ?? 0) || 0,
+              Number(snap.addOnSubtotal ?? 0) || 0,
+              Number(snap.tax ?? 0) || 0,
+              Number(snap.total ?? 0) || 0,
+              snap.notes || null,
+              snap.deliveryAddress || null,
+              Number(snap.version ?? 1) || 1,
+              Boolean(snap.sentToKitchen),
+              toValidIsoOrNull(snap.sentToKitchenAt),
+              toValidIsoOrNull(snap.forwardToKitchenAt),
+              snap.autoForwardCustomMin ?? null,
+              snap.cashierId || null,
+              snap.cashierName || null,
+              Boolean(snap.isWalkIn),
+              snap.assignedRiderId || null,
+              snap.assignedRiderName || null,
+              snap.riderStatus || null,
+              toValidIsoOrNull(snap.deliveredAt),
+              Boolean(snap.paymentCollected || snap.paymentStatus === 'paid'),
+              snap.customerCoordinates ? JSON.stringify(snap.customerCoordinates) : null,
+              snap.assignedWaiterId || null,
+              snap.assignedWaiterName || null,
+              Boolean(snap.isTableQr),
+              Boolean(snap.waiterNotified),
+              toValidIsoOrNull(snap.createdAt) || new Date().toISOString(),
+            ]
+          )
+          .catch(() => {});
+
+        existingRes = await client.query(
+          `SELECT * FROM orders WHERE id = $1 OR order_number = $1 FOR UPDATE`,
+          [orderId]
+        );
+      }
 
       if (existingRes.rows.length === 0) {
         return { status: 404, error: `Order '${orderId}' not found.` };
@@ -883,29 +964,65 @@ export async function PATCH(request: Request) {
         }
       }
 
-      // Delivery completion normalization: When rider marks an order as paid or delivered,
-      // the status immediately becomes terminal 'completed', payment becomes 'paid', and it moves to History.
+      // Completion normalization: Only transition to terminal 'completed' when fulfillment is finished AND paid.
       let effectiveStatus = status;
       let effectiveRiderStatus = riderStatus;
       let effectivePaymentStatus = paymentStatus;
       let effectivePaymentCollected = paymentCollected;
 
+      if (currentPaymentStatus === 'paid' && effectivePaymentStatus !== 'refunded') {
+        effectivePaymentStatus = 'paid';
+        effectivePaymentCollected = true;
+      }
+
+      const effectiveOrderType = body.type || currentOrder.type;
+      const isNowOrAlreadyPaid =
+        effectivePaymentStatus === 'paid' ||
+        Boolean(effectivePaymentCollected) ||
+        currentPaymentStatus === 'paid' ||
+        Boolean(currentOrder.payment_collected);
+      const nextOrCurrentStatus = effectiveStatus || currentStatus;
+      const nextOrCurrentRiderStatus = effectiveRiderStatus || currentOrder.rider_status;
+
+      const isDeliveryFinished =
+        effectiveOrderType === 'delivery' &&
+        isNowOrAlreadyPaid &&
+        (nextOrCurrentStatus === 'delivered' || nextOrCurrentStatus === 'completed' || nextOrCurrentRiderStatus === 'delivered');
+
+      const isDineInFinished =
+        effectiveOrderType === 'dine_in' &&
+        isNowOrAlreadyPaid &&
+        (nextOrCurrentStatus === 'served' || nextOrCurrentStatus === 'completed');
+
+      const isTakeawayFinished =
+        effectiveOrderType === 'takeaway' &&
+        isNowOrAlreadyPaid &&
+        (nextOrCurrentStatus === 'taken' || nextOrCurrentStatus === 'completed');
+
       const isOrderSettledAndFinished =
-        status === 'completed' ||
-        status === 'delivered' ||
-        riderStatus === 'delivered' ||
-        ((currentOrder.type === 'delivery' || body.type === 'delivery') &&
-          (paymentStatus === 'paid' || currentPaymentStatus === 'paid' || Boolean(paymentCollected) || Boolean(currentOrder.payment_collected))) ||
-        ((paymentStatus === 'paid' || Boolean(paymentCollected) || currentPaymentStatus === 'paid' || Boolean(currentOrder.payment_collected)) &&
-          (status === 'served' || status === 'completed' || currentStatus === 'served' || currentStatus === 'ready' || currentOrder.type === 'dine_in'));
+        effectiveStatus === 'completed' ||
+        currentStatus === 'completed' ||
+        isDeliveryFinished ||
+        isDineInFinished ||
+        isTakeawayFinished;
 
       if (isOrderSettledAndFinished) {
         effectiveStatus = 'completed';
-        effectivePaymentStatus = 'paid';
+        effectivePaymentStatus = effectivePaymentStatus === 'refunded' ? 'refunded' : 'paid';
         effectivePaymentCollected = true;
-        if (currentOrder.type === 'delivery' || body.type === 'delivery') {
+        if (effectiveOrderType === 'delivery') {
           effectiveRiderStatus = 'delivered';
         }
+      }
+
+      // Monotonic safeguard: never downgrade an order's advanced lifecycle status on stale PATCH calls
+      if (
+        effectiveStatus !== undefined &&
+        effectiveStatus !== 'cancelled' &&
+        currentStatus !== 'cancelled' &&
+        (ORDER_STATUS_RANK[currentStatus] || 0) > (ORDER_STATUS_RANK[effectiveStatus] || 0)
+      ) {
+        effectiveStatus = currentStatus;
       }
 
       // 4. Server State Machine Validation for Status Transitions

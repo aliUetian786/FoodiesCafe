@@ -38,9 +38,128 @@ const initialState: OrdersState = {
 const persistOrders = (orders: Order[]) => {
   if (typeof window === 'undefined') return;
   try {
-    localStorage.setItem('foodies_orders_live', JSON.stringify(orders));
+    const nextJson = JSON.stringify(orders);
+    if (localStorage.getItem('foodies_orders_live') !== nextJson) {
+      localStorage.setItem('foodies_orders_live', nextJson);
+    }
   } catch (e) { }
 };
+
+export function mergeSingleOrderMonotonically(existing: Order | undefined, inc: Order): Order {
+  const isLocallyPaid = existing
+    ? existing.paymentStatus === 'paid' || existing.paymentCollected === true
+    : false;
+  const isPaid = isLocallyPaid || inc.paymentStatus === 'paid' || Boolean(inc.paymentCollected);
+  const incStatus = inc.status as string;
+  const existingStatus = existing?.status as string | undefined;
+  const orderType = inc.type || existing?.type;
+  const resolvedRiderStatus = (inc.riderStatus || existing?.riderStatus) as Order['riderStatus'];
+
+  const isAnyCancelled = existingStatus === 'cancelled' || incStatus === 'cancelled';
+
+  const isDeliveryFinished =
+    orderType === 'delivery' &&
+    isPaid &&
+    (incStatus === 'delivered' ||
+      incStatus === 'completed' ||
+      existingStatus === 'delivered' ||
+      existingStatus === 'completed' ||
+      resolvedRiderStatus === 'delivered');
+
+  const isDineInFinished =
+    orderType === 'dine_in' &&
+    isPaid &&
+    (incStatus === 'served' ||
+      incStatus === 'completed' ||
+      existingStatus === 'served' ||
+      existingStatus === 'completed');
+
+  const isTakeawayFinished =
+    orderType === 'takeaway' &&
+    isPaid &&
+    (incStatus === 'taken' ||
+      incStatus === 'completed' ||
+      existingStatus === 'taken' ||
+      existingStatus === 'completed');
+
+  const isOrderFinished =
+    !isAnyCancelled &&
+    (incStatus === 'completed' ||
+      existingStatus === 'completed' ||
+      isDeliveryFinished ||
+      isDineInFinished ||
+      isTakeawayFinished);
+
+  if (!existing) {
+    if (!isOrderFinished) return inc;
+    return {
+      ...inc,
+      status: 'completed',
+      riderStatus: orderType === 'delivery' ? 'delivered' : inc.riderStatus,
+      paymentStatus: inc.paymentStatus === 'refunded' ? 'refunded' : 'paid',
+      paymentCollected: true,
+      completedAt: inc.completedAt || new Date().toISOString(),
+      deliveredAt: inc.deliveredAt || new Date().toISOString(),
+    };
+  }
+
+  const existingRank = STATUS_RANK[existing.status] || 0;
+  const incomingRank = STATUS_RANK[inc.status] || 0;
+  const preserveLocalStatus =
+    existing.status !== 'cancelled' &&
+    inc.status !== 'cancelled' &&
+    existingRank > incomingRank;
+
+  const resolvedStatus = isAnyCancelled
+    ? 'cancelled'
+    : isOrderFinished
+      ? 'completed'
+      : preserveLocalStatus
+        ? existing.status
+        : inc.status;
+
+  const resolvedPaymentStatus: PaymentStatus =
+    (isOrderFinished || isLocallyPaid) && inc.paymentStatus !== 'refunded'
+      ? 'paid'
+      : inc.paymentStatus || existing.paymentStatus;
+
+  const resolvedPaymentCollected = Boolean(
+    isOrderFinished || isLocallyPaid || existing.paymentCollected || inc.paymentCollected
+  );
+
+  const resolvedSentToKitchen = Boolean(existing.sentToKitchen || inc.sentToKitchen);
+
+  return {
+    ...existing,
+    ...inc,
+    items: Array.isArray(inc.items) && inc.items.length > 0 ? inc.items : existing.items,
+    tableNumber: inc.tableNumber || existing.tableNumber,
+    tablePin: inc.tablePin || existing.tablePin,
+    customerCoordinates: inc.customerCoordinates || existing.customerCoordinates,
+    notes: inc.notes ?? existing.notes,
+    status: resolvedStatus,
+    paymentStatus: resolvedPaymentStatus,
+    paymentCollected: resolvedPaymentCollected,
+    cashierId: inc.cashierId || existing.cashierId,
+    cashierName: inc.cashierName || existing.cashierName,
+    shiftId: inc.shiftId || existing.shiftId,
+    assignedWaiterId: inc.assignedWaiterId || existing.assignedWaiterId,
+    assignedWaiterName: inc.assignedWaiterName || existing.assignedWaiterName,
+    sentToKitchen: resolvedSentToKitchen,
+    sentToKitchenAt: inc.sentToKitchenAt || existing.sentToKitchenAt,
+    forwardToKitchenAt: resolvedSentToKitchen ? undefined : (inc.forwardToKitchenAt || existing.forwardToKitchenAt),
+    preparationStartedAt: inc.preparationStartedAt || existing.preparationStartedAt,
+    completedAt: isOrderFinished
+      ? inc.completedAt || existing.completedAt || new Date().toISOString()
+      : inc.completedAt || existing.completedAt,
+    deliveredAt: isOrderFinished
+      ? inc.deliveredAt || existing.deliveredAt || new Date().toISOString()
+      : inc.deliveredAt || existing.deliveredAt,
+    assignedRiderId: inc.assignedRiderId || existing.assignedRiderId,
+    assignedRiderName: inc.assignedRiderName || existing.assignedRiderName,
+    riderStatus: isOrderFinished && orderType === 'delivery' ? 'delivered' : resolvedRiderStatus,
+  } as Order;
+}
 
 export const ordersSlice = createSlice({
   name: 'orders',
@@ -60,115 +179,44 @@ export const ordersSlice = createSlice({
         if (ord.orderNumber) existingMap.set(ord.orderNumber, ord);
       }
 
-      // Merge incoming orders, guarding against stale status rollback from asynchronous server writes
+      // Also check localStorage so recent updates from other tabs are never lost on poll
+      if (typeof window !== 'undefined') {
+        try {
+          const saved = localStorage.getItem('foodies_orders_live');
+          if (saved) {
+            const parsed = JSON.parse(saved);
+            if (Array.isArray(parsed)) {
+              for (const ord of parsed) {
+                if (!ord || !ord.id) continue;
+                const prev = existingMap.get(ord.id) || (ord.orderNumber ? existingMap.get(ord.orderNumber) : undefined);
+                const merged = mergeSingleOrderMonotonically(prev, ord);
+                existingMap.set(merged.id, merged);
+                if (merged.orderNumber) existingMap.set(merged.orderNumber, merged);
+              }
+            }
+          }
+        } catch { }
+      }
+
+      // Merge incoming orders monotonically without allowing status or payment downgrades
+      const handledKeys = new Set<string>();
       const mergedIncoming = incoming.map((inc) => {
         const existing = existingMap.get(inc.id) || (inc.orderNumber ? existingMap.get(inc.orderNumber) : undefined);
-        if (!existing) return inc;
-
-        const existingRank = STATUS_RANK[existing.status] || 0;
-        const incomingRank = STATUS_RANK[inc.status] || 0;
-
-        // Never let a stale server response downgrade an advanced local lifecycle status
-        // (unless the server response is an explicit cancellation)
-        const preserveLocalStatus =
-          existing.status !== 'cancelled' &&
-          inc.status !== 'cancelled' &&
-          existingRank > incomingRank;
-
-        const resolvedStatus = preserveLocalStatus ? existing.status : inc.status;
-        const resolvedSentToKitchen = existing.sentToKitchen || inc.sentToKitchen;
-        const resolvedSentToKitchenAt = inc.sentToKitchenAt || existing.sentToKitchenAt;
-        const resolvedPrepStartedAt = inc.preparationStartedAt || existing.preparationStartedAt;
-        const resolvedCompletedAt = inc.completedAt || existing.completedAt;
-        const resolvedDeliveredAt = inc.deliveredAt || existing.deliveredAt;
-        const resolvedRiderId = inc.assignedRiderId || existing.assignedRiderId;
-        const resolvedRiderName = inc.assignedRiderName || existing.assignedRiderName;
-        const resolvedRiderStatus = (inc.riderStatus || existing.riderStatus) as Order['riderStatus'];
-
-        // GUARD: Financial settlements (PAID) must never be downgraded to UNPAID by asynchronous/stale server sync!
-        const isLocallyPaid =
-          existing.paymentStatus === 'paid' ||
-          existing.paymentCollected === true;
-
-        const resolvedPaymentStatus = isLocallyPaid
-          ? (inc.paymentStatus === 'refunded' ? 'refunded' : 'paid')
-          : inc.paymentStatus;
-
-        const resolvedPaymentCollected =
-          isLocallyPaid ||
-          Boolean(inc.paymentCollected) ||
-          resolvedPaymentStatus === 'paid';
-
-        const resolvedCashierId = existing.cashierId || inc.cashierId;
-        const resolvedCashierName = existing.cashierName || inc.cashierName;
-        const resolvedShiftId = existing.shiftId || inc.shiftId;
-        const resolvedWaiterId = existing.assignedWaiterId || inc.assignedWaiterId;
-        const resolvedWaiterName = existing.assignedWaiterName || inc.assignedWaiterName;
-
-        const isPaid = isLocallyPaid || inc.paymentStatus === 'paid' || Boolean(inc.paymentCollected);
-        const currentOrIncStatus = inc.status as string;
-        const currentOrExistingStatus = existing.status as string;
-        const currentOrRiderStatus = resolvedRiderStatus as string | undefined;
-
-        const isDeliveryFinished =
-          (inc.type === 'delivery' || existing.type === 'delivery') &&
-          isPaid &&
-          (currentOrIncStatus === 'delivered' || currentOrIncStatus === 'completed' || currentOrExistingStatus === 'completed' || currentOrRiderStatus === 'delivered');
-
-        const isDineInFinished =
-          (inc.type === 'dine_in' || existing.type === 'dine_in') &&
-          isPaid &&
-          (currentOrIncStatus === 'served' || currentOrIncStatus === 'completed' || currentOrExistingStatus === 'served' || currentOrExistingStatus === 'completed');
-
-        const isTakeawayFinished =
-          (inc.type === 'takeaway' || existing.type === 'takeaway') &&
-          isPaid &&
-          (currentOrIncStatus === 'taken' || currentOrIncStatus === 'completed' || currentOrExistingStatus === 'taken' || currentOrExistingStatus === 'completed');
-
-        const isOrderFinished =
-          currentOrIncStatus === 'completed' ||
-          currentOrExistingStatus === 'completed' ||
-          isDeliveryFinished ||
-          isDineInFinished ||
-          isTakeawayFinished;
-
-        const finalStatus: OrderStatus = isOrderFinished ? 'completed' : resolvedStatus;
-        const finalRiderStatus: Order['riderStatus'] = (isOrderFinished && inc.type === 'delivery') ? 'delivered' : resolvedRiderStatus;
-        const finalPaymentStatus: PaymentStatus = (isOrderFinished || isLocallyPaid) && inc.paymentStatus !== 'refunded' ? 'paid' : resolvedPaymentStatus;
-        const finalPaymentCollected: boolean = isOrderFinished || isLocallyPaid || resolvedPaymentCollected;
-
-        return {
-          ...inc,
-          status: finalStatus,
-          paymentStatus: finalPaymentStatus,
-          paymentCollected: finalPaymentCollected,
-          cashierId: resolvedCashierId,
-          cashierName: resolvedCashierName,
-          shiftId: resolvedShiftId,
-          assignedWaiterId: resolvedWaiterId,
-          assignedWaiterName: resolvedWaiterName,
-          sentToKitchen: resolvedSentToKitchen,
-          sentToKitchenAt: resolvedSentToKitchenAt,
-          forwardToKitchenAt: resolvedSentToKitchen ? undefined : inc.forwardToKitchenAt,
-          preparationStartedAt: resolvedPrepStartedAt,
-          completedAt: isOrderFinished ? (inc.completedAt || new Date().toISOString()) : resolvedCompletedAt,
-          deliveredAt: isOrderFinished ? (inc.deliveredAt || new Date().toISOString()) : resolvedDeliveredAt,
-          assignedRiderId: resolvedRiderId,
-          assignedRiderName: resolvedRiderName,
-          riderStatus: finalRiderStatus,
-        } as Order;
+        const result = mergeSingleOrderMonotonically(existing, inc);
+        if (result.id) handledKeys.add(result.id);
+        if (result.orderNumber) handledKeys.add(result.orderNumber);
+        if (existing?.id) handledKeys.add(existing.id);
+        if (existing?.orderNumber) handledKeys.add(existing.orderNumber);
+        return result;
       });
 
       const merged: Order[] = [...mergedIncoming];
-      const handledKeys = new Set<string>();
-      mergedIncoming.forEach((o) => {
-        if (o.id) handledKeys.add(o.id);
-        if (o.orderNumber) handledKeys.add(o.orderNumber);
-      });
 
       // Preserve existing orders that aren't in the incoming payload (e.g. from other branches or locally active)
       for (const existing of state.orders) {
-        if (!handledKeys.has(existing.id) && !handledKeys.has(existing.orderNumber)) {
+        if (!handledKeys.has(existing.id) && (!existing.orderNumber || !handledKeys.has(existing.orderNumber))) {
+          handledKeys.add(existing.id);
+          if (existing.orderNumber) handledKeys.add(existing.orderNumber);
           merged.push(existing);
         }
       }
@@ -185,47 +233,14 @@ export const ordersSlice = createSlice({
       persistOrders(merged);
     },
     upsertOrder: (state, action: PayloadAction<Order>) => {
-      let ord = action.payload;
-      const isPaid = ord.paymentStatus === 'paid' || Boolean(ord.paymentCollected);
-      const ordStatus = ord.status as string;
-
-      const isDeliveryFinished =
-        ord.type === 'delivery' &&
-        isPaid &&
-        (ordStatus === 'delivered' || ordStatus === 'completed' || ord.riderStatus === 'delivered');
-
-      const isDineInFinished =
-        ord.type === 'dine_in' &&
-        isPaid &&
-        (ordStatus === 'served' || ordStatus === 'completed');
-
-      const isTakeawayFinished =
-        ord.type === 'takeaway' &&
-        isPaid &&
-        (ordStatus === 'taken' || ordStatus === 'completed');
-
-      const isOrderFinished =
-        ordStatus === 'completed' ||
-        isDeliveryFinished ||
-        isDineInFinished ||
-        isTakeawayFinished;
-
-      if (isOrderFinished) {
-        ord = {
-          ...ord,
-          status: 'completed',
-          riderStatus: ord.type === 'delivery' ? 'delivered' : ord.riderStatus,
-          paymentStatus: 'paid',
-          paymentCollected: true,
-          completedAt: ord.completedAt || new Date().toISOString(),
-          deliveredAt: ord.deliveredAt || new Date().toISOString(),
-        };
-      }
-      const idx = state.orders.findIndex((o) => o.id === ord.id || (ord.orderNumber && o.orderNumber === ord.orderNumber));
+      const incomingOrd = action.payload;
+      const idx = state.orders.findIndex(
+        (o) => o.id === incomingOrd.id || (incomingOrd.orderNumber && o.orderNumber === incomingOrd.orderNumber)
+      );
       if (idx >= 0) {
-        state.orders[idx] = { ...state.orders[idx], ...ord };
+        state.orders[idx] = mergeSingleOrderMonotonically(state.orders[idx], incomingOrd);
       } else {
-        state.orders.unshift(ord);
+        state.orders.unshift(mergeSingleOrderMonotonically(undefined, incomingOrd));
       }
       persistOrders(state.orders);
     },
@@ -246,15 +261,15 @@ export const ordersSlice = createSlice({
       }>
     ) => {
       const { orderId, newStatus, ...extras } = action.payload;
-      const idx = state.orders.findIndex((o) => o.id === orderId);
+      const idx = state.orders.findIndex((o) => o.id === orderId || o.orderNumber === orderId);
       if (idx >= 0) {
         const current = state.orders[idx];
-        state.orders[idx] = {
+        state.orders[idx] = mergeSingleOrderMonotonically(current, {
           ...current,
-          status: newStatus,
           ...extras,
+          status: newStatus,
           completedAt: newStatus === 'completed' ? new Date().toISOString() : current.completedAt,
-        };
+        });
         persistOrders(state.orders);
       }
     },
