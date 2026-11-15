@@ -18,7 +18,7 @@ export function getApiBaseUrl(): string {
   }
 
   if (Platform.OS === 'web') {
-    return 'http://localhost:3000';
+    return 'https://foodies-cafe-eutsvzksr-aliraza8.vercel.app';
   }
 
   const hostUri =
@@ -33,7 +33,7 @@ export function getApiBaseUrl(): string {
     }
   }
 
-  return 'http://localhost:3000';
+  return 'https://foodies-cafe-eutsvzksr-aliraza8.vercel.app';
 }
 
 export const API_BASE_URL = getApiBaseUrl();
