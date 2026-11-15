@@ -1,8 +1,10 @@
 'use client';
 
 import React, { useState, useEffect, useRef, useMemo } from 'react';
-import { useApp, useAppSelector, selectCartCount, selectCartSubtotal } from '@/context/AppContext';
-import { MenuItem } from '@/types/cafe';
+import { useApp, useAppSelector, selectCartCount, selectCartSubtotal, getItemMinPrice } from '@/context/AppContext';
+import { MenuItem, Branch } from '@/types/cafe';
+import { CustomerLoginModal } from './CustomerLoginModal';
+import { DeliveryMapModal } from '@/components/common/DeliveryMapModal';
 import {
   Search,
   AlertTriangle,
@@ -16,7 +18,18 @@ import {
   Flame,
   CheckCircle,
   UtensilsCrossed,
+  Utensils,
+  Bike,
   X,
+  Sparkles,
+  MapPin,
+  Phone,
+  User,
+  Banknote,
+  ArrowLeft,
+  CheckCircle2,
+  Tag,
+  Upload,
 } from 'lucide-react';
 
 interface MenuScreenProps {
@@ -25,39 +38,370 @@ interface MenuScreenProps {
   onProceedToCheckout?: () => void;
 }
 
+// Default Authentic Deals if not present in custom menu
+const DEFAULT_DEAL_ITEMS: MenuItem[] = [
+  {
+    id: 'deal-family-biryani',
+    name: 'Family Dum Biryani Feast (Deal for 3-4)',
+    category: 'Deals',
+    description: '2x Royal Chicken Biryani, 1x Half Chicken Boti BBQ, 2x Mint Margaritas, Fresh Zeera Raita & Salad.',
+    basePrice: 1650,
+    image: '/food-biryani.jpg',
+    isAvailable: true,
+    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
+    branchPriceOverrides: { 'gulberg-lahore': 1650, 'f7-islamabad': 1590, 'clifton-karachi': 1690 },
+    sizes: [{ name: 'Family Combo', priceDelta: 0 }],
+  },
+  {
+    id: 'deal-shinwari-duo',
+    name: 'Shinwari Karahi Duo Combo (Deal for 2)',
+    category: 'Deals',
+    description: 'Half Desi Ghee Shinwari Chicken Karahi, 4x Fresh Roghni Naan, 2x Soft Drinks & Mint Chutney.',
+    basePrice: 1550,
+    image: '/hero-bg.jpg',
+    isAvailable: true,
+    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
+    branchPriceOverrides: { 'gulberg-lahore': 1550, 'f7-islamabad': 1490, 'clifton-karachi': 1590 },
+    sizes: [{ name: '2 Persons', priceDelta: 0 }],
+  },
+  {
+    id: 'deal-burger-crave',
+    name: 'Smashed Burger & Fries Crave Deal',
+    category: 'Deals',
+    description: '1x Double Beef Smashed Cheeseburger, 1x Peri Peri Loaded Fries & 1x Artisanal Mint Margarita.',
+    basePrice: 1190,
+    image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&auto=format&fit=crop&q=60',
+    isAvailable: true,
+    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
+    branchPriceOverrides: { 'gulberg-lahore': 1190, 'f7-islamabad': 1150, 'clifton-karachi': 1220 },
+    sizes: [{ name: 'Single Meal', priceDelta: 0 }],
+  },
+  {
+    id: 'deal-bbq-midnight',
+    name: 'Midnight BBQ Feast Deal',
+    category: 'Deals',
+    description: '4 pcs Reshmi Chicken Kebabs, 6 pcs Chicken Malai Boti, 2x Garlic Butter Naans, Raita & Salad.',
+    basePrice: 1290,
+    image: 'https://images.unsplash.com/photo-1599488615731-7e5c2823ff28?w=800&auto=format&fit=crop&q=60',
+    isAvailable: true,
+    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
+    branchPriceOverrides: { 'gulberg-lahore': 1290, 'f7-islamabad': 1250, 'clifton-karachi': 1320 },
+    sizes: [{ name: 'Sharing Platter', priceDelta: 0 }],
+  },
+];
+
 export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart, onProceedToCheckout }) => {
   const {
     currentBranch,
+    tables,
+    hasSelectedBranch,
     menuItems,
     currentBranchId,
     cart,
     categories: appCategories,
     addToCart,
     updateCartItemQty,
+    clearCart,
+    placeOrder,
+    activeTableSession,
     menuSearchQuery,
     setMenuSearchQuery,
     currentUser,
     setCurrentUser,
     addToast,
+    setBranchUnavailableModal,
+    orderType,
+    setOrderType,
+    hasConfirmedOrderType,
+    setHasConfirmedOrderType,
+    selectedDeliveryAddress,
+    setSelectedDeliveryAddress,
+    setCurrentBranchId,
+    dealCard,
+    announcements,
+    updateDealCard,
+    currentRole,
   } = useApp();
 
+  // Order Menu Deals Section: Load photos directly from Local Storage
+  const [localDealPhotos, setLocalDealPhotos] = useState<string[]>(() => {
+    const defaults = ['/food-biryani.jpg', '/hero-bg.jpg'];
+    if (typeof window === 'undefined') return defaults;
+    try {
+      const raw = localStorage.getItem('foodies_local_deal_photos');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch {}
+    return defaults;
+  });
+
+  const [storedDealImage, setStoredDealImage] = useState<string>(() => {
+    if (typeof window === 'undefined') return dealCard?.imageUrl || '/food-biryani.jpg';
+    try {
+      const directImg = localStorage.getItem('foodies_local_deal_card_image');
+      if (directImg) return directImg;
+      const savedCardRaw = localStorage.getItem('foodies_deal_card');
+      if (savedCardRaw) {
+        const parsed = JSON.parse(savedCardRaw);
+        if (parsed?.imageUrl) return parsed.imageUrl;
+      }
+    } catch {}
+    return dealCard?.imageUrl || '/food-biryani.jpg';
+  });
+
+  const [announcementPhotosMap, setAnnouncementPhotosMap] = useState<Record<string, string>>(() => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const raw = localStorage.getItem('foodies_announcement_photos');
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
+    }
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      const directImg = localStorage.getItem('foodies_local_deal_card_image');
+      if (directImg) setStoredDealImage(directImg);
+      else if (dealCard?.imageUrl) setStoredDealImage(dealCard.imageUrl);
+      const rawGallery = localStorage.getItem('foodies_local_deal_photos');
+      if (rawGallery) {
+        const parsed = JSON.parse(rawGallery);
+        if (Array.isArray(parsed) && parsed.length > 0) setLocalDealPhotos(parsed);
+      }
+      const rawAnn = localStorage.getItem('foodies_announcement_photos');
+      if (rawAnn) setAnnouncementPhotosMap(JSON.parse(rawAnn));
+    } catch {}
+  }, [dealCard?.imageUrl]);
+
+  const canEditDealPhotos = currentRole === 'branch_manager' || currentRole === 'platform_owner' || currentRole === 'cashier';
+
+  const handleUploadMenuDealPhoto = (file: File) => {
+    if (!file) return;
+    if (file.size > 1.8 * 1024 * 1024) {
+      addToast({ type: 'warning', title: 'Large Photo', message: 'Choose a photo under 1.8MB for Local Storage.' });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const dataUrl = reader.result as string;
+      if (!dataUrl) return;
+      setStoredDealImage(dataUrl);
+      setLocalDealPhotos((prev) => {
+        const next = [dataUrl, ...prev.filter((p) => p !== dataUrl)].slice(0, 12);
+        try {
+          localStorage.setItem('foodies_local_deal_photos', JSON.stringify(next));
+          localStorage.setItem('foodies_local_deal_card_image', dataUrl);
+          localStorage.setItem('foodies_deal_card', JSON.stringify({ ...dealCard, imageUrl: dataUrl }));
+        } catch {}
+        return next;
+      });
+      if (updateDealCard) {
+        updateDealCard({ ...dealCard, imageUrl: dataUrl });
+      }
+      addToast({ type: 'success', title: 'Deal Photo Updated', message: 'Saved to Local Storage for Order Menu Deals.' });
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Order Type Selection Pop-up Modal state
+  const [orderTypeModalOpen, setOrderTypeModalOpen] = useState(false);
+  const [deliveryMapModalOpen, setDeliveryMapModalOpen] = useState(false);
+
+  // Web Checkout Experience States
+  const [isCheckoutMode, setIsCheckoutMode] = useState(false);
+  const [checkoutRightStep, setCheckoutRightStep] = useState<'table' | 'bill'>('table');
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
+  const [confirmModalOpen, setConfirmModalOpen] = useState(false);
+  const [specialInstructions, setSpecialInstructions] = useState('');
+  const [customerName, setCustomerName] = useState(
+    currentUser?.name && currentUser.name !== 'Guest Customer' ? currentUser.name : ''
+  );
+  const [customerPhone, setCustomerPhone] = useState(currentUser?.phone || '');
+  const [deliveryAddress, setDeliveryAddress] = useState(selectedDeliveryAddress || 'Main Boulevard, Gulberg III, Lahore');
+
+  useEffect(() => {
+    if (selectedDeliveryAddress) {
+      setDeliveryAddress(selectedDeliveryAddress);
+    }
+  }, [selectedDeliveryAddress]);
+
+  const [selectedTableNumber, setSelectedTableNumber] = useState(activeTableSession?.tableNumber || 'T-01');
+
+  // Screen width detection for screen-adaptive checkout (desktop 2-column vs mobile drawer)
+  const [isDesktop, setIsDesktop] = useState(true);
+  useEffect(() => {
+    const checkDesktop = () => {
+      setIsDesktop(typeof window !== 'undefined' ? window.innerWidth > 860 : true);
+    };
+    checkDesktop();
+    window.addEventListener('resize', checkDesktop);
+    return () => window.removeEventListener('resize', checkDesktop);
+  }, []);
+  const normCurrentBranch = useMemo(() => {
+    const id = currentBranchId || 'gulberg-lahore';
+    if (id.includes('gulberg')) return 'gulberg-lahore';
+    if (id.includes('f7') || id.includes('islamabad')) return 'f7-islamabad';
+    if (id.includes('clifton') || id.includes('karachi')) return 'clifton-karachi';
+    return id;
+  }, [currentBranchId]);
+
+  const branchTables = useMemo(() => {
+    const list = (tables || []).filter(
+      (t) => !t.branchId || t.branchId === currentBranchId || t.branchId.includes(normCurrentBranch.split('-')[0])
+    );
+    return list.length > 0 ? list : (tables || []);
+  }, [tables, currentBranchId, normCurrentBranch]);
+
+  const availableFloors = useMemo(() => {
+    const set = new Set<string>();
+    branchTables.forEach((t) => {
+      if (t.floor) set.add(t.floor.trim());
+    });
+    const list = Array.from(set);
+    return list.length > 0 ? list : ['Ground Floor', '1st Floor', 'Rooftop Terrace'];
+  }, [branchTables]);
+
+  const [selectedFloor, setSelectedFloor] = useState<string>('Ground Floor');
+
+  useEffect(() => {
+    if (availableFloors.length > 0 && !availableFloors.includes(selectedFloor)) {
+      setSelectedFloor(availableFloors[0]);
+    }
+  }, [availableFloors, selectedFloor]);
+
+  const floorTables = useMemo(() => {
+    const filtered = branchTables.filter((t) => {
+      const f = (t.floor || 'Ground Floor').toLowerCase();
+      const s = selectedFloor.toLowerCase().split('(')[0].trim();
+      return f.includes(s) || s.includes(f.split('(')[0].trim());
+    });
+    return filtered.length > 0 ? filtered : branchTables;
+  }, [branchTables, selectedFloor]);
+
+  useEffect(() => {
+    if (floorTables.length > 0) {
+      const match = floorTables.find((t) => t.number === selectedTableNumber);
+      if (!match) {
+        const firstAvail = floorTables.find((t) => t.status === 'available') || floorTables[0];
+        if (firstAvail) setSelectedTableNumber(firstAvail.number);
+      }
+    }
+  }, [floorTables, selectedTableNumber]);
+
+  const isCustomerLoggedIn = Boolean(
+    currentUser &&
+    (currentUser.email || (currentUser.name && currentUser.name !== 'Guest Customer')) &&
+    currentUser.role === 'customer'
+  );
+
+  useEffect(() => {
+    if (currentUser?.name && currentUser.name !== 'Guest Customer' && !customerName) {
+      setCustomerName(currentUser.name);
+    }
+    if (currentUser?.phone && !customerPhone) {
+      setCustomerPhone(currentUser.phone);
+    }
+  }, [currentUser]);
+
+  // When login completes while login modal is open, advance directly
+  useEffect(() => {
+    if (loginModalOpen && isCustomerLoggedIn) {
+      setLoginModalOpen(false);
+      if (isDesktop) {
+        if (!hasConfirmedOrderType) {
+          setOrderTypeModalOpen(true);
+        } else {
+          setIsCheckoutMode(true);
+          if (orderType === 'dine_in') {
+            setCheckoutRightStep('table');
+          } else {
+            setCheckoutRightStep('bill');
+          }
+        }
+      } else {
+        if (!hasConfirmedOrderType) {
+          setOrderTypeModalOpen(true);
+        } else {
+          if (onProceedToCheckout) {
+            onProceedToCheckout();
+          } else if (onOpenCart) {
+            onOpenCart();
+          }
+        }
+      }
+    }
+  }, [loginModalOpen, isCustomerLoggedIn, hasConfirmedOrderType, isDesktop, orderType, onProceedToCheckout, onOpenCart]);
+
+  // Return to menu if cart becomes empty
+  useEffect(() => {
+    if (cart.length === 0 && isCheckoutMode) {
+      setIsCheckoutMode(false);
+    }
+  }, [cart.length, isCheckoutMode]);
+
   const searchQuery = menuSearchQuery;
-  // Dynamically ensure all categories present in menuItems are supported alongside appCategories
+  const [unavailableModalDish, setUnavailableModalDish] = useState<MenuItem | null>(null);
+
+  // Fallback combined items containing default deals if not in database
+  const allMenuItems = useMemo(() => {
+    const existingDeal = (menuItems || []).some((i) => (i.category || '').toLowerCase() === 'deals');
+    if (existingDeal) return menuItems;
+    return [...DEFAULT_DEAL_ITEMS, ...(menuItems || [])];
+  }, [menuItems]);
+
+  // Dynamically ensure 'Deals' is always a simple category alongside other categories
   const categories: string[] = useMemo(() => {
-    const list: string[] = [...(appCategories || [])];
-    (menuItems || []).forEach((item) => {
+    const list: string[] = ['Deals'];
+    (appCategories || []).forEach((c) => {
+      if (!list.includes(c) && c.toLowerCase() !== 'deals') {
+        list.push(c);
+      }
+    });
+    (allMenuItems || []).forEach((item) => {
       if (item.category && !list.includes(item.category)) {
         list.push(item.category);
       }
     });
-    return list.length > 0 ? list : ['Biryani & Rice', 'Karahi & Handi', 'BBQ & Kebabs', 'Burgers & Fast Food', 'Tandoor & Breads', 'Beverages & Desserts'];
-  }, [appCategories, menuItems]);
+    return list.length > 0 ? list : ['Deals', 'Biryani & Rice', 'Karahi & Handi', 'BBQ & Kebabs', 'Burgers & Fast Food', 'Tandoor & Breads', 'Beverages & Desserts'];
+  }, [appCategories, allMenuItems]);
 
-  const [selectedCategory, setSelectedCategory] = useState<string>(() => categories[0] || 'Biryani & Rice');
+  const [selectedCategory, setSelectedCategory] = useState<string>(() => categories[0] || 'Deals');
 
   const categoryRowRef = useRef<HTMLDivElement>(null);
   const categoryBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
   const isManualScrollRef = useRef(false);
+
+  // "You May Also Like" drag-up and page scroll listeners
+  const youMayLikeRowRef = useRef<HTMLDivElement>(null);
+  const isPointerDraggingRef = useRef(false);
+  const pointerStartYRef = useRef(0);
+  const pointerStartScrollYRef = useRef(0);
+
+  const handleYouMayLikePointerDown = (e: React.PointerEvent) => {
+    if (e.button !== 0) return;
+    isPointerDraggingRef.current = true;
+    pointerStartYRef.current = e.clientY;
+    pointerStartScrollYRef.current = window.scrollY;
+  };
+
+  const handleYouMayLikePointerMove = (e: React.PointerEvent) => {
+    if (!isPointerDraggingRef.current) return;
+    const deltaY = pointerStartYRef.current - e.clientY;
+    if (Math.abs(deltaY) > 3) {
+      window.scrollTo({
+        top: pointerStartScrollYRef.current + deltaY,
+        behavior: 'auto',
+      });
+    }
+  };
+
+  const handleYouMayLikePointerUp = () => {
+    isPointerDraggingRef.current = false;
+  };
 
   // Sync selectedCategory if categories loaded later
   useEffect(() => {
@@ -75,13 +419,14 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
     const iNorm = norm(itemCat);
     const sNorm = norm(sectionCat);
     if (iNorm === sNorm) return true;
+    if (sNorm === 'deals' && (iNorm.includes('deal') || iNorm.includes('combo'))) return true;
     if ((iNorm.includes('karahi') || iNorm.includes('shinwari')) && (sNorm.includes('karahi') || sNorm.includes('shinwari'))) return true;
     if ((iNorm.includes('tandoor') || iNorm.includes('bread')) && (sNorm.includes('tandoor') || sNorm.includes('bread'))) return true;
     return false;
   };
 
   // Filtered items when searching
-  const filteredItems = menuItems.filter((item) => {
+  const filteredItems = allMenuItems.filter((item) => {
     const matchesSearch =
       item.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
       item.description.toLowerCase().includes(searchQuery.toLowerCase());
@@ -130,7 +475,7 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
 
       if (!ticking) {
         window.requestAnimationFrame(() => {
-          const pureCats = appCategories || [];
+          const pureCats = categories || [];
           if (pureCats.length === 0) {
             ticking = false;
             return;
@@ -245,6 +590,263 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
   const cartCount = mounted ? rawCartCount : 0;
   const cartSubtotal = mounted ? rawCartSubtotal : 0;
 
+  // Delivery minimum order amount calculation
+  const isDelivery = orderType === 'delivery';
+  const minDeliveryAmount = currentBranch?.minDeliveryAmount ?? 500;
+  const isBelowMinDelivery = isDelivery && cartCount > 0 && cartSubtotal < minDeliveryAmount;
+  const deliveryShortfall = Math.max(0, minDeliveryAmount - cartSubtotal);
+
+  // Taxes and Grand Total calculations
+  const tax = Math.round(cartSubtotal * 0.16);
+  const deliveryFee = orderType === 'delivery' ? 150 : 0;
+  const grandTotal = cartSubtotal + tax + deliveryFee;
+
+  // Complementary "You May Also Like" items for checkout
+  const youMayAlsoLikeItems = useMemo(() => {
+    const cartItemIds = new Set((cart || []).map((c) => c.menuItemId || c.id));
+    const cartItemNames = new Set((cart || []).map((c) => (c.name || '').toLowerCase()));
+
+    const priorityCategories = ['Beverages', 'Desserts', 'Tandoor & Breads', 'Appetizers', 'Beverages & Desserts'];
+
+    const filtered = (menuItems || []).filter((item) => {
+      if (cartItemIds.has(item.id)) return false;
+      if (cartItemNames.has((item.name || '').toLowerCase())) return false;
+      const isAvailAtBranch = item.branchAvailability?.[currentBranchId] !== false && item.isAvailable !== false;
+      return isAvailAtBranch;
+    });
+
+    const priorityMatches = filtered.filter((i) =>
+      priorityCategories.some((cat) => (i.category || '').toLowerCase().includes(cat.toLowerCase()))
+    );
+
+    const candidates = priorityMatches.length >= 4 ? priorityMatches : filtered;
+    return candidates.slice(0, 8);
+  }, [menuItems, cart, currentBranchId]);
+
+  const handleProceedClick = () => {
+    if (cartCount === 0) return;
+
+    // 1. If not signed in first: pop up screen for login first
+    if (!isCustomerLoggedIn) {
+      setLoginModalOpen(true);
+      return;
+    }
+
+    // 2. Next page asks for order type if not confirmed yet
+    if (!hasConfirmedOrderType) {
+      setOrderTypeModalOpen(true);
+      return;
+    }
+
+    // If delivery is chosen and below minimum:
+    if (orderType === 'delivery' && cartSubtotal < minDeliveryAmount) {
+      addToast({
+        type: 'warning',
+        title: `Select More Items for Delivery (Min Rs. ${minDeliveryAmount.toLocaleString()})`,
+        message: `Please select Rs. ${deliveryShortfall.toLocaleString()} more items to cross Rs. ${minDeliveryAmount.toLocaleString()} for delivery.`,
+      });
+      return;
+    }
+
+    // 3. Screen-adaptive checkout branching:
+    // Big Screen (Laptop/Desktop > 860px): In-page 2-column checkout with left order detail & right payment card
+    // Small Screen (Mobile <= 860px): Mobile bottom-sheet checkout drawer
+    if (isDesktop) {
+      setIsCheckoutMode(true);
+      if (orderType === 'dine_in') {
+        setCheckoutRightStep('table');
+      } else {
+        setCheckoutRightStep('bill');
+      }
+    } else {
+      if (onProceedToCheckout) {
+        onProceedToCheckout();
+      } else if (onOpenCart) {
+        onOpenCart();
+      }
+    }
+  };
+
+  const handleDeliveryConfirmed = (addr: string, branch: Branch) => {
+    setDeliveryAddress(addr);
+    if (setSelectedDeliveryAddress) setSelectedDeliveryAddress(addr);
+    if (setCurrentBranchId) setCurrentBranchId(branch.id);
+    setOrderType('delivery');
+    setHasConfirmedOrderType(true);
+    setDeliveryMapModalOpen(false);
+
+    // If customer selected Delivery and value is less than minimum delivery amount:
+    if (cartSubtotal < minDeliveryAmount) {
+      addToast({
+        type: 'warning',
+        title: `Select More Items for Delivery (Min Rs. ${minDeliveryAmount.toLocaleString()})`,
+        message: `Please select Rs. ${deliveryShortfall.toLocaleString()} more items to cross Rs. ${minDeliveryAmount.toLocaleString()} for delivery.`,
+      });
+      return;
+    }
+
+    // Screen-adaptive checkout branching:
+    if (isDesktop) {
+      setIsCheckoutMode(true);
+      setCheckoutRightStep('bill');
+    } else {
+      if (onProceedToCheckout) {
+        onProceedToCheckout();
+      } else if (onOpenCart) {
+        onOpenCart();
+      }
+    }
+  };
+
+  const handleSelectOrderType = (selected: 'dine_in' | 'takeaway' | 'delivery') => {
+    if (!isCustomerLoggedIn) {
+      setOrderTypeModalOpen(false);
+      setLoginModalOpen(true);
+      return;
+    }
+
+    if (selected === 'delivery') {
+      setOrderTypeModalOpen(false);
+      setDeliveryMapModalOpen(true);
+      return;
+    }
+
+    setOrderType(selected);
+    setHasConfirmedOrderType(true);
+    setOrderTypeModalOpen(false);
+
+    // Screen-adaptive checkout branching:
+    if (isDesktop) {
+      setIsCheckoutMode(true);
+      if (selected === 'dine_in') {
+        setCheckoutRightStep('table');
+      } else {
+        setCheckoutRightStep('bill');
+      }
+    } else {
+      if (onProceedToCheckout) {
+        onProceedToCheckout();
+      } else if (onOpenCart) {
+        onOpenCart();
+      }
+    }
+  };
+
+  const handleConfirmAndPayCash = () => {
+    // 0. Verify customer is authenticated
+    if (!isCustomerLoggedIn) {
+      setConfirmModalOpen(false);
+      setLoginModalOpen(true);
+      addToast({
+        type: 'warning',
+        title: 'Sign In Required ✉️',
+        message: 'Please sign in to your customer account to place and pay for your order.',
+      });
+      return;
+    }
+
+    if (!customerName.trim()) {
+      addToast({
+        type: 'warning',
+        title: 'Customer Name Required',
+        message: 'Please enter your name for this order.',
+      });
+      return;
+    }
+
+    const cleanDigits = customerPhone.replace(/\D/g, '');
+    if (!cleanDigits || cleanDigits.length < 9) {
+      addToast({
+        type: 'warning',
+        title: 'Receiver Mobile Number Required 📱',
+        message: 'Please provide a valid receiver mobile number for order delivery & rider updates.',
+      });
+      return;
+    }
+
+    // Resolve authenticated customer profile from context or customer session cache
+    let activeCustomer = currentUser;
+    if ((!activeCustomer || !activeCustomer.name || activeCustomer.name === 'Guest Customer') && typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('foodies_customer_user');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && parsed.name && parsed.name !== 'Guest Customer') {
+            activeCustomer = parsed;
+          }
+        }
+      } catch (e) {}
+    }
+
+    const clean10 = cleanDigits.slice(-10);
+    const effectiveCustomerId = activeCustomer?.id && activeCustomer.id !== 'user-guest'
+      ? activeCustomer.id
+      : `cust-${clean10}`;
+    const effectiveCustomerName = customerName.trim() || activeCustomer?.name || (cleanDigits ? `Customer (${clean10})` : 'Customer');
+    const effectiveCustomerPhone = customerPhone || activeCustomer?.phone || '';
+    const effectiveCustomerEmail = activeCustomer?.email || undefined;
+
+    const effectiveType = orderType || 'delivery';
+    const effectivePaymentMethod = effectiveType === 'delivery'
+      ? 'Cash on Delivery (COD)'
+      : effectiveType === 'dine_in'
+      ? 'Cash at Table'
+      : 'Cash at Counter';
+
+    try {
+      const placed = placeOrder(
+        effectiveType,
+        effectiveType === 'dine_in' ? selectedTableNumber : undefined,
+        undefined, // tablePin
+        effectiveType === 'takeaway' ? '15-25 mins' : undefined,
+        effectiveType === 'delivery' ? deliveryAddress : undefined,
+        effectivePaymentMethod,
+        undefined, // customItems
+        {
+          customerId: effectiveCustomerId,
+          customerName: effectiveCustomerName,
+          customerPhone: effectiveCustomerPhone,
+          customerEmail: effectiveCustomerEmail,
+          notes: specialInstructions.trim() || undefined,
+          paymentStatus: 'unpaid',
+          paymentCollected: false,
+        }
+      );
+
+      // Permanently link order to active customer account cache immediately
+      if (typeof window !== 'undefined' && placed) {
+        try {
+          const myIds = JSON.parse(localStorage.getItem('foodies_customer_order_ids') || '[]');
+          if (!myIds.includes(placed.id)) myIds.unshift(placed.id);
+          if (placed.orderNumber && !myIds.includes(placed.orderNumber)) myIds.unshift(placed.orderNumber);
+          localStorage.setItem('foodies_customer_order_ids', JSON.stringify(myIds));
+
+          const cache = JSON.parse(localStorage.getItem('foodies_customer_history_cache') || '[]');
+          const updatedCache = [placed, ...cache.filter((o: any) => o.id !== placed.id && o.orderNumber !== placed.orderNumber)];
+          localStorage.setItem('foodies_customer_history_cache', JSON.stringify(updatedCache));
+        } catch (e) {}
+      }
+
+      clearCart();
+      setIsCheckoutMode(false);
+      setConfirmModalOpen(false);
+
+      addToast({
+        type: 'success',
+        title: 'Order Placed Successfully! 🎉',
+        message: `Order #${placed?.orderNumber || 'FC-NEW'} has been received by the cafe.`,
+      });
+
+      onNavigate('order-tracking');
+    } catch (err: any) {
+      addToast({
+        type: 'error',
+        title: 'Failed to Place Order',
+        message: err?.message || 'Please try again.',
+      });
+    }
+  };
+
   // Snappy flying piece animation from clicked order item to header cart button
   const triggerFlyToCart = (
     e: React.MouseEvent,
@@ -340,10 +942,14 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
 
   // Helper to render an individual item card
   const renderItemCard = (item: MenuItem) => {
-    const isAvailable = (item.branchAvailability && item.branchAvailability[currentBranchId] !== undefined)
-      ? Boolean(item.branchAvailability[currentBranchId])
+    const isAvailable = hasSelectedBranch
+      ? ((item.branchAvailability && item.branchAvailability[currentBranchId] !== undefined)
+          ? Boolean(item.branchAvailability[currentBranchId])
+          : (item.isAvailable ?? true))
       : (item.isAvailable ?? true);
-    const rawPrice = item.branchPriceOverrides?.[currentBranchId] ?? item.basePrice;
+    const rawPrice = hasSelectedBranch
+      ? (item.branchPriceOverrides?.[currentBranchId] ?? item.basePrice)
+      : getItemMinPrice(item);
     const displayPrice = Number(rawPrice) || 0;
 
     // Check if item is already in cart for this order
@@ -364,22 +970,33 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
           boxShadow: isAvailable ? 'var(--shadow-md)' : 'none',
           display: 'flex',
           flexDirection: 'column',
-          cursor: 'default',
+          cursor: isAvailable ? 'default' : 'pointer',
           opacity: isAvailable ? 1 : 0.6,
           filter: isAvailable ? 'none' : 'grayscale(70%)',
           position: 'relative',
         }}
+        onClick={!isAvailable ? () => setBranchUnavailableModal({
+          visible: true,
+          branchName: currentBranch?.name || 'this branch',
+          itemNames: [item.name],
+        }) : undefined}
       >
         {/* Photo & Category Badge */}
-        <div className="dish-img-wrap" style={{ height: '190px', width: '100%', position: 'relative', overflow: 'hidden' }}>
-          <img
-            src={item.image}
-            alt={item.name}
-            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-            onError={(e) => {
-              (e.target as HTMLImageElement).src = '/food-biryani.jpg';
-            }}
-          />
+        <div className="dish-img-wrap" style={{ height: '190px', width: '100%', position: 'relative', overflow: 'hidden', backgroundColor: '#F8FAFC' }}>
+          {item.image && item.image.trim() !== '' ? (
+            <img
+              src={item.image}
+              alt={item.name}
+              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              onError={(e) => {
+                (e.target as HTMLImageElement).src = '/food-biryani.jpg';
+              }}
+            />
+          ) : (
+            <div style={{ width: '100%', height: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)' }}>
+              <Utensils size={42} style={{ opacity: 0.35 }} />
+            </div>
+          )}
           <span
             className="dish-cat-badge"
             style={{
@@ -475,10 +1092,16 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
             {/* When not in cart: display "+ Add" button (desktop) / "Order" (mobile). When selected: order option appears as delete sign, quantity, plus sign */}
             {inCartQty === 0 ? (
               <button
-                disabled={!isAvailable}
                 onClick={(e) => {
                   e.stopPropagation();
-                  if (!isAvailable) return;
+                  if (!isAvailable) {
+                    setBranchUnavailableModal({
+                      visible: true,
+                      branchName: currentBranch?.name || 'this branch',
+                      itemNames: [item.name],
+                    });
+                    return;
+                  }
                   triggerFlyToCart(e, () => {
                     addToCart({
                       id: `cart-${item.id}-${Date.now()}`,
@@ -496,17 +1119,17 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
                   width: '96px',
                   boxSizing: 'border-box',
                   borderRadius: 'var(--radius-md)',
-                  backgroundColor: isAvailable ? 'var(--primary)' : 'var(--bg-card-subtle)',
-                  color: isAvailable ? '#FFFFFF' : 'var(--text-muted)',
+                  backgroundColor: isAvailable ? 'var(--primary)' : '#FEE2E2',
+                  color: isAvailable ? '#FFFFFF' : '#DC2626',
                   fontSize: 'clamp(11px, 1.5vw, 13px)',
                   fontWeight: 700,
-                  cursor: isAvailable ? 'pointer' : 'not-allowed',
+                  cursor: 'pointer',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'center',
                   gap: '4px',
                   boxShadow: isAvailable ? '0 4px 10px var(--primary-glow)' : 'none',
-                  border: 'none',
+                  border: isAvailable ? 'none' : '1px solid #FCA5A5',
                   flexShrink: 0,
                   whiteSpace: 'nowrap',
                 }}
@@ -521,12 +1144,12 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
                     style={{
                       fontSize: 'clamp(10px, 1.3vw, 11px)',
                       fontWeight: 750,
-                      color: 'var(--text-muted)',
+                      color: '#DC2626',
                       lineHeight: 1,
                       letterSpacing: '0.01em',
                     }}
                   >
-                    Out of Stock
+                    Unavailable
                   </span>
                 )}
               </button>
@@ -638,41 +1261,43 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
 
   return (
     <div
-      className="foodies-menu-container"
+      className={`foodies-menu-container ${isCheckoutMode ? 'checkout-active' : ''}`}
       style={{
         maxWidth: '1280px',
         margin: '0 auto',
         padding: `0 16px ${menuBottomPadding}`,
+        paddingTop: isCheckoutMode ? '20px' : '0px',
         width: '100%',
         boxSizing: 'border-box',
       }}
     >
-      {/* Category Filters Bar & Search Box: FULL LINE directly below the 72px fixed header (tight spacing) */}
-      <div
-        className="foodies-category-bar-full-line"
-        style={{
-          position: 'sticky',
-          top: '72px', // In line with customer header bottom
-          zIndex: 900,
-          backgroundColor: 'var(--bg-main)',
-          padding: '6px 0 8px',
-          marginTop: 0,
-          marginBottom: '14px',
-          borderBottom: '1px solid var(--border-color)',
-          boxShadow: '0 2px 8px rgba(0, 0, 0, 0.03)',
-          width: '100%',
-        }}
-      >
+      {/* Category Filters Bar & Search Box: FULL LINE directly below the 72px fixed header (tight spacing) - Hidden in Checkout Mode */}
+      {!isCheckoutMode && (
         <div
-          className="foodies-menu-toolbar"
+          className="foodies-category-bar-full-line"
           style={{
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between',
-            gap: '14px',
+            position: 'sticky',
+            top: '72px', // In line with customer header bottom
+            zIndex: 900,
+            backgroundColor: 'var(--bg-main)',
+            padding: '6px 0 8px',
+            marginTop: 0,
+            marginBottom: '14px',
+            borderBottom: '1px solid var(--border-color)',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.03)',
             width: '100%',
           }}
         >
+          <div
+            className="foodies-menu-toolbar"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: '14px',
+              width: '100%',
+            }}
+          >
           {/* Scrollable Category Filter Pills */}
           <div
             ref={categoryRowRef}
@@ -777,12 +1402,356 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
           </div>
         </div>
       </div>
+      )}
 
       {/* Two-Column Layout Below Categories: Dishes on Left, Static Checkout Card on Right */}
       <div className="foodies-menu-main-layout" style={{ display: 'flex', gap: '28px', alignItems: 'flex-start', width: '100%' }}>
-        {/* Left Column: Menu Dishes (scrollable alongside checkout card) */}
+        {/* Left Column: Menu Dishes or Checkout Order Review */}
         <div style={{ flex: '1 1 0%', minWidth: 0 }}>
-          {searchQuery.trim().length > 0 ? (
+          {isCheckoutMode ? (
+            /* ================= CHECKOUT MODE LEFT COLUMN ================= */
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+              {/* Selected Items Card */}
+              <div
+                style={{
+                  backgroundColor: 'var(--bg-card)',
+                  borderRadius: '20px',
+                  border: '1px solid var(--border-color)',
+                  padding: '24px',
+                  boxShadow: 'var(--shadow-sm)',
+                }}
+              >
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    marginBottom: '20px',
+                    paddingBottom: '16px',
+                    borderBottom: '1.5px solid var(--border-color)',
+                    flexWrap: 'wrap',
+                    gap: '12px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                    <button
+                      type="button"
+                      onClick={() => setIsCheckoutMode(false)}
+                      style={{
+                        width: '38px',
+                        height: '38px',
+                        borderRadius: '10px',
+                        backgroundColor: 'var(--bg-card-subtle)',
+                        border: '1.5px solid var(--border-color)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        color: 'var(--text-main)',
+                        transition: 'all 0.15s ease',
+                        boxShadow: 'var(--shadow-sm)',
+                        flexShrink: 0,
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = 'var(--primary-light)';
+                        e.currentTarget.style.borderColor = 'var(--primary)';
+                        e.currentTarget.style.color = 'var(--primary)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'var(--bg-card-subtle)';
+                        e.currentTarget.style.borderColor = 'var(--border-color)';
+                        e.currentTarget.style.color = 'var(--text-main)';
+                      }}
+                      title="Back to Menu"
+                      aria-label="Back to Menu"
+                    >
+                      <ArrowLeft size={19} />
+                    </button>
+                    <div>
+                      <h2
+                        style={{
+                          margin: 0,
+                          fontSize: '20px',
+                          fontWeight: 900,
+                          color: 'var(--text-main)',
+                          fontFamily: 'Outfit, sans-serif',
+                        }}
+                      >
+                        Your Selected Items
+                      </h2>
+                      <p style={{ margin: '3px 0 0', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                        {cartCount} {cartCount === 1 ? 'item' : 'items'} in your order
+                      </p>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setIsCheckoutMode(false)}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      padding: '8px 14px',
+                      borderRadius: '10px',
+                      border: '1.5px solid var(--primary)',
+                      backgroundColor: 'transparent',
+                      color: 'var(--primary)',
+                      fontWeight: 800,
+                      fontSize: '13px',
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <Plus size={15} />
+                    <span>Add More Items</span>
+                  </button>
+                </div>
+
+                {/* List of Cart Items: Displays 3 items, scrollable if > 3 items */}
+                <div
+                  className="checkout-selected-items-scroll"
+                  style={{
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '14px',
+                    maxHeight: cart.length > 3 ? '292px' : 'none',
+                    overflowY: cart.length > 3 ? 'auto' : 'visible',
+                    paddingRight: cart.length > 3 ? '6px' : '0px',
+                    scrollbarWidth: 'thin',
+                  }}
+                >
+                  {cart.map((item) => {
+                    const itemMenuData = menuItems.find((m) => m.id === item.menuItemId);
+                    const itemImg = itemMenuData?.image || '/food-biryani.jpg';
+                    return (
+                    <div
+                      key={item.id}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        padding: '12px 16px',
+                        borderRadius: '14px',
+                        backgroundColor: 'var(--bg-card-subtle)',
+                        border: '1px solid var(--border-color)',
+                        gap: '16px',
+                      }}
+                    >
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flex: 1, minWidth: 0 }}>
+                        <img
+                          src={itemImg}
+                          alt={item.name}
+                          style={{
+                            width: '60px',
+                            height: '60px',
+                            borderRadius: '10px',
+                            objectFit: 'cover',
+                            flexShrink: 0,
+                          }}
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = '/food-biryani.jpg';
+                          }}
+                        />
+                        <div style={{ flex: 1, minWidth: 0 }}>
+                          <div
+                            style={{
+                              fontSize: '15px',
+                              fontWeight: 850,
+                              color: 'var(--text-main)',
+                              whiteSpace: 'nowrap',
+                              overflow: 'hidden',
+                              textOverflow: 'ellipsis',
+                            }}
+                          >
+                            {item.name}
+                          </div>
+                          <div style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px', fontWeight: 650 }}>
+                            Rs. {item.unitPrice.toLocaleString()} each
+                          </div>
+                        </div>
+                      </div>
+
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexShrink: 0 }}>
+                        {/* Quantity Controller */}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                          <button
+                            type="button"
+                            onClick={() => updateCartItemQty(item.id, -1)}
+                            style={{
+                              width: '30px',
+                              height: '30px',
+                              borderRadius: '8px',
+                              backgroundColor: item.quantity === 1 ? '#FEF2F2' : 'var(--bg-card)',
+                              border: item.quantity === 1 ? '1px solid #FCA5A5' : '1px solid var(--border-color)',
+                              color: item.quantity === 1 ? '#DC2626' : 'var(--primary)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            {item.quantity === 1 ? <Trash2 size={13} /> : <Minus size={13} />}
+                          </button>
+                          <span style={{ fontSize: '14px', fontWeight: 900, minWidth: '20px', textAlign: 'center', color: 'var(--text-main)' }}>
+                            {item.quantity}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={() => updateCartItemQty(item.id, 1)}
+                            style={{
+                              width: '30px',
+                              height: '30px',
+                              borderRadius: '8px',
+                              backgroundColor: 'var(--primary)',
+                              border: 'none',
+                              color: '#FFFFFF',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                            }}
+                          >
+                            <Plus size={13} />
+                          </button>
+                        </div>
+
+                        {/* Line Total */}
+                        <div style={{ minWidth: '85px', textAlign: 'right', fontSize: '15px', fontWeight: 900, color: 'var(--primary)' }}>
+                          Rs. {(item.unitPrice * item.quantity).toLocaleString()}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })}
+                </div>
+
+                {/* You May Also Like Section (In a row below the selected items) */}
+                {youMayAlsoLikeItems.length > 0 && (
+                  <div
+                    style={{
+                      marginTop: '24px',
+                      paddingTop: '20px',
+                      borderTop: '1.5px solid var(--border-color)',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '14px' }}>
+                      <Sparkles size={18} color="var(--primary)" />
+                      <h3 style={{ margin: 0, fontSize: '16.5px', fontWeight: 900, color: 'var(--text-main)', fontFamily: 'Outfit, sans-serif' }}>
+                        You May Also Like
+                      </h3>
+                      <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>• Popular additions</span>
+                    </div>
+
+                    <div
+                      className="you-may-also-like-row"
+                      ref={youMayLikeRowRef}
+                      onPointerDown={handleYouMayLikePointerDown}
+                      onPointerMove={handleYouMayLikePointerMove}
+                      onPointerUp={handleYouMayLikePointerUp}
+                      onPointerCancel={handleYouMayLikePointerUp}
+                      onWheel={(e) => {
+                        if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+                          window.scrollBy({ top: e.deltaY, behavior: 'auto' });
+                        }
+                      }}
+                      style={{
+                        display: 'flex',
+                        gap: '14px',
+                        overflowX: 'auto',
+                        overflowY: 'hidden',
+                        paddingBottom: '10px',
+                        scrollbarWidth: 'thin',
+                        touchAction: 'pan-y pan-x',
+                        WebkitOverflowScrolling: 'touch',
+                        overscrollBehaviorX: 'contain',
+                        overscrollBehaviorY: 'auto',
+                      }}
+                    >
+                      {youMayAlsoLikeItems.map((rec) => {
+                        const recPrice = (currentBranch && rec.branchPriceOverrides?.[currentBranch.id]) || rec.basePrice;
+                        return (
+                        <div
+                          key={rec.id}
+                          style={{
+                            width: '180px',
+                            flexShrink: 0,
+                            borderRadius: '14px',
+                            backgroundColor: 'var(--bg-card-subtle)',
+                            border: '1px solid var(--border-color)',
+                            overflow: 'hidden',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            justifyContent: 'space-between',
+                          }}
+                        >
+                          <img
+                            src={rec.image || '/food-biryani.jpg'}
+                            alt={rec.name}
+                            style={{ width: '100%', height: '105px', objectFit: 'cover' }}
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = '/food-biryani.jpg';
+                            }}
+                          />
+                          <div style={{ padding: '10px', display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, justifyContent: 'space-between' }}>
+                            <div>
+                              <div
+                                style={{
+                                  fontSize: '13px',
+                                  fontWeight: 800,
+                                  color: 'var(--text-main)',
+                                  whiteSpace: 'nowrap',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                }}
+                              >
+                                {rec.name}
+                              </div>
+                              <div style={{ fontSize: '12.5px', fontWeight: 900, color: 'var(--primary)', marginTop: '2px' }}>
+                                Rs. {recPrice.toLocaleString()}
+                              </div>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                addToCart({
+                                  id: `cart-${rec.id}-${Date.now()}`,
+                                  menuItemId: rec.id,
+                                  name: rec.name,
+                                  unitPrice: recPrice,
+                                  quantity: 1,
+                                  size: rec.sizes?.[0]?.name || 'Standard',
+                                });
+                              }}
+                              style={{
+                                width: '100%',
+                                padding: '6px 10px',
+                                borderRadius: '8px',
+                                backgroundColor: 'var(--primary)',
+                                border: 'none',
+                                color: '#FFFFFF',
+                                fontSize: '12px',
+                                fontWeight: 800,
+                                cursor: 'pointer',
+                                display: 'flex',
+                                alignItems: 'center',
+                                justifyContent: 'center',
+                                gap: '4px',
+                              }}
+                            >
+                              <Plus size={13} />
+                              <span>Add</span>
+                            </button>
+                          </div>
+                        </div>
+                      );
+                    })}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </div>
+          ) : searchQuery.trim().length > 0 ? (
             /* Search Query Mode: flat grid of results */
             <div>
               <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px', flexWrap: 'wrap', gap: '10px' }}>
@@ -833,7 +1802,7 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
             /* Default Mode: Category Sections for ScrollSpy */
             <div style={{ display: 'flex', flexDirection: 'column', gap: '48px' }}>
               {categories.map((cat: string) => {
-                  const catItems = menuItems.filter((i) => isItemInCategory(i.category, cat));
+                  const catItems = allMenuItems.filter((i) => isItemInCategory(i.category, cat));
                   if (catItems.length === 0) return null;
 
                   return (
@@ -901,28 +1870,675 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
           )}
         </div>
 
-        {/* Right Column: Full Static Checkout Card below the category line */}
+        {/* Right Column: Full Static Checkout Card below the category line (Fixed 380px width) */}
         <div
           className="desktop-checkout-column"
           style={{
-            width: '350px',
+            width: '380px',
+            minWidth: '380px',
+            maxWidth: '380px',
             flexShrink: 0,
             position: 'sticky',
-            top: '126px', // Pinned cleanly below the 72px fixed header + compact category bar
+            top: isCheckoutMode ? '88px' : '126px', // In checkout mode aligns directly below 72px fixed header
             zIndex: 850,
           }}
         >
+          {isCheckoutMode ? (
+            orderType === 'dine_in' && checkoutRightStep === 'table' ? (
+              /* ================= DINE-IN TABLE SELECTION CARD (Fixed 560px height & 380px width) ================= */
+              <div
+                style={{
+                  width: '100%',
+                  height: '560px',
+                  minHeight: '560px',
+                  maxHeight: '560px',
+                  boxSizing: 'border-box',
+                  backgroundColor: 'var(--bg-card)',
+                  borderRadius: '20px',
+                  border: '1.5px solid var(--border-color)',
+                  boxShadow: 'var(--shadow-md)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  overflow: 'hidden',
+                }}
+              >
+                {/* Header (Pinned) */}
+                <div
+                  style={{
+                    padding: '16px 20px',
+                    borderBottom: '1px solid var(--border-color)',
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    justifyContent: 'space-between',
+                    gap: '10px',
+                    backgroundColor: 'var(--bg-card-subtle)',
+                    flexShrink: 0,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                    <div
+                      style={{
+                        width: '36px',
+                        height: '36px',
+                        borderRadius: '10px',
+                        backgroundColor: 'rgba(217, 101, 40, 0.1)',
+                        color: 'var(--primary)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      <UtensilsCrossed size={18} />
+                    </div>
+                    <div>
+                      <h3 style={{ fontSize: '15px', fontWeight: 900, color: 'var(--text-main)', margin: 0, letterSpacing: '-0.01em' }}>
+                        Select Dine-In Table
+                      </h3>
+                      <p style={{ fontSize: '11.5px', color: 'var(--text-secondary)', margin: '2px 0 0' }}>
+                        {currentBranch?.name || 'Gulberg Flagship'} • Table Service
+                      </p>
+                    </div>
+                  </div>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isCustomerLoggedIn) {
+                        setLoginModalOpen(true);
+                        return;
+                      }
+                      setOrderTypeModalOpen(true);
+                    }}
+                    style={{
+                      background: 'none',
+                      border: 'none',
+                      color: 'var(--primary)',
+                      fontSize: '12px',
+                      fontWeight: 750,
+                      cursor: 'pointer',
+                      padding: '4px',
+                    }}
+                  >
+                    Change Type
+                  </button>
+                </div>
+
+                {/* Body (Scrollable, flex: 1) */}
+                <div
+                  style={{
+                    flex: 1,
+                    overflowY: 'auto',
+                    padding: '16px 20px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '14px',
+                  }}
+                >
+                  {/* Floor Switcher Strip */}
+                  <div>
+                    <div style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', marginBottom: '8px' }}>
+                      Select Floor
+                    </div>
+                    <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '4px' }}>
+                      {availableFloors.map((fl) => {
+                        const isAct = selectedFloor === fl;
+                        const shortName = fl.split('(')[0].trim();
+                        return (
+                          <button
+                            key={fl}
+                            type="button"
+                            onClick={() => setSelectedFloor(fl)}
+                            style={{
+                              padding: '6px 12px',
+                              borderRadius: '20px',
+                              border: isAct ? '1.5px solid var(--primary)' : '1px solid var(--border-color)',
+                              backgroundColor: isAct ? 'var(--primary)' : 'var(--bg-card-subtle)',
+                              color: isAct ? '#FFFFFF' : 'var(--text-main)',
+                              fontSize: '12px',
+                              fontWeight: isAct ? 800 : 650,
+                              cursor: 'pointer',
+                              whiteSpace: 'nowrap',
+                              transition: 'all 0.15s ease',
+                              boxShadow: isAct ? '0 2px 8px var(--primary-glow)' : 'none',
+                            }}
+                          >
+                            {shortName}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Table Cards Grid */}
+                  <div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                        Tables on {selectedFloor.split('(')[0].trim()} ({floorTables.length})
+                      </span>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                        Tap to select
+                      </span>
+                    </div>
+
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(2, 1fr)',
+                        gap: '10px',
+                        maxHeight: '230px',
+                        overflowY: 'auto',
+                        padding: '2px',
+                      }}
+                    >
+                      {floorTables.map((t) => {
+                        const isSel = selectedTableNumber === t.number || selectedTableNumber === t.number.replace(/\D/g, '');
+                        const isOccupied = t.status === 'occupied';
+
+                        return (
+                          <div
+                            key={t.id}
+                            onClick={() => {
+                              setSelectedTableNumber(t.number);
+                            }}
+                            style={{
+                              padding: '12px 10px',
+                              borderRadius: '12px',
+                              border: isSel
+                                ? '2px solid var(--primary)'
+                                : '1.5px solid var(--border-color)',
+                              backgroundColor: isSel
+                                ? 'rgba(217, 101, 40, 0.08)'
+                                : 'var(--bg-card)',
+                              cursor: 'pointer',
+                              transition: 'all 0.15s ease',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: '4px',
+                              position: 'relative',
+                              boxShadow: isSel ? '0 3px 12px var(--primary-glow)' : 'var(--shadow-sm)',
+                            }}
+                          >
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                              <span style={{ fontSize: '13.5px', fontWeight: 850, color: isSel ? 'var(--primary)' : 'var(--text-main)' }}>
+                                Table {t.number}
+                              </span>
+                              {isSel && (
+                                <span
+                                  style={{
+                                    backgroundColor: 'var(--primary)',
+                                    color: '#FFFFFF',
+                                    borderRadius: '50%',
+                                    width: '18px',
+                                    height: '18px',
+                                    display: 'flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontSize: '11px',
+                                    fontWeight: 900,
+                                  }}
+                                >
+                                  ✓
+                                </span>
+                              )}
+                            </div>
+
+                            <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', fontWeight: 650 }}>
+                              🪑 {t.capacity || t.chairs || 4} Seats
+                            </div>
+
+                            <div style={{ marginTop: '2px' }}>
+                              <span
+                                style={{
+                                  fontSize: '10.5px',
+                                  fontWeight: 750,
+                                  padding: '2px 6px',
+                                  borderRadius: '10px',
+                                  backgroundColor: isOccupied ? '#FEE2E2' : '#DCFCE7',
+                                  color: isOccupied ? '#B91C1C' : '#15803D',
+                                  display: 'inline-block',
+                                }}
+                              >
+                                {isOccupied ? '🔴 Occupied' : '🟢 Available'}
+                              </span>
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
+
+                  {/* Selected Table Summary Banner */}
+                  <div
+                    style={{
+                      padding: '10px 12px',
+                      borderRadius: '10px',
+                      backgroundColor: 'var(--bg-card-subtle)',
+                      border: '1px solid var(--border-color)',
+                      fontSize: '12px',
+                      color: 'var(--text-main)',
+                      fontWeight: 750,
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '8px',
+                    }}
+                  >
+                    <span style={{ fontSize: '15px' }}>📍</span>
+                    <span>
+                      Selected: <strong>Table {selectedTableNumber}</strong> ({selectedFloor.split('(')[0].trim()})
+                    </span>
+                  </div>
+                </div>
+
+                {/* Footer (Pinned) */}
+                <div
+                  style={{
+                    padding: '16px 20px',
+                    borderTop: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-card)',
+                    flexShrink: 0,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isCustomerLoggedIn) {
+                        setLoginModalOpen(true);
+                        addToast({
+                          type: 'warning',
+                          title: 'Sign In Required ✉️',
+                          message: 'Please sign in to your customer account to proceed.',
+                        });
+                        return;
+                      }
+                      setCheckoutRightStep('bill');
+                      addToast({
+                        type: 'success',
+                        title: 'Table Selected',
+                        message: `Table #${selectedTableNumber} assigned to your dine-in order.`,
+                      });
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '13px',
+                      borderRadius: '12px',
+                      backgroundColor: 'var(--primary)',
+                      color: '#FFFFFF',
+                      border: 'none',
+                      fontWeight: 850,
+                      fontSize: '14px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      boxShadow: '0 4px 14px var(--primary-glow)',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <span>Confirm Table & View Bill ➔</span>
+                  </button>
+                </div>
+              </div>
+            ) : (
+              /* ================= PAYMENT INFO PAGE / CARD (Fixed 560px height & 380px width) ================= */
+              <div
+                style={{
+                  width: '100%',
+                  height: '560px',
+                  minHeight: '560px',
+                  maxHeight: '560px',
+                  boxSizing: 'border-box',
+                  backgroundColor: 'var(--bg-card)',
+                  borderRadius: '20px',
+                  border: '1.5px solid var(--border-color)',
+                  boxShadow: 'var(--shadow-md)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  overflow: 'hidden',
+                }}
+              >
+                {/* 1. Header: Delivery / Order Type Selected at Top (Pinned) */}
+                <div
+                  style={{
+                    padding: '14px 20px',
+                    borderBottom: '1px solid var(--border-color)',
+                    backgroundColor: 'rgba(217, 101, 40, 0.08)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: '10px',
+                    flexShrink: 0,
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        width: '34px',
+                        height: '34px',
+                        borderRadius: '8px',
+                        backgroundColor: 'var(--primary)',
+                        color: '#FFFFFF',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        flexShrink: 0,
+                      }}
+                    >
+                      {orderType === 'dine_in' ? (
+                        <UtensilsCrossed size={17} />
+                      ) : orderType === 'takeaway' ? (
+                        <ShoppingBag size={17} />
+                      ) : (
+                        <Bike size={17} />
+                      )}
+                    </div>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ fontSize: '13px', fontWeight: 850, color: 'var(--text-main)', textTransform: 'capitalize' }}>
+                        {orderType === 'dine_in' ? '🍽️ Dine-In' : orderType === 'takeaway' ? '🛍️ Takeaway' : '🛵 Delivery'}
+                      </div>
+                      <div
+                        style={{
+                          fontSize: '11px',
+                          color: 'var(--text-secondary)',
+                          fontWeight: 650,
+                          whiteSpace: 'nowrap',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          marginTop: '1px',
+                        }}
+                      >
+                        {orderType === 'dine_in'
+                          ? `Table #${selectedTableNumber} • ${selectedFloor.split('(')[0].trim()}`
+                          : orderType === 'takeaway'
+                          ? (currentBranch?.name || 'Gulberg Branch')
+                          : deliveryAddress}
+                      </div>
+                    </div>
+                  </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                    {orderType === 'dine_in' && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          if (!isCustomerLoggedIn) {
+                            setLoginModalOpen(true);
+                            return;
+                          }
+                          setCheckoutRightStep('table');
+                        }}
+                        style={{
+                          background: 'none',
+                          border: '1px solid var(--primary-border)',
+                          borderRadius: '6px',
+                          color: 'var(--primary)',
+                          fontSize: '11px',
+                          fontWeight: 750,
+                          cursor: 'pointer',
+                          padding: '3px 8px',
+                          backgroundColor: 'var(--primary-light)',
+                        }}
+                      >
+                        Table
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (!isCustomerLoggedIn) {
+                          setLoginModalOpen(true);
+                          return;
+                        }
+                        setOrderTypeModalOpen(true);
+                      }}
+                      style={{
+                        background: 'none',
+                        border: 'none',
+                        color: 'var(--primary)',
+                        fontSize: '12px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        padding: '4px 6px',
+                      }}
+                    >
+                      Change
+                    </button>
+                  </div>
+                </div>
+
+                {/* Middle Content: Scrollable Body (flex: 1) */}
+                <div
+                  style={{
+                    flex: 1,
+                    overflowY: 'auto',
+                    padding: '16px 20px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '14px',
+                  }}
+                >
+                  {/* 2. Total Bill with Info */}
+                  <div
+                    style={{
+                      padding: '14px 16px',
+                      borderRadius: '14px',
+                      backgroundColor: 'var(--bg-card-subtle)',
+                      border: '1px solid var(--border-color)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 650 }}>
+                      <span>Items Subtotal</span>
+                      <span style={{ fontWeight: 800, color: 'var(--text-main)' }}>Rs. {cartSubtotal.toLocaleString()}</span>
+                    </div>
+                    {orderType === 'delivery' && (
+                      <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 650 }}>
+                        <span>Delivery Fee</span>
+                        <span style={{ fontWeight: 800, color: 'var(--text-main)' }}>Rs. {deliveryFee.toLocaleString()}</span>
+                      </div>
+                    )}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'var(--text-secondary)', fontWeight: 650 }}>
+                      <span>GST (16%)</span>
+                      <span style={{ fontWeight: 800, color: 'var(--text-main)' }}>Rs. {tax.toLocaleString()}</span>
+                    </div>
+                    <div style={{ height: '1px', backgroundColor: 'var(--border-color)', margin: '4px 0' }} />
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                      <span style={{ fontSize: '14px', fontWeight: 850, color: 'var(--text-main)' }}>Total Bill</span>
+                      <span style={{ fontSize: '20px', fontWeight: 900, color: 'var(--primary)', fontFamily: 'Outfit, sans-serif' }}>
+                        Rs. {grandTotal.toLocaleString()}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* 3. Special Instructions */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 750, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                      Special Cooking / Delivery Instructions
+                    </label>
+                    <textarea
+                      rows={2}
+                      value={specialInstructions}
+                      onChange={(e) => setSpecialInstructions(e.target.value)}
+                      placeholder="e.g. less spicy, extra napkins, contact-free handover..."
+                      style={{
+                        width: '100%',
+                        padding: '10px 12px',
+                        borderRadius: '10px',
+                        border: '1.5px solid var(--border-color)',
+                        backgroundColor: 'var(--bg-card)',
+                        fontSize: '12.5px',
+                        color: 'var(--text-main)',
+                        boxSizing: 'border-box',
+                        fontFamily: 'inherit',
+                        resize: 'none',
+                      }}
+                    />
+                  </div>
+
+                  {/* 4. Customer Name (Required) */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                      Customer Name <span style={{ color: 'var(--primary)' }}>*</span>
+                    </label>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '8px',
+                        borderRadius: '10px',
+                        border: '1.5px solid var(--border-color)',
+                        backgroundColor: 'var(--bg-card)',
+                        padding: '0 12px',
+                      }}
+                    >
+                      <User size={15} color="var(--primary)" />
+                      <input
+                        type="text"
+                        value={customerName}
+                        onChange={(e) => setCustomerName(e.target.value)}
+                        placeholder="e.g. Shahwaiz Akram"
+                        style={{
+                          flex: 1,
+                          padding: '10px 0',
+                          border: 'none',
+                          backgroundColor: 'transparent',
+                          fontSize: '13px',
+                          fontWeight: 700,
+                          color: 'var(--text-main)',
+                          fontFamily: 'inherit',
+                          outline: 'none',
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* 5. Receiver Mobile Number (Required) */}
+                  <div>
+                    <label style={{ display: 'block', fontSize: '12px', fontWeight: 800, color: 'var(--text-secondary)', marginBottom: '6px' }}>
+                      Receiver Mobile Number <span style={{ color: 'var(--primary)' }}>*</span>
+                    </label>
+                    <div
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        borderRadius: '10px',
+                        border: '1.5px solid var(--border-color)',
+                        backgroundColor: 'var(--bg-card)',
+                        overflow: 'hidden',
+                      }}
+                    >
+                      <span
+                        style={{
+                          padding: '0 10px',
+                          fontSize: '12.5px',
+                          fontWeight: 750,
+                          color: 'var(--text-secondary)',
+                          borderRight: '1px solid var(--border-color)',
+                          backgroundColor: 'var(--bg-card-subtle)',
+                          lineHeight: '38px',
+                        }}
+                      >
+                        🇵🇰 +92
+                      </span>
+                      <input
+                        type="tel"
+                        value={customerPhone.replace(/^(\+92|0)/, '')}
+                        onChange={(e) => setCustomerPhone(e.target.value)}
+                        placeholder="300 1234567"
+                        style={{
+                          flex: 1,
+                          padding: '10px 12px',
+                          border: 'none',
+                          backgroundColor: 'transparent',
+                          fontSize: '13px',
+                          fontWeight: 700,
+                          color: 'var(--text-main)',
+                          fontFamily: 'inherit',
+                          outline: 'none',
+                        }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                {/* 6. Footer: Button to Pay Cash (Pinned) */}
+                <div
+                  style={{
+                    padding: '16px 20px',
+                    borderTop: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-card)',
+                    flexShrink: 0,
+                  }}
+                >
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!isCustomerLoggedIn) {
+                        setLoginModalOpen(true);
+                        addToast({
+                          type: 'warning',
+                          title: 'Sign In Required ✉️',
+                          message: 'Please sign in to your customer account to place and pay for your order.',
+                        });
+                        return;
+                      }
+                      if (!customerName.trim()) {
+                        addToast({
+                          type: 'warning',
+                          title: 'Customer Name Required',
+                          message: 'Please enter your name for this order.',
+                        });
+                        return;
+                      }
+                      const cleanDigits = customerPhone.replace(/\D/g, '');
+                      if (!cleanDigits || cleanDigits.length < 9) {
+                        addToast({
+                          type: 'warning',
+                          title: 'Receiver Mobile Number Required 📱',
+                          message: 'Please provide a valid receiver mobile number.',
+                        });
+                        return;
+                      }
+                      setConfirmModalOpen(true);
+                    }}
+                    style={{
+                      width: '100%',
+                      padding: '14px',
+                      borderRadius: '12px',
+                      backgroundColor: 'var(--primary)',
+                      color: '#FFFFFF',
+                      border: 'none',
+                      fontWeight: 850,
+                      fontSize: '14.5px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '8px',
+                      boxShadow: '0 4px 14px var(--primary-glow)',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    <Banknote size={18} />
+                    <span>Pay Cash (Rs. {grandTotal.toLocaleString()})</span>
+                  </button>
+                </div>
+              </div>
+            )
+          ) : (
           <div
             className="desktop-static-checkout"
             style={{
               width: '100%',
-              height: '520px',
-              minHeight: '380px',
-              maxHeight: 'calc(100vh - 146px)',
+              height: '560px',
+              minHeight: '560px',
+              maxHeight: '560px',
               boxSizing: 'border-box',
               backgroundColor: 'var(--bg-card)',
               borderRadius: '20px',
-              border: '1px solid var(--border-color)',
+              border: '1.5px solid var(--border-color)',
               boxShadow: 'var(--shadow-md)',
               display: 'flex',
               flexDirection: 'column',
@@ -1110,39 +2726,78 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
               </span>
             </div>
 
+            {/* Minimum Delivery Warning Notice: appears when delivery is active and cartSubtotal < minDeliveryAmount */}
+            {isBelowMinDelivery && (
+              <div
+                style={{
+                  backgroundColor: '#FEF3C7',
+                  border: '1.5px solid #F59E0B',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '9px 12px',
+                  marginBottom: '10px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: '0 2px 8px rgba(245, 158, 11, 0.15)',
+                  boxSizing: 'border-box',
+                }}
+              >
+                <AlertTriangle size={17} color="#D97706" style={{ flexShrink: 0 }} />
+                <div style={{ flex: 1, fontSize: '11.5px', color: '#92400E', lineHeight: 1.35, fontWeight: 700 }}>
+                  <span>Min delivery order is <strong>Rs. {minDeliveryAmount.toLocaleString()}</strong>.</span>
+                  <div style={{ color: '#B45309', fontWeight: 850, marginTop: '1px' }}>
+                    Select <strong>Rs. {deliveryShortfall.toLocaleString()}</strong> more to proceed.
+                  </div>
+                </div>
+              </div>
+            )}
+
             {/* Static Checkout Clickable Button */}
             <button
               type="button"
-              disabled={cartCount === 0}
-              onClick={() => (onProceedToCheckout ? onProceedToCheckout() : onOpenCart())}
+              disabled={cartCount === 0 || isBelowMinDelivery}
+              onClick={handleProceedClick}
               style={{
                 width: '100%',
                 padding: '13px',
                 borderRadius: 'var(--radius-md)',
-                backgroundColor: cartCount > 0 ? 'var(--primary)' : 'var(--bg-card-subtle)',
-                color: cartCount > 0 ? '#FFFFFF' : 'var(--text-muted)',
-                border: 'none',
+                backgroundColor: cartCount === 0
+                  ? 'var(--bg-card-subtle)'
+                  : isBelowMinDelivery
+                  ? '#FEF3C7'
+                  : 'var(--primary)',
+                color: cartCount === 0
+                  ? 'var(--text-muted)'
+                  : isBelowMinDelivery
+                  ? '#92400E'
+                  : '#FFFFFF',
+                border: isBelowMinDelivery ? '1.5px solid #F59E0B' : 'none',
                 fontWeight: 850,
-                fontSize: '14px',
-                cursor: cartCount > 0 ? 'pointer' : 'not-allowed',
+                fontSize: '13px',
+                cursor: cartCount === 0 || isBelowMinDelivery ? 'not-allowed' : 'pointer',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
                 gap: '8px',
-                boxShadow: cartCount > 0 ? '0 4px 14px var(--primary-glow)' : 'none',
+                boxShadow: cartCount > 0 && !isBelowMinDelivery ? '0 4px 14px var(--primary-glow)' : 'none',
                 transition: 'all 0.15s ease',
               }}
             >
-              <span>Proceed to Checkout</span>
+              <span>
+                {isBelowMinDelivery
+                  ? `Select Rs. ${deliveryShortfall.toLocaleString()} More for Delivery`
+                  : 'Proceed to Checkout'}
+              </span>
               <ArrowRight size={16} />
             </button>
           </div>
         </div>
+        )}
       </div>
     </div>
 
       {/* Mobile Floating Checkout Line Bar (Appears when item is selected on mobile) */}
-      {cartCount > 0 && (
+      {cartCount > 0 && !isCheckoutMode && (
         <div
           className="foodies-mobile-checkout-bar"
           style={{
@@ -1160,6 +2815,32 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
             gap: '12px',
           }}
         >
+          {/* Notification just above mobile checkout button when below delivery minimum */}
+          {isBelowMinDelivery && (
+            <div
+              style={{
+                position: 'absolute',
+                bottom: '100%',
+                left: '12px',
+                right: '12px',
+                marginBottom: '6px',
+                backgroundColor: '#FEF3C7',
+                border: '1.5px solid #F59E0B',
+                borderRadius: '12px',
+                padding: '8px 12px',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+              }}
+            >
+              <AlertTriangle size={15} color="#D97706" style={{ flexShrink: 0 }} />
+              <div style={{ fontSize: '11.5px', color: '#92400E', fontWeight: 750, flex: 1 }}>
+                Min delivery Rs. {minDeliveryAmount.toLocaleString()}. Select <strong>Rs. {deliveryShortfall.toLocaleString()}</strong> more to checkout.
+              </div>
+            </div>
+          )}
+
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <div
               style={{
@@ -1188,33 +2869,468 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
 
           <button
             type="button"
-            onClick={() => (onProceedToCheckout ? onProceedToCheckout() : onOpenCart())}
+            disabled={cartCount === 0 || isBelowMinDelivery}
+            onClick={handleProceedClick}
             style={{
               flex: 1,
-              maxWidth: '220px',
-              padding: '11px 18px',
+              maxWidth: isBelowMinDelivery ? '240px' : '220px',
+              padding: '11px 16px',
               borderRadius: 'var(--radius-full)',
-              backgroundColor: 'var(--primary)',
-              color: '#FFFFFF',
-              border: 'none',
+              backgroundColor: isBelowMinDelivery ? '#FEF3C7' : 'var(--primary)',
+              color: isBelowMinDelivery ? '#92400E' : '#FFFFFF',
+              border: isBelowMinDelivery ? '1.5px solid #F59E0B' : 'none',
               fontWeight: 850,
-              fontSize: '13.5px',
-              cursor: 'pointer',
+              fontSize: '12px',
+              cursor: isBelowMinDelivery ? 'not-allowed' : 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
-              gap: '8px',
-              boxShadow: '0 4px 12px var(--primary-glow)',
+              gap: '6px',
+              boxShadow: isBelowMinDelivery ? 'none' : '0 4px 12px var(--primary-glow)',
             }}
           >
-            <span>Proceed to Checkout</span>
-            <ArrowRight size={16} />
+            <span>
+              {isBelowMinDelivery
+                ? `Select Rs. ${deliveryShortfall.toLocaleString()} More`
+                : 'Proceed to Checkout'}
+            </span>
+            <ArrowRight size={15} />
           </button>
+        </div>
+      )}
+
+      {/* 3 Clickable Buttons Pop-up Modal Asking for Order Type */}
+      {orderTypeModalOpen && (
+        <div
+          className="foodies-modal-overlay"
+          onClick={() => setOrderTypeModalOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            backgroundColor: 'rgba(0, 0, 0, 0.65)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+            animation: 'fadeIn 0.18s ease-out',
+          }}
+        >
+          <div
+            className="foodies-modal-card"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: 'var(--bg-card)',
+              borderRadius: '20px',
+              border: '1.5px solid var(--border-color)',
+              boxShadow: '0 20px 48px rgba(0, 0, 0, 0.25)',
+              maxWidth: '520px',
+              width: '100%',
+              padding: '24px 28px',
+              boxSizing: 'border-box',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '18px',
+              animation: 'scaleUp 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+            }}
+          >
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 900, color: 'var(--text-main)', fontFamily: 'Outfit, sans-serif' }}>
+                Select Order Type
+              </h3>
+              <button
+                type="button"
+                onClick={() => setOrderTypeModalOpen(false)}
+                style={{
+                  background: 'none',
+                  border: 'none',
+                  color: 'var(--text-muted)',
+                  cursor: 'pointer',
+                  padding: '6px',
+                  borderRadius: '8px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                }}
+                aria-label="Close"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* 3 Clickable Option Buttons in One Single Line with Only Type Name */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '10px', width: '100%' }}>
+              <button
+                type="button"
+                onClick={() => handleSelectOrderType('dine_in')}
+                className="order-type-select-btn"
+                style={{
+                  padding: '16px 8px',
+                  borderRadius: '12px',
+                  border: '1.5px solid var(--border-color)',
+                  backgroundColor: 'var(--bg-card)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '15px',
+                  fontWeight: 800,
+                  color: 'var(--text-main)',
+                  textAlign: 'center',
+                  transition: 'all 0.18s ease',
+                  boxShadow: 'var(--shadow-sm)',
+                  boxSizing: 'border-box',
+                }}
+              >
+                Dine-In
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSelectOrderType('takeaway')}
+                className="order-type-select-btn"
+                style={{
+                  padding: '16px 8px',
+                  borderRadius: '12px',
+                  border: '1.5px solid var(--border-color)',
+                  backgroundColor: 'var(--bg-card)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '15px',
+                  fontWeight: 800,
+                  color: 'var(--text-main)',
+                  textAlign: 'center',
+                  transition: 'all 0.18s ease',
+                  boxShadow: 'var(--shadow-sm)',
+                  boxSizing: 'border-box',
+                }}
+              >
+                Takeaway
+              </button>
+
+              <button
+                type="button"
+                onClick={() => handleSelectOrderType('delivery')}
+                className="order-type-select-btn"
+                style={{
+                  padding: '16px 8px',
+                  borderRadius: '12px',
+                  border: '1.5px solid var(--border-color)',
+                  backgroundColor: 'var(--bg-card)',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '15px',
+                  fontWeight: 800,
+                  color: 'var(--text-main)',
+                  textAlign: 'center',
+                  transition: 'all 0.18s ease',
+                  boxShadow: 'var(--shadow-sm)',
+                  boxSizing: 'border-box',
+                }}
+              >
+                Delivery
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Customer Login Modal: triggered on checkout if user is not signed in first */}
+      <CustomerLoginModal
+        isOpen={loginModalOpen}
+        onClose={() => setLoginModalOpen(false)}
+        onSuccess={() => {
+          setLoginModalOpen(false);
+          if (isDesktop) {
+            if (!hasConfirmedOrderType) {
+              setOrderTypeModalOpen(true);
+            } else {
+              setIsCheckoutMode(true);
+              if (orderType === 'dine_in') {
+                setCheckoutRightStep('table');
+              } else {
+                setCheckoutRightStep('bill');
+              }
+            }
+          } else {
+            if (!hasConfirmedOrderType) {
+              setOrderTypeModalOpen(true);
+            } else if (onProceedToCheckout) {
+              onProceedToCheckout();
+            } else if (onOpenCart) {
+              onOpenCart();
+            }
+          }
+        }}
+      />
+
+      {/* Interactive OpenStreetMap Delivery Location Confirmation Modal */}
+      <DeliveryMapModal
+        isOpen={deliveryMapModalOpen}
+        onClose={() => setDeliveryMapModalOpen(false)}
+        onConfirmDelivery={handleDeliveryConfirmed}
+      />
+
+      {/* Order Price Confirmation Pop-up Modal */}
+      {confirmModalOpen && (
+        <div
+          className="foodies-modal-overlay"
+          onClick={() => setConfirmModalOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            backgroundColor: 'rgba(0, 0, 0, 0.65)',
+            backdropFilter: 'blur(6px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+            animation: 'fadeIn 0.18s ease-out',
+          }}
+        >
+          <div
+            className="foodies-modal-card"
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: 'var(--bg-card)',
+              borderRadius: '20px',
+              border: '1.5px solid var(--border-color)',
+              boxShadow: '0 20px 48px rgba(0, 0, 0, 0.25)',
+              maxWidth: '460px',
+              width: '100%',
+              padding: '24px 26px',
+              boxSizing: 'border-box',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+              animation: 'scaleUp 0.2s cubic-bezier(0.16, 1, 0.3, 1)',
+            }}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '20px', fontWeight: 900, color: 'var(--text-main)', fontFamily: 'Outfit, sans-serif' }}>
+                  Confirm Your Order
+                </h3>
+                <p style={{ margin: '4px 0 0', fontSize: '13px', color: 'var(--text-secondary)' }}>
+                  Review your order price and details before submitting
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setConfirmModalOpen(false)}
+                style={{ background: 'none', border: 'none', color: 'var(--text-muted)', cursor: 'pointer', padding: '4px' }}
+                aria-label="Close"
+              >
+                <X size={20} />
+              </button>
+            </div>
+
+            {/* Prominent Order Price Highlight */}
+            <div
+              style={{
+                padding: '16px 18px',
+                borderRadius: '16px',
+                backgroundColor: 'rgba(217, 101, 40, 0.08)',
+                border: '1.5px solid rgba(217, 101, 40, 0.25)',
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <div>
+                <span style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Total Order Price
+                </span>
+                <div style={{ fontSize: '24px', fontWeight: 900, color: 'var(--primary)', fontFamily: 'Outfit, sans-serif', marginTop: '2px' }}>
+                  Rs. {grandTotal.toLocaleString()}
+                </div>
+              </div>
+              <div
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '9999px',
+                  backgroundColor: 'var(--primary)',
+                  color: '#FFFFFF',
+                  fontSize: '11px',
+                  fontWeight: 850,
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                }}
+              >
+                <Banknote size={14} />
+                <span>Pay Cash</span>
+              </div>
+            </div>
+
+            {/* Order Summary Details */}
+            <div
+              style={{
+                padding: '14px',
+                borderRadius: '14px',
+                backgroundColor: 'var(--bg-card-subtle)',
+                border: '1px solid var(--border-color)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '10px',
+                fontSize: '13px',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: 'var(--text-secondary)', fontWeight: 650 }}>Order Type</span>
+                <span style={{ fontWeight: 800, color: 'var(--text-main)', textTransform: 'capitalize' }}>
+                  {orderType === 'dine_in' ? '🍽️ Dine-In' : orderType === 'takeaway' ? '🛍️ Takeaway' : '🛵 Delivery'}
+                </span>
+              </div>
+
+              {orderType === 'delivery' && (
+                <div
+                  onClick={() => setDeliveryMapModalOpen(true)}
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'flex-start',
+                    gap: '10px',
+                    cursor: 'pointer',
+                    padding: '4px 6px',
+                    borderRadius: '8px',
+                    backgroundColor: 'rgba(217, 101, 40, 0.05)',
+                  }}
+                  title="Click to change delivery location pin"
+                >
+                  <span style={{ color: 'var(--text-secondary)', fontWeight: 650, flexShrink: 0 }}>Deliver To 📍</span>
+                  <span style={{ fontWeight: 750, color: 'var(--primary)', textAlign: 'right', wordBreak: 'break-word', textDecoration: 'underline' }}>
+                    {deliveryAddress}
+                  </span>
+                </div>
+              )}
+
+              {orderType === 'dine_in' && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: 'var(--text-secondary)', fontWeight: 650 }}>Table</span>
+                  <span style={{ fontWeight: 800, color: 'var(--text-main)' }}>
+                    Table #{selectedTableNumber}
+                  </span>
+                </div>
+              )}
+
+              {orderType === 'takeaway' && (
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ color: 'var(--text-secondary)', fontWeight: 650 }}>Branch</span>
+                  <span style={{ fontWeight: 800, color: 'var(--text-main)' }}>
+                    {currentBranch?.name || 'Gulberg Branch'}
+                  </span>
+                </div>
+              )}
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: 'var(--text-secondary)', fontWeight: 650 }}>Customer Name</span>
+                <span style={{ fontWeight: 800, color: 'var(--text-main)' }}>
+                  {customerName.trim() || 'Valued Customer'}
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: 'var(--text-secondary)', fontWeight: 650 }}>Receiver Mobile</span>
+                <span style={{ fontWeight: 800, color: 'var(--text-main)' }}>
+                  🇵🇰 +92 {customerPhone.replace(/^(\+92|0)/, '')}
+                </span>
+              </div>
+
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <span style={{ color: 'var(--text-secondary)', fontWeight: 650 }}>Items Count</span>
+                <span style={{ fontWeight: 800, color: 'var(--text-main)' }}>
+                  {cartCount} {cartCount === 1 ? 'item' : 'items'}
+                </span>
+              </div>
+
+              {specialInstructions.trim() && (
+                <div style={{ borderTop: '1px solid var(--border-color)', paddingTop: '8px' }}>
+                  <span style={{ color: 'var(--text-secondary)', fontWeight: 650, display: 'block', marginBottom: '2px', fontSize: '12px' }}>
+                    Special Instructions
+                  </span>
+                  <span style={{ color: 'var(--text-main)', fontStyle: 'italic', fontSize: '12.5px' }}>
+                    &ldquo;{specialInstructions.trim()}&rdquo;
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* Action Buttons */}
+            <div style={{ display: 'flex', gap: '10px', marginTop: '4px' }}>
+              <button
+                type="button"
+                onClick={() => setConfirmModalOpen(false)}
+                style={{
+                  flex: 1,
+                  padding: '12px',
+                  borderRadius: '12px',
+                  border: '1px solid var(--border-color)',
+                  backgroundColor: 'var(--bg-card)',
+                  color: 'var(--text-secondary)',
+                  fontWeight: 750,
+                  fontSize: '13.5px',
+                  cursor: 'pointer',
+                }}
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  if (!isCustomerLoggedIn) {
+                    setConfirmModalOpen(false);
+                    setLoginModalOpen(true);
+                    addToast({
+                      type: 'warning',
+                      title: 'Sign In Required ✉️',
+                      message: 'Please sign in to your customer account to place and pay for your order.',
+                    });
+                    return;
+                  }
+                  handleConfirmAndPayCash();
+                }}
+                style={{
+                  flex: 2,
+                  padding: '12px',
+                  borderRadius: '12px',
+                  border: 'none',
+                  backgroundColor: 'var(--primary)',
+                  color: '#FFFFFF',
+                  fontWeight: 850,
+                  fontSize: '13.5px',
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 14px var(--primary-glow)',
+                }}
+              >
+                <span>Confirm Order (Rs. {grandTotal.toLocaleString()})</span>
+                <ArrowRight size={16} />
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
       {/* Responsive styles for progressive layout breakdown */}
       <style jsx>{`
+        .order-type-select-btn:hover {
+          border-color: var(--primary) !important;
+          background-color: var(--primary-light) !important;
+          transform: translateY(-2px);
+          box-shadow: 0 6px 20px var(--primary-glow) !important;
+        }
         .foodies-menu-main-layout {
           display: flex;
           gap: 28px;
@@ -1303,9 +3419,17 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
             top: 72px !important;
             margin-top: 0 !important;
           }
-          .desktop-checkout-column,
           .desktop-static-checkout {
             display: none !important;
+          }
+          .foodies-menu-container:not(.checkout-active) .desktop-checkout-column {
+            display: none !important;
+          }
+          .foodies-menu-container.checkout-active .desktop-checkout-column {
+            display: block !important;
+            width: 100% !important;
+            position: static !important;
+            margin-top: 20px !important;
           }
           .foodies-menu-main-layout {
             display: block;

@@ -70,9 +70,16 @@ const getInitialUser = (): User => {
   } else {
     try {
       const savedCust = localStorage.getItem('foodies_customer_user');
+      const loginTimeStr = localStorage.getItem('foodies_customer_login_time');
       if (savedCust) {
         const parsed = JSON.parse(savedCust);
-        if (parsed?.role === 'customer') return parsed;
+        if (parsed?.role === 'customer' && parsed.name && parsed.name !== 'Guest Customer') {
+          const loginTime = loginTimeStr ? Number(loginTimeStr) : null;
+          if (loginTime && !isNaN(loginTime) && Date.now() - loginTime > 24 * 60 * 60 * 1000) {
+            return GUEST_CUSTOMER;
+          }
+          return parsed;
+        }
       }
     } catch (e) {}
   }
@@ -104,7 +111,12 @@ export const uiSlice = createSlice({
       state.currentUser = action.payload;
       if (typeof window !== 'undefined') {
         if (action.payload.role === 'customer') {
-          localStorage.setItem('foodies_customer_user', JSON.stringify(action.payload));
+          if (action.payload.name && action.payload.name !== 'Guest Customer') {
+            localStorage.setItem('foodies_customer_user', JSON.stringify(action.payload));
+            if (!localStorage.getItem('foodies_customer_login_time')) {
+              localStorage.setItem('foodies_customer_login_time', Date.now().toString());
+            }
+          }
         } else {
           localStorage.setItem('foodies_staff_user', JSON.stringify(action.payload));
         }

@@ -14,15 +14,18 @@ import {
   Phone,
   Clock,
   Building,
-  RotateCcw,
-  ZoomIn,
-  ZoomOut,
   Save,
   ArrowRight,
   Bike,
   ShoppingBag,
   UtensilsCrossed,
 } from 'lucide-react';
+import { OpenStreetMapView } from '@/components/common/OpenStreetMapView';
+import {
+  OsmMarkerItem,
+  getOsmDirectionsUrl,
+  reverseGeocodeOpenStreetMap,
+} from '@/utils/openStreetMap';
 
 interface StoreMapModalProps {
   isOpen: boolean;
@@ -69,6 +72,9 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
     addToast,
     customerCoordinates,
     setCustomerCoordinates,
+    selectedDeliveryAddress,
+    setSelectedDeliveryAddress,
+    savedAddresses,
   } = useApp();
 
   // Pakistani Locality Identifier for delivery pins
@@ -107,24 +113,40 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
   const [locating, setLocating] = useState(false);
   const [locationStatus, setLocationStatus] = useState<string>('Detecting location...');
 
-  // Update user location handler & auto-select nearest branch
-  const handleUpdateLocation = (coords: { lat: number; lng: number }, userAction = true) => {
+  // Update user location handler, reverse-geocode via OpenStreetMap, store persistently, & auto-select nearest branch
+  const handleUpdateLocation = (
+    coords: { lat: number; lng: number },
+    userAction = true,
+    addressOverride?: string
+  ) => {
     setUserCoords(coords);
     if (setCustomerCoordinates) setCustomerCoordinates(coords);
     if (typeof window !== 'undefined') {
       localStorage.setItem('foodies_customer_coordinates', JSON.stringify(coords));
     }
 
-    // Auto-select nearest branch based on the new location
-    let nearest = branches[0];
+    if (addressOverride && addressOverride.trim()) {
+      setSelectedDeliveryAddress(addressOverride.trim());
+    } else if (userAction) {
+      reverseGeocodeOpenStreetMap(coords.lat, coords.lng).then((geo) => {
+        if (geo?.address) {
+          setSelectedDeliveryAddress(geo.address);
+        }
+      }).catch(() => {});
+    }
+
+    // Auto-select nearest open branch based on the new location
+    let nearest = branches.find((b) => b.isOpen) || branches[0];
     let minD = Infinity;
     branches.forEach((b) => {
-      const bLat = b.latitude ?? (b.city === 'Islamabad' ? 33.7215 : b.city === 'Karachi' ? 24.8252 : 31.5126);
-      const bLng = b.longitude ?? (b.city === 'Islamabad' ? 73.0552 : b.city === 'Karachi' ? 67.0305 : 74.3436);
-      const d = calculateDistanceKm(coords.lat, coords.lng, bLat, bLng);
-      if (d < minD) {
-        minD = d;
-        nearest = b;
+      if (b.isOpen) {
+        const bLat = b.latitude ?? (b.city === 'Islamabad' ? 33.7215 : b.city === 'Karachi' ? 24.8252 : 31.5126);
+        const bLng = b.longitude ?? (b.city === 'Islamabad' ? 73.0552 : b.city === 'Karachi' ? 67.0305 : 74.3436);
+        const d = calculateDistanceKm(coords.lat, coords.lng, bLat, bLng);
+        if (d < minD) {
+          minD = d;
+          nearest = b;
+        }
       }
     });
 
@@ -137,14 +159,14 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
       }
     }
 
-    const area = getLocationLabel(coords.lat, coords.lng);
+    const area = addressOverride || getLocationLabel(coords.lat, coords.lng);
     setLocationStatus(area);
 
     if (userAction && nearest) {
       addToast({
         type: 'info',
-        title: 'Location Set 📍',
-        message: `${area}. Nearest branch (${nearest.name}) auto-selected. You can also pick any branch.`,
+        title: 'Location Stored on OpenStreetMap 📍',
+        message: `${area}. Nearest branch (${nearest.name}) auto-selected.`,
       });
     }
   };
@@ -154,12 +176,7 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
 
   // Search filter
   const [searchQuery, setSearchQuery] = useState('');
-
-  // Map interactive state (zoom & pan)
-  const [zoomLevel, setZoomLevel] = useState(1);
-  const [panOffset, setPanOffset] = useState({ x: 0, y: 0 });
-  const [isDragging, setIsDragging] = useState(false);
-  const [dragStart, setDragStart] = useState({ x: 0, y: 0 });
+  const [mapZoom, setMapZoom] = useState(12);
 
   // Manager / Owner branch location editing state
   const [editingBranch, setEditingBranch] = useState<Branch | null>(null);
@@ -214,7 +231,7 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
     }
   }, [isOpen, startInEditMode, initialEditingBranchId, isManagerOrOwner, selectedBranchId, currentBranchId, branches]);
 
-  // Request user geolocation when modal opens
+  // Load stored customer coordinates or detect GPS when modal opens
   useEffect(() => {
     if (!isOpen) return;
 
@@ -222,15 +239,23 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
       setSelectedBranchId(currentBranchId);
     }
 
+    if (customerCoordinates && typeof customerCoordinates.lat === 'number' && typeof customerCoordinates.lng === 'number') {
+      setUserCoords(customerCoordinates);
+      setLocating(false);
+      setLocationStatus(getLocationLabel(customerCoordinates.lat, customerCoordinates.lng));
+      return;
+    }
+
     if ('geolocation' in navigator) {
       setLocating(true);
       navigator.geolocation.getCurrentPosition(
         (position) => {
           const coords = {
-            lat: position.coords.latitude,
-            lng: position.coords.longitude,
+            lat: Number(position.coords.latitude.toFixed(6)),
+            lng: Number(position.coords.longitude.toFixed(6)),
           };
           setUserCoords(coords);
+          setCustomerCoordinates(coords);
           setLocating(false);
           setLocationStatus('GPS Active');
         },
@@ -301,6 +326,16 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
 
   // Handlers
   const handleSelectBranch = (bId: string) => {
+    const b = branches.find((item) => item.id === bId);
+    if (b && !b.isOpen) {
+      addToast({
+        type: 'warning',
+        title: 'Branch Closed / Offline',
+        message: `${b.name} is currently Closed / Offline. You cannot proceed with this branch. Please choose an open branch.`,
+      });
+      return;
+    }
+
     // Freedom to order from ANY branch of customer's choice
     setSelectedBranchId(bId);
     setCurrentBranchId(bId);
@@ -309,7 +344,6 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
       localStorage.setItem('foodies_customer_manual_branch', bId);
       localStorage.setItem('foodies_customer_selected_branch', bId);
     }
-    const b = branches.find((item) => item.id === bId);
     addToast({
       type: 'success',
       title: 'Branch Selected! 📍',
@@ -317,18 +351,18 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
     });
   };
 
-  const handleStartEdit = (b: Branch, e: React.MouseEvent) => {
-    e.stopPropagation();
-    if (!isManagerOrOwner) return;
+  const handleStartEdit = (b: Branch, e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (!isManagerOrOwner || !b) return;
 
     setEditingBranch(b);
     setEditForm({
-      name: b.name,
-      city: b.city,
-      address: b.address,
-      phone: b.phone,
-      latitude: b.latitude ?? (b.city === 'Islamabad' ? 33.7215 : b.city === 'Karachi' ? 24.8252 : 31.5126),
-      longitude: b.longitude ?? (b.city === 'Islamabad' ? 73.0552 : b.city === 'Karachi' ? 67.0305 : 74.3436),
+      name: b.name || '',
+      city: b.city || '',
+      address: b.address || '',
+      phone: b.phone || '',
+      latitude: Number(b.latitude) || (b.city === 'Islamabad' ? 33.7215 : b.city === 'Karachi' ? 24.8252 : 31.5126),
+      longitude: Number(b.longitude) || (b.city === 'Islamabad' ? 73.0552 : b.city === 'Karachi' ? 67.0305 : 74.3436),
       maxOrderDistanceKm: b.maxOrderDistanceKm ?? 50,
       tableQrMaxDistanceMeters: b.tableQrMaxDistanceMeters ?? 300,
     });
@@ -358,58 +392,55 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
     setEditingBranch(null);
   };
 
-  // Map panning
-  const handleMouseDown = (e: React.MouseEvent) => {
-    setIsDragging(true);
-    setDragStart({ x: e.clientX - panOffset.x, y: e.clientY - panOffset.y });
-  };
-
-  const handleMouseMove = (e: React.MouseEvent) => {
-    if (!isDragging) return;
-    setPanOffset({
-      x: e.clientX - dragStart.x,
-      y: e.clientY - dragStart.y,
-    });
-  };
-
-  const handleMouseUp = () => {
-    setIsDragging(false);
-  };
-
-  const handleResetMap = () => {
-    setZoomLevel(1);
-    setPanOffset({ x: 0, y: 0 });
-  };
-
-  // Map coordinate normalization
-  const mapWidth = 600;
-  const mapHeight = 380;
-
-  const projectCoords = (lat: number, lng: number) => {
-    const minLat = 24.0;
-    const maxLat = 34.5;
-    const minLng = 66.5;
-    const maxLng = 75.2;
-
-    const xRatio = (lng - minLng) / (maxLng - minLng);
-    const yRatio = (lat - minLat) / (maxLat - minLat);
-
-    const padding = 45;
-    const x = padding + xRatio * (mapWidth - padding * 2);
-    const y = mapHeight - (padding + yRatio * (mapHeight - padding * 2));
-
-    return { x, y };
-  };
-
-  const userPoint = userCoords ? projectCoords(userCoords.lat, userCoords.lng) : projectCoords(DEFAULT_USER_COORDS.lat, DEFAULT_USER_COORDS.lng);
-  const activePoint = activeBranch ? projectCoords(activeBranch.resolvedLat, activeBranch.resolvedLng) : null;
-
-  // DIRECTION LINE LOGIC PER USER REQUIREMENT:
-  // - If delivery: Direction line points TO YOU (from Branch to You)
-  // - If takeaway or dine-in: Direction line points FROM YOU TO BRANCH
   const isDelivery = activeOrderType === 'delivery';
-  const lineStart = isDelivery ? activePoint : userPoint;
-  const lineEnd = isDelivery ? userPoint : activePoint;
+  const effectiveUserCoords = userCoords || DEFAULT_USER_COORDS;
+
+  const osmMarkers: OsmMarkerItem[] = useMemo(() => {
+    const branchPins: OsmMarkerItem[] = branchesWithDistance.map((b) => ({
+      id: b.id,
+      lat: b.resolvedLat,
+      lng: b.resolvedLng,
+      title: `${b.name}`,
+      subtitle: b.address,
+      kind: b.id === selectedBranchId ? 'selected_branch' : 'branch',
+      badgeText: `${b.distanceKm} km`,
+    }));
+
+    return [
+      ...branchPins,
+      {
+        id: 'customer-current-loc',
+        lat: effectiveUserCoords.lat,
+        lng: effectiveUserCoords.lng,
+        title: isDelivery ? 'Delivery Location' : 'Your Current Location',
+        kind: 'customer',
+        badgeText: 'You',
+      },
+    ];
+  }, [branchesWithDistance, selectedBranchId, effectiveUserCoords.lat, effectiveUserCoords.lng, isDelivery]);
+
+  const osmMapCenter = useMemo(() => {
+    if (activeBranch) {
+      return {
+        lat: activeBranch.resolvedLat,
+        lng: activeBranch.resolvedLng,
+      };
+    }
+    return effectiveUserCoords;
+  }, [activeBranch, effectiveUserCoords]);
+
+  const osmRouteLine = useMemo(() => {
+    if (!activeBranch) return null;
+    const branchPoint = { lat: activeBranch.resolvedLat, lng: activeBranch.resolvedLng };
+    return {
+      from: isDelivery ? branchPoint : effectiveUserCoords,
+      to: isDelivery ? effectiveUserCoords : branchPoint,
+      label: isDelivery
+        ? `Branch ➔ You (${activeBranch.distanceKm} km)`
+        : `You ➔ Branch (${activeBranch.distanceKm} km)`,
+      color: isDelivery ? '#EA580C' : '#2563EB',
+    };
+  }, [activeBranch, effectiveUserCoords, isDelivery]);
 
   return (
     <div
@@ -436,8 +467,8 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
           borderRadius: '24px',
           border: '1.5px solid var(--border-color)',
           boxShadow: '0 24px 60px rgba(0, 0, 0, 0.35)',
-          width: 'clamp(320px, 94vw, 700px)',
-          height: 'clamp(420px, 68vh, 520px)',
+          width: 'clamp(340px, 95vw, 840px)',
+          height: 'clamp(500px, 82vh, 620px)',
           display: 'flex',
           flexDirection: 'column',
           overflow: 'hidden',
@@ -562,6 +593,33 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
                         {b.city}
                       </span>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '3px' }}>
+                        {b.isOpen ? (
+                          <span
+                            style={{
+                              fontSize: '9px',
+                              fontWeight: 900,
+                              padding: '1px 5px',
+                              borderRadius: '8px',
+                              backgroundColor: '#DCFCE7',
+                              color: '#15803D',
+                            }}
+                          >
+                            ● Open
+                          </span>
+                        ) : (
+                          <span
+                            style={{
+                              fontSize: '9px',
+                              fontWeight: 900,
+                              padding: '1px 5px',
+                              borderRadius: '8px',
+                              backgroundColor: '#FEE2E2',
+                              color: '#DC2626',
+                            }}
+                          >
+                            ● Closed / Offline
+                          </span>
+                        )}
                         {isNearest && (
                           <span
                             style={{
@@ -607,14 +665,22 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
 
                     {/* Location Address below the name in LESS BOLD words */}
                     <div
+                      onClick={(e) => {
+                        if (isManagerOrOwner) {
+                          e.stopPropagation();
+                          handleStartEdit(b, e);
+                        }
+                      }}
+                      title={isManagerOrOwner ? 'Click to edit branch location & GPS' : undefined}
                       style={{
                         fontSize: '11px',
                         fontWeight: 450,
                         color: 'var(--text-muted)',
                         lineHeight: 1.35,
+                        cursor: isManagerOrOwner ? 'pointer' : 'inherit',
                       }}
                     >
-                      {b.address}
+                      {b.address} {isManagerOrOwner && <span style={{ color: '#7C3AED', fontWeight: 700 }}>· Edit 📍</span>}
                     </div>
 
                     {/* Distance indicator */}
@@ -662,408 +728,180 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
 
           {/* 
             ========================================================================
-            RIGHT 3 QUARTERS (~72% width): INTERACTIVE MAP VIEW
-            Showing current location, that branch location, and directional route line
+            RIGHT 3 QUARTERS (~72% width): INTERACTIVE OPENSTREETMAP VIEW
+            Showing current location, branch locations, search, GPS & directional route
             ========================================================================
           */}
           <div
             style={{
               flex: 1,
-              backgroundColor: '#F7F6F1',
+              backgroundColor: '#F8FAFC',
               position: 'relative',
               overflow: 'hidden',
               display: 'flex',
               flexDirection: 'column',
-              userSelect: 'none',
+              padding: '10px',
+              gap: '8px',
             }}
-            onMouseDown={handleMouseDown}
-            onMouseMove={handleMouseMove}
-            onMouseUp={handleMouseUp}
-            onMouseLeave={handleMouseUp}
           >
-            {/* Quick Location Jump Toolbar */}
+            {/* Location Selector Toolbar: If saved addresses exist, show "Use already saved location", otherwise Quick City Preset */}
             <div
               style={{
-                padding: '5px 10px',
-                backgroundColor: '#FFFFFF',
-                borderBottom: '1px solid var(--border-color)',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 gap: '6px',
                 overflowX: 'auto',
                 flexShrink: 0,
-                zIndex: 10,
               }}
             >
-              <div style={{ display: 'flex', alignItems: 'center', gap: '5px', overflowX: 'auto' }}>
-                <button
-                  type="button"
-                  onClick={() => {
-                    if (typeof window !== 'undefined' && 'geolocation' in navigator) {
-                      navigator.geolocation.getCurrentPosition(
-                        (pos) => handleUpdateLocation({ lat: pos.coords.latitude, lng: pos.coords.longitude }),
-                        () => addToast({ type: 'warning', title: 'GPS Unavailable', message: 'Could not access GPS. Please click on the map.' }),
-                        { timeout: 6000 }
-                      );
-                    }
-                  }}
-                  title="Take me to my current GPS location"
-                  style={{
-                    padding: '3px 9px',
-                    borderRadius: '12px',
-                    backgroundColor: 'rgba(37, 99, 235, 0.1)',
-                    border: '1px solid rgba(37, 99, 235, 0.25)',
-                    color: '#2563EB',
-                    fontSize: '10.5px',
-                    fontWeight: 800,
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: '4px',
-                  }}
-                >
-                  <Navigation size={12} />
-                  <span>My Current GPS</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleUpdateLocation({ lat: 31.5204, lng: 74.3587 })}
-                  style={{
-                    padding: '3px 8px',
-                    borderRadius: '12px',
-                    backgroundColor: 'var(--bg-card)',
-                    border: '1px solid var(--border-color)',
-                    color: 'var(--text-main)',
-                    fontSize: '10.5px',
-                    fontWeight: 750,
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  📍 Lahore
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleUpdateLocation({ lat: 33.6844, lng: 73.0479 })}
-                  style={{
-                    padding: '3px 8px',
-                    borderRadius: '12px',
-                    backgroundColor: 'var(--bg-card)',
-                    border: '1px solid var(--border-color)',
-                    color: 'var(--text-main)',
-                    fontSize: '10.5px',
-                    fontWeight: 750,
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  📍 Islamabad
-                </button>
-                <button
-                  type="button"
-                  onClick={() => handleUpdateLocation({ lat: 24.8607, lng: 67.0011 })}
-                  style={{
-                    padding: '3px 8px',
-                    borderRadius: '12px',
-                    backgroundColor: 'var(--bg-card)',
-                    border: '1px solid var(--border-color)',
-                    color: 'var(--text-main)',
-                    fontSize: '10.5px',
-                    fontWeight: 750,
-                    cursor: 'pointer',
-                    whiteSpace: 'nowrap',
-                  }}
-                >
-                  📍 Karachi
-                </button>
-              </div>
-              <span style={{ fontSize: '9.5px', color: 'var(--primary)', fontWeight: 800, whiteSpace: 'nowrap' }}>
-                💡 Click map to set location
+              {savedAddresses && savedAddresses.length > 0 ? (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', overflowX: 'auto' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-main)', whiteSpace: 'nowrap' }}>
+                    Use Already Saved Location:
+                  </span>
+                  {savedAddresses.map((addr) => (
+                    <button
+                      key={addr.id}
+                      type="button"
+                      onClick={() => {
+                        setMapZoom(14);
+                        if (addr.coordinates) {
+                          handleUpdateLocation(addr.coordinates, true, addr.address);
+                        } else {
+                          setSelectedDeliveryAddress(addr.address);
+                        }
+                      }}
+                      style={{
+                        padding: '4px 9px',
+                        borderRadius: '999px',
+                        backgroundColor: '#FFFFFF',
+                        border: '1px solid var(--border-color)',
+                        color: 'var(--primary)',
+                        fontSize: '11px',
+                        fontWeight: 750,
+                        cursor: 'pointer',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      📍 {addr.label}: {addr.address.length > 20 ? `${addr.address.substring(0, 20)}...` : addr.address}
+                    </button>
+                  ))}
+                </div>
+              ) : (
+                <div style={{ display: 'flex', alignItems: 'center', gap: '5px', overflowX: 'auto' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                    Quick Area Preset:
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMapZoom(13);
+                      handleUpdateLocation({ lat: 31.5204, lng: 74.3587 }, true, 'Main Boulevard Gulberg III, Lahore');
+                    }}
+                    style={{
+                      padding: '4px 9px',
+                      borderRadius: '10px',
+                      backgroundColor: '#FFFFFF',
+                      border: '1px solid var(--border-color)',
+                      color: 'var(--text-main)',
+                      fontSize: '11px',
+                      fontWeight: 750,
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    📍 Lahore
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMapZoom(13);
+                      handleUpdateLocation({ lat: 33.6844, lng: 73.0479 }, true, 'Sector F-7 / Blue Area, Islamabad');
+                    }}
+                    style={{
+                      padding: '4px 9px',
+                      borderRadius: '10px',
+                      backgroundColor: '#FFFFFF',
+                      border: '1px solid var(--border-color)',
+                      color: 'var(--text-main)',
+                      fontSize: '11px',
+                      fontWeight: 750,
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    📍 Islamabad
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setMapZoom(13);
+                      handleUpdateLocation({ lat: 24.8607, lng: 67.0011 }, true, 'Clifton / DHA, Karachi');
+                    }}
+                    style={{
+                      padding: '4px 9px',
+                      borderRadius: '10px',
+                      backgroundColor: '#FFFFFF',
+                      border: '1px solid var(--border-color)',
+                      color: 'var(--text-main)',
+                      fontSize: '11px',
+                      fontWeight: 750,
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    📍 Karachi
+                  </button>
+                </div>
+              )}
+              <span style={{ fontSize: '10.5px', color: 'var(--primary)', fontWeight: 800, whiteSpace: 'nowrap' }}>
+                Click map to store current location pin
               </span>
             </div>
 
-            {/* Zoom / Control Buttons */}
-            <div
-              style={{
-                position: 'absolute',
-                top: '46px',
-                right: '10px',
-                zIndex: 20,
-                display: 'flex',
-                flexDirection: 'column',
-                gap: '4px',
-              }}
-            >
-              <button
-                type="button"
-                onClick={() => setZoomLevel((z) => Math.min(z + 0.25, 2.2))}
-                title="Zoom In"
-                style={{
-                  width: '28px',
-                  height: '28px',
-                  borderRadius: '6px',
-                  backgroundColor: '#FFFFFF',
-                  border: '1px solid var(--border-color)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  color: 'var(--text-main)',
+            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+              <OpenStreetMapView
+                center={osmMapCenter}
+                zoom={mapZoom}
+                height={275}
+                markers={osmMarkers}
+                selectedMarkerId={selectedBranchId}
+                onSelectMarker={(id) => {
+                  if (id !== 'customer-current-loc') {
+                    handleSelectBranch(id);
+                  }
                 }}
-              >
-                <ZoomIn size={14} />
-              </button>
-              <button
-                type="button"
-                onClick={() => setZoomLevel((z) => Math.max(z - 0.25, 0.7))}
-                title="Zoom Out"
-                style={{
-                  width: '28px',
-                  height: '28px',
-                  borderRadius: '6px',
-                  backgroundColor: '#FFFFFF',
-                  border: '1px solid var(--border-color)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  color: 'var(--text-main)',
+                interactivePin={effectiveUserCoords}
+                onPinChange={(coords, geo) => {
+                  handleUpdateLocation(coords, true, geo?.address);
                 }}
-              >
-                <ZoomOut size={14} />
-              </button>
-              <button
-                type="button"
-                onClick={handleResetMap}
-                title="Reset View"
-                style={{
-                  width: '28px',
-                  height: '28px',
-                  borderRadius: '6px',
-                  backgroundColor: '#FFFFFF',
-                  border: '1px solid var(--border-color)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  cursor: 'pointer',
-                  color: 'var(--text-main)',
+                onGpsLocated={(coords, geo) => {
+                  setMapZoom(14);
+                  handleUpdateLocation(coords, true, geo?.address || '');
                 }}
-              >
-                <RotateCcw size={12} />
-              </button>
+                routeLine={osmRouteLine}
+                showSearch={true}
+                showGpsButton={true}
+                modeLabel={isDelivery ? 'OpenStreetMap • Delivery & Branch View' : 'OpenStreetMap • Branch Locator'}
+                externalDirectionsOrigin={effectiveUserCoords}
+              />
             </div>
 
-            {/* Interactive Vector Map */}
-            <div
-              style={{
-                flex: 1,
-                width: '100%',
-                height: '100%',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                cursor: isDragging ? 'grabbing' : 'crosshair',
-                transform: `translate(${panOffset.x}px, ${panOffset.y}px) scale(${zoomLevel})`,
-                transformOrigin: 'center center',
-                transition: isDragging ? 'none' : 'transform 0.15s ease-out',
-              }}
-            >
-              <svg
-                viewBox={`0 0 ${mapWidth} ${mapHeight}`}
-                style={{ width: '100%', height: '100%', maxWidth: `${mapWidth}px`, maxHeight: `${mapHeight}px` }}
-                onClick={(e) => {
-                  const svg = e.currentTarget;
-                  const rect = svg.getBoundingClientRect();
-                  const clickX = ((e.clientX - rect.left) / rect.width) * mapWidth;
-                  const clickY = ((e.clientY - rect.top) / rect.height) * mapHeight;
-                  
-                  const minLat = 24.0;
-                  const maxLat = 34.5;
-                  const minLng = 66.5;
-                  const maxLng = 75.2;
-                  const padding = 45;
-                  
-                  const xRatio = Math.max(0, Math.min(1, (clickX - padding) / (mapWidth - padding * 2)));
-                  const yRatio = Math.max(0, Math.min(1, (mapHeight - padding - clickY) / (mapHeight - padding * 2)));
-                  const newLat = Number((minLat + yRatio * (maxLat - minLat)).toFixed(4));
-                  const newLng = Number((minLng + xRatio * (maxLng - minLng)).toFixed(4));
-                  
-                  handleUpdateLocation({ lat: newLat, lng: newLng });
-                }}
-              >
-                <defs>
-                  <pattern id="compactGrid" width="24" height="24" patternUnits="userSpaceOnUse">
-                    <path d="M 24 0 L 0 0 0 24" fill="none" stroke="#EBE8DE" strokeWidth="0.8" />
-                  </pattern>
-
-                  {/* Gradient for trajectory route */}
-                  <linearGradient id="routeGrad" x1="0%" y1="0%" x2="100%" y2="100%">
-                    <stop offset="0%" stopColor={isDelivery ? 'var(--primary)' : '#2563EB'} />
-                    <stop offset="100%" stopColor={isDelivery ? '#2563EB' : 'var(--primary)'} />
-                  </linearGradient>
-
-                  {/* Arrowhead marker pointing to Customer (Delivery) */}
-                  <marker
-                    id="arrowToCustomer"
-                    viewBox="0 0 10 10"
-                    refX="8"
-                    refY="5"
-                    markerWidth="6"
-                    markerHeight="6"
-                    orient="auto-start-reverse"
-                  >
-                    <path d="M 0 1 L 10 5 L 0 9 z" fill="#2563EB" />
-                  </marker>
-
-                  {/* Arrowhead marker pointing to Branch (Takeaway/Dine-In) */}
-                  <marker
-                    id="arrowToBranch"
-                    viewBox="0 0 10 10"
-                    refX="8"
-                    refY="5"
-                    markerWidth="6"
-                    markerHeight="6"
-                    orient="auto-start-reverse"
-                  >
-                    <path d="M 0 1 L 10 5 L 0 9 z" fill="var(--primary)" />
-                  </marker>
-                </defs>
-
-                <rect width={mapWidth} height={mapHeight} fill="#F7F6F1" />
-                <rect width={mapWidth} height={mapHeight} fill="url(#compactGrid)" />
-
-                {/* Major routes matching checkout vector design */}
-                <path d="M 60 220 Q 140 180 230 140 T 360 80" fill="none" stroke="#E3DFD5" strokeWidth="6" strokeLinecap="round" />
-
-                {/* City Labels */}
-                <text x="90" y="210" fill="#BFBBAE" fontSize="9" fontWeight="800">KARACHI</text>
-                <text x="250" y="130" fill="#BFBBAE" fontSize="9" fontWeight="800">LAHORE</text>
-                <text x="360" y="60" fill="#BFBBAE" fontSize="9" fontWeight="800">ISLAMABAD</text>
-
-                {/* DIRECTIONAL ROUTE LINE */}
-                {lineStart && lineEnd && (
-                  <g>
-                    {/* Shadow line */}
-                    <line
-                      x1={lineStart.x}
-                      y1={lineStart.y}
-                      x2={lineEnd.x}
-                      y2={lineEnd.y}
-                      stroke="rgba(0, 0, 0, 0.06)"
-                      strokeWidth="5"
-                      strokeLinecap="round"
-                    />
-
-                    {/* Animated directional dashed line with arrowhead */}
-                    <line
-                      x1={lineStart.x}
-                      y1={lineStart.y}
-                      x2={lineEnd.x}
-                      y2={lineEnd.y}
-                      stroke="url(#routeGrad)"
-                      strokeWidth="3"
-                      strokeDasharray="6 4"
-                      strokeLinecap="round"
-                      markerEnd={isDelivery ? 'url(#arrowToCustomer)' : 'url(#arrowToBranch)'}
-                    >
-                      <animate
-                        attributeName="stroke-dashoffset"
-                        from="20"
-                        to="0"
-                        dur="1.2s"
-                        repeatCount="indefinite"
-                      />
-                    </line>
-
-                    {/* Midpoint Directional Badge */}
-                    <g transform={`translate(${(lineStart.x + lineEnd.x) / 2}, ${(lineStart.y + lineEnd.y) / 2 - 8})`}>
-                      <rect x="-65" y="-10" width="130" height="20" rx="10" fill="#FFFFFF" stroke="var(--border-color)" strokeWidth="1" />
-                      <text x="0" y="4" textAnchor="middle" fill="var(--text-main)" fontSize="9" fontWeight="900">
-                        {isDelivery
-                          ? `Branch ➔ You (${activeBranch?.distanceKm} km)`
-                          : `You ➔ Branch (${activeBranch?.distanceKm} km)`}
-                      </text>
-                    </g>
-                  </g>
-                )}
-
-                {/* Other Branch Pins */}
-                {branchesWithDistance.map((b) => {
-                  if (b.id === selectedBranchId) return null;
-                  const pt = projectCoords(b.resolvedLat, b.resolvedLng);
-                  return (
-                    <g
-                      key={`pin-${b.id}`}
-                      transform={`translate(${pt.x}, ${pt.y})`}
-                      onClick={(e) => {
-                        e.stopPropagation();
-                        handleSelectBranch(b.id);
-                      }}
-                      style={{ cursor: 'pointer' }}
-                    >
-                      <circle r="9" fill="#FFFFFF" stroke="var(--border-color)" strokeWidth="1.5" />
-                      <circle r="4" fill="var(--text-muted)" />
-                      <text x="0" y="16" textAnchor="middle" fill="var(--text-secondary)" fontSize="8" fontWeight="800">
-                        {b.city}
-                      </text>
-                    </g>
-                  );
-                })}
-
-                {/* Customer Pin (Blue Radar Pin) */}
-                {userPoint && (
-                  <g transform={`translate(${userPoint.x}, ${userPoint.y})`}>
-                    <circle r="14" fill="rgba(37, 99, 235, 0.2)">
-                      <animate attributeName="r" from="8" to="18" dur="2s" repeatCount="indefinite" />
-                      <animate attributeName="opacity" from="0.7" to="0" dur="2s" repeatCount="indefinite" />
-                    </circle>
-                    <circle r="5" fill="#2563EB" stroke="#FFFFFF" strokeWidth="1.5" />
-                    <g transform="translate(0, -12)">
-                      <rect x="-35" y="-8" width="70" height="15" rx="7" fill="#2563EB" />
-                      <text x="0" y="2.5" textAnchor="middle" fill="#FFFFFF" fontSize="7.5" fontWeight="900">
-                        {isDelivery ? 'DELIVER HERE' : 'YOU (DEST)'}
-                      </text>
-                    </g>
-                  </g>
-                )}
-
-                {/* Selected Branch Pin (Orange Pin from checkout) */}
-                {activePoint && activeBranch && (
-                  <g transform={`translate(${activePoint.x}, ${activePoint.y})`}>
-                    <path d="M 0 0 C -8 -10 -9 -20 0 -28 C 9 -20 8 -10 0 0 Z" fill="var(--primary)" stroke="#FFFFFF" strokeWidth="1.5" />
-                    <circle cx="0" cy="-18" r="5" fill="#FFFFFF" />
-                    <text x="0" y="-15" textAnchor="middle" fontSize="7">☕</text>
-                    <g transform="translate(0, 10)">
-                      <rect x="-42" y="0" width="84" height="16" rx="5" fill="#FFFFFF" stroke="var(--primary)" strokeWidth="1" />
-                      <text x="0" y="10.5" textAnchor="middle" fill="var(--text-main)" fontSize="8" fontWeight="900">
-                        {activeBranch.city} Branch
-                      </text>
-                    </g>
-                  </g>
-                )}
-              </svg>
-            </div>
-
-            {/* Compact Floating Branch Details Overlay at bottom of map */}
+            {/* Compact Floating Branch Details Card at bottom of map */}
             {activeBranch && (
               <div
                 style={{
-                  position: 'absolute',
-                  bottom: '8px',
-                  left: '8px',
-                  right: '8px',
                   backgroundColor: '#FFFFFF',
                   borderRadius: '14px',
                   border: '1px solid var(--border-color)',
-                  boxShadow: '0 8px 24px rgba(0, 0, 0, 0.15)',
+                  boxShadow: '0 4px 14px rgba(0, 0, 0, 0.08)',
                   padding: '8px 12px',
                   display: 'flex',
                   alignItems: 'center',
                   justifyContent: 'space-between',
                   gap: '10px',
-                  zIndex: 30,
+                  flexShrink: 0,
                 }}
               >
                 <div style={{ minWidth: 0 }}>
@@ -1082,7 +920,10 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
 
                 <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
                   <a
-                    href={`https://www.google.com/maps/dir/?api=1&destination=${activeBranch.resolvedLat},${activeBranch.resolvedLng}`}
+                    href={getOsmDirectionsUrl(effectiveUserCoords, {
+                      lat: activeBranch.resolvedLat,
+                      lng: activeBranch.resolvedLng,
+                    })}
                     target="_blank"
                     rel="noopener noreferrer"
                     style={{
@@ -1100,56 +941,68 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
                     }}
                   >
                     <ExternalLink size={12} />
-                    <span>Directions</span>
+                    <span>OpenStreetMap Directions</span>
                   </a>
 
                   {onProceedToPayment ? (
                     <button
                       type="button"
+                      disabled={!activeBranch.isOpen}
                       onClick={() => {
+                        if (!activeBranch.isOpen) return;
                         handleSelectBranch(activeBranch.id);
                         onProceedToPayment();
                       }}
                       style={{
                         padding: '6px 12px',
                         borderRadius: 'var(--radius-sm)',
-                        backgroundColor: 'var(--primary)',
+                        backgroundColor: activeBranch.isOpen ? 'var(--primary)' : '#9CA3AF',
                         color: '#FFFFFF',
                         border: 'none',
                         fontSize: '11.5px',
                         fontWeight: 850,
-                        cursor: 'pointer',
+                        cursor: activeBranch.isOpen ? 'pointer' : 'not-allowed',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '4px',
+                        opacity: activeBranch.isOpen ? 1 : 0.7,
                       }}
                     >
-                      <span>Proceed to Payment</span>
+                      <span>{activeBranch.isOpen ? 'Proceed to Payment' : 'Branch Closed / Offline'}</span>
                       <ArrowRight size={13} />
                     </button>
                   ) : (
                     <button
                       type="button"
+                      disabled={!activeBranch.isOpen}
                       onClick={() => {
+                        if (!activeBranch.isOpen) return;
                         handleSelectBranch(activeBranch.id);
                         onClose();
                       }}
                       style={{
                         padding: '6px 12px',
                         borderRadius: 'var(--radius-sm)',
-                        backgroundColor: 'var(--primary)',
-                        color: '#000000',
+                        backgroundColor: activeBranch.isOpen ? 'var(--primary)' : '#E5E7EB',
+                        color: activeBranch.isOpen ? '#000000' : '#9CA3AF',
                         border: 'none',
                         fontSize: '11.5px',
                         fontWeight: 850,
-                        cursor: 'pointer',
+                        cursor: activeBranch.isOpen ? 'pointer' : 'not-allowed',
                         display: 'flex',
                         alignItems: 'center',
                         gap: '4px',
+                        opacity: activeBranch.isOpen ? 1 : 0.7,
                       }}
                     >
                       <Check size={13} />
-                      <span>{currentBranchId === activeBranch.id ? 'Selected' : 'Select Branch'}</span>
+                      <span>
+                        {!activeBranch.isOpen
+                          ? 'Closed / Offline'
+                          : currentBranchId === activeBranch.id
+                          ? 'Selected'
+                          : 'Select Branch'}
+                      </span>
                     </button>
                   )}
                 </div>
@@ -1349,6 +1202,40 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
                       }}
                     />
                   </div>
+                </div>
+
+                {/* Interactive OpenStreetMap Branch Coordinate Picker */}
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                    Pick Branch Location on OpenStreetMap
+                  </label>
+                  <OpenStreetMapView
+                    center={{ lat: editForm.latitude || 31.5126, lng: editForm.longitude || 74.3436 }}
+                    zoom={14}
+                    height={190}
+                    interactivePin={{ lat: editForm.latitude || 31.5126, lng: editForm.longitude || 74.3436 }}
+                    onPinChange={(coords, geo) => {
+                      setEditForm((f) => ({
+                        ...f,
+                        latitude: coords.lat,
+                        longitude: coords.lng,
+                        address: geo?.address || f.address,
+                        city: geo?.city || f.city,
+                      }));
+                    }}
+                    onGpsLocated={(coords, geo) => {
+                      setEditForm((f) => ({
+                        ...f,
+                        latitude: coords.lat,
+                        longitude: coords.lng,
+                        address: geo?.address || f.address,
+                        city: geo?.city || f.city,
+                      }));
+                    }}
+                    showSearch={true}
+                    showGpsButton={true}
+                    modeLabel="Click OpenStreetMap to Set Branch Pin"
+                  />
                 </div>
 
                 <div>

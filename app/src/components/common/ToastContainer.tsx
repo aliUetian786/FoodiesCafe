@@ -13,7 +13,7 @@ export const ToastContainer: React.FC = () => {
     <div
       style={{
         position: 'fixed',
-        top: '72px',
+        top: '84px',
         right: '24px',
         zIndex: 999999,
         display: 'flex',

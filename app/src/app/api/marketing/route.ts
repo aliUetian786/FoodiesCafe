@@ -1,74 +1,96 @@
 import { NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { query } from '@/lib/db';
+import { cacheGet, cacheSet, cacheInvalidatePrefix } from '@/lib/redis';
+import { broadcastRealtimeEvent } from '@/lib/realtime';
+import { requireAuth } from '@/lib/auth';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    // 1. Fetch hero banners
-    const bannersRes = await query(
-      `SELECT id, title, subtitle, badge, image_url as "imageUrl",
-              category_link as "categoryLink", active, display_order as "displayOrder"
-       FROM hero_banners
-       ORDER BY display_order ASC`
-    );
+    let payload = await cacheGet<any>('marketing:all');
 
-    // 2. Fetch deal card
-    const dealsRes = await query(
-      `SELECT id, title, subtitle, price, tag, image_url as "imageUrl",
-              category_link as "categoryLink"
-       FROM deal_cards
-       LIMIT 1`
-    );
+    if (!payload) {
+      const [bannersRes, dealsRes, footerRes, catsRes] = await Promise.all([
+        query(
+          `SELECT id, title, subtitle, badge, image_url as "imageUrl",
+                  category_link as "categoryLink", active, display_order as "displayOrder"
+           FROM hero_banners
+           ORDER BY display_order ASC`
+        ),
+        query(
+          `SELECT id, title, subtitle, price, tag, image_url as "imageUrl",
+                  category_link as "categoryLink"
+           FROM deal_cards
+           LIMIT 1`
+        ),
+        query(
+          `SELECT helpline, email, hours,
+                  address_lahore as "addressLahore",
+                  address_islamabad as "addressIslamabad",
+                  address_karachi as "addressKarachi",
+                  tagline, copyright_text as "copyrightText",
+                  order_routing_support_first as "orderRoutingSupportFirst",
+                  auto_forward_kitchen_min as "autoForwardKitchenMin",
+                  auto_forward_mode as "autoForwardMode",
+                  home_notification_enabled as "homeNotificationEnabled",
+                  home_notification_badge as "homeNotificationBadge",
+                  home_notification_title as "homeNotificationTitle",
+                  home_notification_message as "homeNotificationMessage",
+                  home_notification_type as "homeNotificationType",
+                  home_notification_updated_by as "homeNotificationUpdatedBy",
+                  home_notification_updated_at as "homeNotificationUpdatedAt"
+           FROM footer_settings
+           LIMIT 1`
+        ).catch(() => ({ rows: [] })),
+        query(`SELECT name FROM categories ORDER BY display_order ASC`),
+      ]);
 
-    // 3. Fetch footer settings
-    let footerData = null;
-    try {
-      const footerRes = await query(
-        `SELECT helpline, email, hours,
-                address_lahore as "addressLahore",
-                address_islamabad as "addressIslamabad",
-                address_karachi as "addressKarachi",
-                tagline, copyright_text as "copyrightText",
-                order_routing_support_first as "orderRoutingSupportFirst",
-                auto_forward_kitchen_min as "autoForwardKitchenMin",
-                auto_forward_mode as "autoForwardMode"
-         FROM footer_settings
-         LIMIT 1`
-      );
-      footerData = footerRes.rows[0] || null;
-    } catch (e) {
-      // Fallback query if columns not present yet in table
-      const fallbackRes = await query(
-        `SELECT helpline, email, hours,
-                address_lahore as "addressLahore",
-                address_islamabad as "addressIslamabad",
-                address_karachi as "addressKarachi",
-                tagline, copyright_text as "copyrightText"
-         FROM footer_settings
-         LIMIT 1`
-      ).catch(() => ({ rows: [] }));
-      footerData = fallbackRes.rows[0] || null;
+      const deal = dealsRes.rows[0]
+        ? {
+            ...dealsRes.rows[0],
+            price:
+              typeof dealsRes.rows[0].price === 'string' && !dealsRes.rows[0].price.startsWith('Rs.')
+                ? `Rs. ${Number(dealsRes.rows[0].price).toLocaleString()}`
+                : dealsRes.rows[0].price,
+          }
+        : null;
+
+      const data = {
+        heroBanners: bannersRes.rows,
+        dealCard: deal,
+        footerSettings: footerRes.rows[0] || null,
+        categories: catsRes.rows.map((r: any) => r.name),
+      };
+
+      const etag = `"mkt-${crypto.createHash('sha1').update(JSON.stringify(data)).digest('hex').slice(0, 16)}"`;
+      payload = { ...data, etag };
+      await cacheSet('marketing:all', payload, 30);
     }
 
-    // 4. Fetch categories
-    const catsRes = await query(
-      `SELECT name FROM categories ORDER BY display_order ASC`
+    if (request.headers.get('if-none-match') === payload.etag) {
+      return new NextResponse(null, {
+        status: 304,
+        headers: {
+          ETag: payload.etag,
+          'Cache-Control': 'public, max-age=15, stale-while-revalidate=60',
+        },
+      });
+    }
+
+    return NextResponse.json(
+      {
+        heroBanners: payload.heroBanners,
+        dealCard: payload.dealCard,
+        footerSettings: payload.footerSettings,
+        categories: payload.categories,
+      },
+      {
+        headers: {
+          ETag: payload.etag,
+          'Cache-Control': 'public, max-age=15, stale-while-revalidate=60',
+        },
+      }
     );
-
-    const deal = dealsRes.rows[0]
-      ? {
-          ...dealsRes.rows[0],
-          price: typeof dealsRes.rows[0].price === 'string' && !dealsRes.rows[0].price.startsWith('Rs.')
-            ? `Rs. ${Number(dealsRes.rows[0].price).toLocaleString()}`
-            : dealsRes.rows[0].price,
-        }
-      : null;
-
-    return NextResponse.json({
-      heroBanners: bannersRes.rows,
-      dealCard: deal,
-      footerSettings: footerData,
-      categories: catsRes.rows.map((r: any) => r.name),
-    });
   } catch (error: any) {
     return NextResponse.json(
       { error: 'Failed to fetch marketing and categories from PostgreSQL', details: error.message },
@@ -77,22 +99,25 @@ export async function GET() {
   }
 }
 
-let footerColumnsMigrated = false;
-
-async function ensureFooterColumns() {
-  if (footerColumnsMigrated) return;
-  try {
-    await query(`ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS order_routing_support_first BOOLEAN DEFAULT true`);
-    await query(`ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS auto_forward_kitchen_min INT DEFAULT 3`);
-    await query(`ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS auto_forward_mode VARCHAR(20) DEFAULT 'timed'`);
-    footerColumnsMigrated = true;
-  } catch (err) {}
-}
-
 export async function PATCH(request: Request) {
   try {
+    const { auth, errorResponse } = requireAuth(request, ['platform_owner', 'branch_manager']);
+    if (errorResponse) return errorResponse;
+
     const body = await request.json();
     const { type } = body;
+
+    const invalidateAll = async () => {
+      await Promise.all([
+        cacheInvalidatePrefix('marketing:'),
+        cacheInvalidatePrefix('menu:'),
+        cacheInvalidatePrefix('catalog:'),
+        cacheInvalidatePrefix('sync:payload:'),
+      ]);
+      try {
+        broadcastRealtimeEvent({ type: 'MENU_UPDATED' });
+      } catch {}
+    };
 
     // A. FOOTER SETTINGS UPDATE
     if (type === 'footer') {
@@ -100,9 +125,6 @@ export async function PATCH(request: Request) {
       const updates: string[] = [];
       const values: any[] = [];
       let idx = 1;
-
-      // Auto-migrate schema columns if missing (cached once)
-      await ensureFooterColumns();
 
       if (settings.helpline !== undefined) {
         updates.push(`helpline = $${idx++}`);
@@ -148,12 +170,41 @@ export async function PATCH(request: Request) {
         updates.push(`auto_forward_mode = $${idx++}`);
         values.push(settings.autoForwardMode);
       }
+      if (settings.homeNotificationEnabled !== undefined) {
+        updates.push(`home_notification_enabled = $${idx++}`);
+        values.push(Boolean(settings.homeNotificationEnabled));
+      }
+      if (settings.homeNotificationBadge !== undefined) {
+        updates.push(`home_notification_badge = $${idx++}`);
+        values.push(String(settings.homeNotificationBadge));
+      }
+      if (settings.homeNotificationTitle !== undefined) {
+        updates.push(`home_notification_title = $${idx++}`);
+        values.push(String(settings.homeNotificationTitle));
+      }
+      if (settings.homeNotificationMessage !== undefined) {
+        updates.push(`home_notification_message = $${idx++}`);
+        values.push(String(settings.homeNotificationMessage));
+      }
+      if (settings.homeNotificationType !== undefined) {
+        updates.push(`home_notification_type = $${idx++}`);
+        values.push(String(settings.homeNotificationType));
+      }
+      if (settings.homeNotificationUpdatedBy !== undefined) {
+        updates.push(`home_notification_updated_by = $${idx++}`);
+        values.push(String(settings.homeNotificationUpdatedBy));
+      }
+      if (settings.homeNotificationUpdatedAt !== undefined) {
+        updates.push(`home_notification_updated_at = $${idx++}`);
+        values.push(String(settings.homeNotificationUpdatedAt));
+      }
 
       if (updates.length > 0) {
         const sql = `UPDATE footer_settings SET ${updates.join(', ')} WHERE id = 'default' RETURNING *`;
         await query(sql, values);
       }
 
+      await invalidateAll();
       return NextResponse.json({ success: true, message: 'Footer updated in PostgreSQL' });
     }
 
@@ -182,6 +233,7 @@ export async function PATCH(request: Request) {
         deal.imageUrl,
         deal.categoryLink || 'Biryani & Rice',
       ]);
+      await invalidateAll();
       return NextResponse.json({ success: true, deal: res.rows[0] });
     }
 
@@ -210,6 +262,7 @@ export async function PATCH(request: Request) {
         banner.active !== undefined ? banner.active : true,
         banner.displayOrder || null,
       ]);
+      await invalidateAll();
       return NextResponse.json({ success: true, banner: res.rows[0] });
     }
 
@@ -217,6 +270,7 @@ export async function PATCH(request: Request) {
     if (type === 'delete_banner') {
       const { id } = body;
       await query(`DELETE FROM hero_banners WHERE id = $1`, [id]);
+      await invalidateAll();
       return NextResponse.json({ success: true, message: `Banner ${id} deleted` });
     }
 
@@ -232,17 +286,20 @@ export async function PATCH(request: Request) {
           `INSERT INTO categories (id, name, display_order) VALUES ($1, $2, $3) ON CONFLICT (name) DO NOTHING`,
           [catId, name, nextOrder]
         );
+        await invalidateAll();
         return NextResponse.json({ success: true, message: `Category ${name} created in PostgreSQL` });
       }
 
       if (action === 'rename' && oldName && newName) {
         await query(`UPDATE categories SET name = $1 WHERE name = $2`, [newName, oldName]);
         await query(`UPDATE menu_items SET category = $1 WHERE category = $2`, [newName, oldName]);
+        await invalidateAll();
         return NextResponse.json({ success: true, message: `Category renamed from ${oldName} to ${newName}` });
       }
 
       if (action === 'delete' && name) {
         await query(`DELETE FROM categories WHERE name = $1`, [name]);
+        await invalidateAll();
         return NextResponse.json({ success: true, message: `Category ${name} deleted from PostgreSQL` });
       }
     }

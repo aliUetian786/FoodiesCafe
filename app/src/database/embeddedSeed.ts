@@ -2,6 +2,7 @@
 import { MenuItem } from '@/types/cafe';
 
 export const INITIAL_CATEGORIES: string[] = [
+  'Deals',
   'Biryani & Rice',
   'Karahi & Handi',
   'BBQ & Kebabs',
@@ -11,6 +12,55 @@ export const INITIAL_CATEGORIES: string[] = [
 ];
 
 export const INITIAL_MENU: MenuItem[] = [
+  // 0. Deals & Combos
+  {
+    id: 'deal-1',
+    name: 'Family Dum Biryani Feast (Deal for 3-4)',
+    category: 'Deals',
+    description: '2x Royal Chicken Biryani, 1x Half Chicken Boti BBQ, 2x Mint Margaritas, Fresh Zeera Raita & Salad.',
+    basePrice: 1650,
+    image: '/food-biryani.jpg',
+    isAvailable: true,
+    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
+    branchPriceOverrides: { 'gulberg-lahore': 1650, 'f7-islamabad': 1590, 'clifton-karachi': 1690 },
+    sizes: [{ name: 'Family Combo', priceDelta: 0 }],
+  },
+  {
+    id: 'deal-2',
+    name: 'Shinwari Karahi Duo Combo (Deal for 2)',
+    category: 'Deals',
+    description: 'Half Desi Ghee Shinwari Chicken Karahi, 4x Fresh Roghni Naan, 2x Soft Drinks & Mint Chutney.',
+    basePrice: 1550,
+    image: '/hero-bg.jpg',
+    isAvailable: true,
+    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
+    branchPriceOverrides: { 'gulberg-lahore': 1550, 'f7-islamabad': 1490, 'clifton-karachi': 1590 },
+    sizes: [{ name: '2 Persons', priceDelta: 0 }],
+  },
+  {
+    id: 'deal-3',
+    name: 'Smashed Burger & Fries Crave Deal',
+    category: 'Deals',
+    description: '1x Double Beef Smashed Cheeseburger, 1x Peri Peri Loaded Fries & 1x Artisanal Mint Margarita.',
+    basePrice: 1190,
+    image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&auto=format&fit=crop&q=60',
+    isAvailable: true,
+    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
+    branchPriceOverrides: { 'gulberg-lahore': 1190, 'f7-islamabad': 1150, 'clifton-karachi': 1220 },
+    sizes: [{ name: 'Single Meal', priceDelta: 0 }],
+  },
+  {
+    id: 'deal-4',
+    name: 'Midnight BBQ Feast Deal',
+    category: 'Deals',
+    description: '4 pcs Reshmi Chicken Kebabs, 6 pcs Chicken Malai Boti, 2x Garlic Butter Naans, Raita & Salad.',
+    basePrice: 1290,
+    image: 'https://images.unsplash.com/photo-1599488615731-7e5c2823ff28?w=800&auto=format&fit=crop&q=60',
+    isAvailable: true,
+    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
+    branchPriceOverrides: { 'gulberg-lahore': 1290, 'f7-islamabad': 1250, 'clifton-karachi': 1320 },
+    sizes: [{ name: 'Sharing Platter', priceDelta: 0 }],
+  },
   // 1. Biryani & Rice
   {
     id: 'm1',
@@ -21,6 +71,7 @@ export const INITIAL_MENU: MenuItem[] = [
     image: '/food-biryani.jpg',
     isAvailable: true,
     branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
+    branchPriceOverrides: { 'gulberg-lahore': 750, 'f7-islamabad': 620, 'clifton-karachi': 680 },
     sizes: [
       { name: 'Regular (Single)', priceDelta: 0 },
       { name: 'Jumbo (Double)', priceDelta: 350 },
@@ -40,6 +91,7 @@ export const INITIAL_MENU: MenuItem[] = [
     image: '/food-biryani.jpg',
     isAvailable: true,
     branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
+    branchPriceOverrides: { 'gulberg-lahore': 1050, 'f7-islamabad': 920, 'clifton-karachi': 990 },
     sizes: [
       { name: 'Single Pot', priceDelta: 0 },
       { name: 'Family Platter (Serves 3)', priceDelta: 850 },
@@ -78,6 +130,7 @@ export const INITIAL_MENU: MenuItem[] = [
     image: '/hero-bg.jpg',
     isAvailable: true,
     branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
+    branchPriceOverrides: { 'gulberg-lahore': 1350, 'f7-islamabad': 1180, 'clifton-karachi': 1280 },
     sizes: [
       { name: 'Half (serves 2)', priceDelta: 0 },
       { name: 'Full (serves 4)', priceDelta: 1100 },
@@ -209,6 +262,7 @@ export const INITIAL_MENU: MenuItem[] = [
     image: '/hero-bg.jpg',
     isAvailable: true,
     branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
+    branchPriceOverrides: { 'gulberg-lahore': 890, 'f7-islamabad': 790, 'clifton-karachi': 850 },
     sizes: [
       { name: 'Double Patty', priceDelta: 0 },
       { name: 'Triple Monster Patty', priceDelta: 310 },
@@ -342,7 +396,8 @@ CREATE TABLE IF NOT EXISTS branches (
     longitude DOUBLE PRECISION,
     max_order_distance_km DOUBLE PRECISION NOT NULL DEFAULT 50,
     table_qr_max_distance_meters INT NOT NULL DEFAULT 300,
-    payment_settings JSONB NOT NULL DEFAULT '{"dine_in":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"takeaway":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"delivery":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false}}'::jsonb,
+    min_delivery_amount INT NOT NULL DEFAULT 500,
+    payment_settings JSONB NOT NULL DEFAULT '{"dine_in":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"takeaway":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"delivery":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false}}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -361,6 +416,8 @@ CREATE TABLE IF NOT EXISTS users (
     rider_availability VARCHAR(30) DEFAULT 'available',
     rider_total_deliveries INT DEFAULT 0,
     rider_active_order_id VARCHAR(64),
+    assigned_floor VARCHAR(100),
+    assigned_table_numbers JSONB DEFAULT '[]'::jsonb,
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -402,6 +459,8 @@ CREATE TABLE IF NOT EXISTS tables (
     qr_code TEXT,
     qr_expires_at TIMESTAMPTZ,
     allow_qr_reserved BOOLEAN DEFAULT false,
+    assigned_waiter_id VARCHAR(64),
+    assigned_waiter_name VARCHAR(255),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     UNIQUE(branch_id, number)
@@ -446,24 +505,11 @@ CREATE TABLE IF NOT EXISTS orders (
     assigned_waiter_name VARCHAR(255),
     is_table_qr BOOLEAN DEFAULT false,
     waiter_notified BOOLEAN DEFAULT false,
-    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
-);
-
-CREATE TABLE IF NOT EXISTS complaints (
-    id VARCHAR(64) PRIMARY KEY,
-    ticket_number VARCHAR(50) NOT NULL UNIQUE,
-    customer_id VARCHAR(64) NOT NULL,
-    customer_name VARCHAR(255) NOT NULL,
-    customer_phone VARCHAR(50) NOT NULL,
-    customer_email VARCHAR(255),
-    branch_id VARCHAR(64) NOT NULL,
-    order_id VARCHAR(64),
-    order_number VARCHAR(50),
-    subject VARCHAR(255) NOT NULL,
-    status VARCHAR(30) NOT NULL DEFAULT 'new',
-    assigned_to VARCHAR(255),
-    messages JSONB NOT NULL DEFAULT '[]'::jsonb,
+    sent_to_kitchen BOOLEAN DEFAULT false,
+    sent_to_kitchen_at TIMESTAMPTZ,
+    forward_to_kitchen_at TIMESTAMPTZ,
+    auto_forward_custom_min INT,
+    idempotency_key VARCHAR(128),
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
@@ -542,6 +588,13 @@ CREATE TABLE IF NOT EXISTS footer_settings (
     address_karachi TEXT NOT NULL,
     tagline TEXT NOT NULL,
     copyright_text TEXT NOT NULL,
+    whatsapp VARCHAR(50),
+    instagram VARCHAR(100),
+    facebook VARCHAR(100),
+    tiktok VARCHAR(100),
+    order_routing_support_first BOOLEAN NOT NULL DEFAULT true,
+    auto_forward_kitchen_min INT NOT NULL DEFAULT 3,
+    auto_forward_mode VARCHAR(30) NOT NULL DEFAULT 'timed',
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -562,14 +615,112 @@ CREATE TABLE IF NOT EXISTS table_sessions (
     status VARCHAR(30) NOT NULL DEFAULT 'occupied',
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+CREATE TABLE IF NOT EXISTS announcements (
+    id VARCHAR(64) PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    tag VARCHAR(64) NOT NULL DEFAULT 'ANNOUNCEMENT',
+    description TEXT NOT NULL,
+    valid_until VARCHAR(100),
+    branch_id VARCHAR(64),
+    branch_name VARCHAR(100),
+    discount_percent INT,
+    badge_color VARCHAR(50) DEFAULT '#EF4444',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS email_otps (
+    email VARCHAR(255) PRIMARY KEY,
+    code VARCHAR(10) NOT NULL,
+    expires_at BIGINT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS order_history (
+    id VARCHAR(64) PRIMARY KEY,
+    order_id VARCHAR(64) NOT NULL,
+    order_number VARCHAR(50) NOT NULL,
+    branch_id VARCHAR(64) NOT NULL,
+    actor_id VARCHAR(64) NOT NULL DEFAULT 'system',
+    actor_name VARCHAR(255) NOT NULL DEFAULT 'System',
+    actor_role VARCHAR(50) NOT NULL DEFAULT 'system',
+    change_type VARCHAR(50) NOT NULL,
+    old_status VARCHAR(30),
+    new_status VARCHAR(30),
+    old_payment_status VARCHAR(30),
+    new_payment_status VARCHAR(30),
+    old_total NUMERIC(10, 2),
+    new_total NUMERIC(10, 2),
+    version INT NOT NULL DEFAULT 1,
+    details TEXT,
+    payload JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS notifications (
+    id VARCHAR(100) PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    type VARCHAR(30) NOT NULL DEFAULT 'info',
+    category VARCHAR(50) NOT NULL DEFAULT 'system',
+    branch_id VARCHAR(100) DEFAULT 'all',
+    order_id VARCHAR(100),
+    order_number VARCHAR(64),
+    order_type VARCHAR(30),
+    sender_id VARCHAR(100),
+    sender_name VARCHAR(150),
+    sender_role VARCHAR(50),
+    target_roles JSONB NOT NULL DEFAULT '["all"]'::jsonb,
+    target_platform VARCHAR(20) NOT NULL DEFAULT 'all',
+    target_user_id VARCHAR(100),
+    target_customer_phone VARCHAR(50),
+    target_customer_name VARCHAR(150),
+    target_waiter_id VARCHAR(100),
+    target_waiter_name VARCHAR(150),
+    target_rider_id VARCHAR(100),
+    target_rider_name VARCHAR(150),
+    read_by JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE TABLE IF NOT EXISTS notification_settings (
+    id VARCHAR(64) PRIMARY KEY DEFAULT 'global',
+    default_platform VARCHAR(20) NOT NULL DEFAULT 'all',
+    notify_customer BOOLEAN NOT NULL DEFAULT true,
+    notify_concerned_rider BOOLEAN NOT NULL DEFAULT true,
+    notify_concerned_waiter BOOLEAN NOT NULL DEFAULT true,
+    notify_kitchen BOOLEAN NOT NULL DEFAULT true,
+    notify_cashier_and_manager BOOLEAN NOT NULL DEFAULT true,
+    events JSONB NOT NULL DEFAULT '{"orderPlaced":true,"sentToKitchen":true,"cooking":true,"orderReady":true,"outForDelivery":true,"orderServed":true,"orderCompleted":true,"orderCancelled":true,"waiterAssigned":true,"riderAssigned":true,"paymentReceived":true}'::jsonb,
+    recipient_rules JSONB NOT NULL DEFAULT '{"customer":{"orderPlaced":true,"cooking":true,"orderReady":true,"outForDelivery":true,"orderCompleted":true,"orderCancelled":true},"rider":{"orderAssigned":true,"orderReady":true,"orderCancelled":true},"waiter":{"orderAssigned":true,"orderReady":true,"orderCancelled":true},"kitchen":{"newOrderPlaced":true,"orderCancelled":true},"cashierAndManager":{"orderPlaced":true,"orderCancelled":true,"paymentReceived":true}}'::jsonb,
+    updated_by VARCHAR(150),
+    updated_by_role VARCHAR(50),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS recipient_rules JSONB;
+
+CREATE TABLE IF NOT EXISTS banner_deal_approval_requests (
+    id VARCHAR(64) PRIMARY KEY,
+    type VARCHAR(20) NOT NULL,
+    action VARCHAR(20) NOT NULL,
+    target_id VARCHAR(64),
+    submitted_by VARCHAR(255) NOT NULL,
+    submitted_by_role VARCHAR(50) NOT NULL,
+    submitted_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    banner_data JSONB,
+    deal_data JSONB,
+    decision_by VARCHAR(255),
+    decision_at TIMESTAMPTZ,
+    notes TEXT
+);
 `;
 
 export const FALLBACK_SEED_SQL = `
-INSERT INTO branches (id, name, city, address, phone, opening_hours, is_open, is_busy, prep_time_estimate_min, full_edit_window_min, stop_add_ons_min_before_ready, delivery_enabled, latitude, longitude, max_order_distance_km, table_qr_max_distance_meters, payment_settings)
+INSERT INTO branches (id, name, city, address, phone, opening_hours, is_open, is_busy, prep_time_estimate_min, full_edit_window_min, stop_add_ons_min_before_ready, delivery_enabled, latitude, longitude, max_order_distance_km, table_qr_max_distance_meters, min_delivery_amount, payment_settings)
 VALUES
-('gulberg-lahore', 'Gulberg Branch (Flagship)', 'Lahore', '92-B2, Mian Mehmood Ali Kasoori Rd, Gulberg III, Lahore', '+92 42 3578 9101', '11:00 AM - 1:00 AM', true, false, 20, 15, 10, true, 31.5126, 74.3436, 50, 300, '{"dine_in":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"takeaway":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"delivery":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":true}}'::jsonb),
-('f7-islamabad', 'F-7 Markaz Branch', 'Islamabad', 'Shop 4-B, College Road, F-7 Markaz, Islamabad', '+92 51 2654 321', '12:00 PM - 12:00 AM', true, true, 30, 15, 10, true, 33.7215, 73.0552, 50, 300, '{"dine_in":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"takeaway":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"delivery":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false}}'::jsonb),
-('clifton-karachi', 'Clifton Block 4 Branch', 'Karachi', 'Plot 12-C, 26th Street, Block 4, Clifton, Karachi', '+92 21 3587 6543', '1:00 PM - 2:00 AM', true, false, 25, 15, 10, true, 24.8252, 67.0305, 50, 300, '{"dine_in":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"takeaway":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"delivery":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":true}}'::jsonb)
+('gulberg-lahore', 'Gulberg Branch (Flagship)', 'Lahore', '92-B2, Mian Mehmood Ali Kasoori Rd, Gulberg III, Lahore', '+92 42 3578 9101', '11:00 AM - 1:00 AM', true, false, 20, 15, 10, true, 31.5126, 74.3436, 50, 300, 500, '{"dine_in":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"takeaway":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"delivery":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":true}}'::jsonb),
+('f7-islamabad', 'F-7 Markaz Branch', 'Islamabad', 'Shop 4-B, College Road, F-7 Markaz, Islamabad', '+92 51 2654 321', '12:00 PM - 12:00 AM', true, true, 30, 15, 10, true, 33.7215, 73.0552, 50, 300, 500, '{"dine_in":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"takeaway":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"delivery":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false}}'::jsonb),
+('clifton-karachi', 'Clifton Block 4 Branch', 'Karachi', 'Plot 12-C, 26th Street, Block 4, Clifton, Karachi', '+92 21 3587 6543', '1:00 PM - 2:00 AM', true, false, 25, 15, 10, true, 24.8252, 67.0305, 50, 300, 500, '{"dine_in":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"takeaway":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"delivery":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":true}}'::jsonb)
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, is_open = EXCLUDED.is_open, payment_settings = EXCLUDED.payment_settings;
 
 INSERT INTO categories (id, name, display_order)
@@ -587,7 +738,6 @@ VALUES
 ('user-cust', 'Zeeshan Ahmed', '+92 301 5551234', 'zeeshan@example.com', 'House 14, Street 9, Model Town, Lahore', 'customer', NULL, 'active', 0, 'password123'),
 ('user-owner', 'Malik Jahangir', '+92 300 0000001', 'owner@foodiescafe.pk', NULL, 'platform_owner', NULL, 'active', 0, 'password123'),
 ('user-bm', 'Rashid Mehmood', '+92 300 2223344', 'manager.gulberg@foodiescafe.pk', NULL, 'branch_manager', 'gulberg-lahore', 'active', 0, 'password123'),
-('user-rep', 'Zara Noor', '+92 300 4445566', 'rep.gulberg@foodiescafe.pk', NULL, 'branch_representative', 'gulberg-lahore', 'active', 0, 'password123'),
 ('user-kitchen', 'Chef Ustaad Aslam', '+92 300 6667788', 'kitchen.gulberg@foodiescafe.pk', NULL, 'kitchen_staff', 'gulberg-lahore', 'active', 0, 'password123'),
 ('user-cashier', 'Bilal Farooq', '+92 300 8889900', 'cashier.gulberg@foodiescafe.pk', NULL, 'cashier', 'gulberg-lahore', 'active', 0, 'password123'),
 ('user-floor', 'Kashif Ali', '+92 300 1112233', 'floor.gulberg@foodiescafe.pk', NULL, 'floor_staff', 'gulberg-lahore', 'active', 0, 'password123'),
@@ -598,28 +748,28 @@ VALUES
 ('user-bm-khi', 'Kamran Siddiqui', '+92 300 5556677', 'manager.karachi@foodiescafe.pk', NULL, 'branch_manager', 'clifton-karachi', 'active', 0, 'password123')
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role;
 
-INSERT INTO menu_items (id, name, category, description, base_price, image, is_available, branch_availability, sizes, extras)
+INSERT INTO menu_items (id, name, category, description, base_price, image, is_available, branch_availability, branch_price_overrides, sizes, extras)
 VALUES
-('m1', 'Royal Chicken Dum Biryani', 'Biryani & Rice', 'Fragrant long-grain basmati cooked with saffron, marinated chicken, caramelised onions & secret house spices in a sealed copper handi.', 650, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '[{"name":"Regular (Single)","priceDelta":0},{"name":"Jumbo (Double)","priceDelta":350}]'::jsonb, '[{"name":"Extra Zeera Raita","price":60},{"name":"Fresh Kachumber Salad","price":70},{"name":"Extra Boiled Egg","price":50}]'::jsonb),
-('m8', 'Mutton Special Dum Biryani', 'Biryani & Rice', 'Slow-cooked succulent baby mutton pieces layered with aged basmati rice, whole cardamoms, fried onions and saffron steam.', 950, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '[{"name":"Single Pot","priceDelta":0},{"name":"Family Platter (Serves 3)","priceDelta":850}]'::jsonb, '[{"name":"Extra Zeera Raita","price":60},{"name":"Fresh Kachumber Salad","price":70}]'::jsonb),
-('m9', 'Matka Dum Biryani with Chicken', 'Biryani & Rice', 'Traditional earthen clay pot chicken biryani sealed with dough, delivering intense smoky aroma, spiced potatoes and tender chicken.', 720, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '[{"name":"Standard Matka","priceDelta":0},{"name":"Jumbo Matka","priceDelta":320}]'::jsonb, '[{"name":"Mint Raita","price":60},{"name":"Spicy Chutney","price":50}]'::jsonb),
-('m2', 'Desi Ghee Shinwari Chicken Karahi', 'Karahi & Handi', 'Fresh country chicken wok-tossed in pure organic desi ghee, ripe tomatoes, coarse crushed black pepper and ginger juliennes.', 1250, '/hero-bg.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '[{"name":"Half (serves 2)","priceDelta":0},{"name":"Full (serves 4)","priceDelta":1100}]'::jsonb, '[{"name":"Roghni Naan","price":80},{"name":"Garlic Butter Naan","price":110},{"name":"Mint Chutney","price":50}]'::jsonb),
-('m10', 'Boneless Chicken Makhni Handi', 'Karahi & Handi', 'Velvety smooth tomato cream gravy with tender boneless chicken breast cubes, topped with fresh dairy butter and kasuri methi.', 1180, '/hero-bg.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '[{"name":"Half (serves 2)","priceDelta":0},{"name":"Full (serves 4)","priceDelta":970}]'::jsonb, '[{"name":"Garlic Butter Naan","price":110},{"name":"Extra Makhni Gravy","price":150}]'::jsonb),
-('m11', 'Peshawari Mutton Shinwari Karahi', 'Karahi & Handi', 'Prime mutton cuts simmered in pure animal fat and butter with salt, green chilies and fresh tomatoes in a traditional charcoal wok.', 1850, '/hero-bg.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '[{"name":"Half KG (serves 2)","priceDelta":0},{"name":"Full KG (serves 4)","priceDelta":1600}]'::jsonb, '[{"name":"Tandoori Roti (2 pcs)","price":70},{"name":"Roghni Naan","price":80}]'::jsonb),
-('m3', 'Smoky Beef Seekh Kebabs (4 Pcs)', 'BBQ & Kebabs', 'Melt-in-mouth prime beef mince seasoned with roasted cumin, brown onion paste, coriander seeds and charcoal grilled over hot embers.', 780, '/hero-bg.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '[{"name":"Standard (4 pcs)","priceDelta":0},{"name":"Platter (8 pcs)","priceDelta":680}]'::jsonb, '[{"name":"Tandoori Paratha","price":90},{"name":"Mint Coriander Dip","price":40}]'::jsonb),
-('m12', 'Charcoal Grilled Chicken Malai Boti', 'BBQ & Kebabs', 'Creamy boneless chicken thigh cubes marinated in heavy malai, crushed green chilies, white pepper, and seared over charcoal.', 820, '/hero-bg.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '[{"name":"Single Skewer (8 pcs)","priceDelta":0},{"name":"Double Skewer (16 pcs)","priceDelta":740}]'::jsonb, '[{"name":"Garlic Naan","price":110},{"name":"Imli Chutney","price":50}]'::jsonb),
-('m13', 'Mutton Balochi Chops (3 Pcs)', 'BBQ & Kebabs', 'Tender mutton chops marinated in Balochi dried spices, ginger garlic paste and slow grilled till charred and crispy outside.', 1450, '/hero-bg.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '[{"name":"Standard (3 pcs)","priceDelta":0},{"name":"Feast (6 pcs)","priceDelta":1350}]'::jsonb, '[{"name":"Peshawari Chutney","price":60},{"name":"Roghni Naan","price":80}]'::jsonb),
-('m4', 'The Foodies Crunch Burger', 'Burgers & Fast Food', 'Crispy fried buttermilk chicken fillet tossed in spicy glaze, topped with cheddar cheese, tangy coleslaw, garlic aioli on a toasted brioche.', 620, '/hero-bg.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '[{"name":"Single Fillet","priceDelta":0},{"name":"Double Monster Fillet","priceDelta":280}]'::jsonb, '[{"name":"Seasoned Masala Fries","price":160},{"name":"Cheese Dip Shot","price":90}]'::jsonb),
-('m14', 'Double Beef Smashed Cheeseburger', 'Burgers & Fast Food', 'Two seared prime beef patties, double melted cheddar, caramelized onions, crisp iceberg lettuce and house secret sauce on potato bun.', 840, '/hero-bg.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '[{"name":"Double Patty","priceDelta":0},{"name":"Triple Monster Patty","priceDelta":310}]'::jsonb, '[{"name":"Crispy Curly Fries","price":190},{"name":"Truffle Mayo","price":80}]'::jsonb),
-('m15', 'Peri Peri Loaded Crispy Fries', 'Burgers & Fast Food', 'Skin-on golden fries smothered with spicy crispy chicken chunks, warm cheddar cheese sauce, garlic ranch and pickled jalapeños.', 420, '/hero-bg.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '[{"name":"Regular Box","priceDelta":0},{"name":"Party Sharing Platter","priceDelta":340}]'::jsonb, '[{"name":"Extra Cheddar Sauce","price":80},{"name":"Jalapeño Bombs (4 pcs)","price":140}]'::jsonb),
-('m5', 'Fresh Tandoori Roghni Naan', 'Tandoor & Breads', 'Soft leavened bread brushed with clarified butter, toasted white sesame seeds and baked against clay tandoor walls.', 80, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '[]'::jsonb, '[]'::jsonb),
-('m16', 'Roasted Garlic Butter Naan', 'Tandoor & Breads', 'Fresh clay oven tandoori bread slathered in melted butter, roasted minced garlic, and chopped coriander leaves.', 110, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '[]'::jsonb, '[]'::jsonb),
-('m17', 'Cheese Stuffed Tandoori Naan', 'Tandoor & Breads', 'Crispy outside, molten inside! Stuffed with mozzarella & mild cheddar cheese, herbs and brushed with butter.', 240, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '[]'::jsonb, '[]'::jsonb),
-('m6', 'Traditional Peshawari Qahwa with Cardamom', 'Beverages & Desserts', 'Brewed green tea leaves infused with green cardamom pods, cinnamon bark, served with saffron candy crystals.', 120, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '[]'::jsonb, '[]'::jsonb),
-('m7', 'Shahi Malai Kulfi on Stick', 'Beverages & Desserts', 'Dense, creamy frozen dessert made from reduced whole milk, infused with roasted pistachios, almonds, and rose essence.', 220, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '[]'::jsonb, '[]'::jsonb),
-('m18', 'Artisanal Fresh Mint Margarita', 'Beverages & Desserts', 'Fresh mint leaves blended with fresh lime juice, black rock salt, and ice-cold soda. The ultimate refreshing palate cleanser.', 260, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '[]'::jsonb, '[]'::jsonb),
-('m19', 'Special Karak Doodh Patti Chai', 'Beverages & Desserts', 'Slow-simmered rich full-cream milk tea brewed with cardamom pods and premium CTC black tea leaves.', 130, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '[]'::jsonb, '[]'::jsonb),
-('m20', 'Hot Gulab Jamun with Rabri (2 Pcs)', 'Beverages & Desserts', 'Soft hot fried dumplings soaked in rose cardamom syrup, served on a chilled bed of thickened pistachio malai rabri.', 290, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '[]'::jsonb, '[]'::jsonb)
+('m1', 'Royal Chicken Dum Biryani', 'Biryani & Rice', 'Fragrant long-grain basmati cooked with saffron, marinated chicken, caramelised onions & secret house spices in a sealed copper handi.', 650, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '{"gulberg-lahore":750,"f7-islamabad":620,"clifton-karachi":680}'::jsonb, '[{"name":"Regular (Single)","priceDelta":0},{"name":"Jumbo (Double)","priceDelta":350}]'::jsonb, '[{"name":"Extra Zeera Raita","price":60},{"name":"Fresh Kachumber Salad","price":70},{"name":"Extra Boiled Egg","price":50}]'::jsonb),
+('m8', 'Mutton Special Dum Biryani', 'Biryani & Rice', 'Slow-cooked succulent baby mutton pieces layered with aged basmati rice, whole cardamoms, fried onions and saffron steam.', 950, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '{"gulberg-lahore":1050,"f7-islamabad":920,"clifton-karachi":990}'::jsonb, '[{"name":"Single Pot","priceDelta":0},{"name":"Family Platter (Serves 3)","priceDelta":850}]'::jsonb, '[{"name":"Extra Zeera Raita","price":60},{"name":"Fresh Kachumber Salad","price":70}]'::jsonb),
+('m9', 'Matka Dum Biryani with Chicken', 'Biryani & Rice', 'Traditional earthen clay pot chicken biryani sealed with dough, delivering intense smoky aroma, spiced potatoes and tender chicken.', 720, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '{}'::jsonb, '[{"name":"Standard Matka","priceDelta":0},{"name":"Jumbo Matka","priceDelta":320}]'::jsonb, '[{"name":"Mint Raita","price":60},{"name":"Spicy Chutney","price":50}]'::jsonb),
+('m2', 'Desi Ghee Shinwari Chicken Karahi', 'Karahi & Handi', 'Fresh country chicken wok-tossed in pure organic desi ghee, ripe tomatoes, coarse crushed black pepper and ginger juliennes.', 1250, '/hero-bg.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '{"gulberg-lahore":1350,"f7-islamabad":1180,"clifton-karachi":1280}'::jsonb, '[{"name":"Half (serves 2)","priceDelta":0},{"name":"Full (serves 4)","priceDelta":1100}]'::jsonb, '[{"name":"Roghni Naan","price":80},{"name":"Garlic Butter Naan","price":110},{"name":"Mint Chutney","price":50}]'::jsonb),
+('m10', 'Boneless Chicken Makhni Handi', 'Karahi & Handi', 'Velvety smooth tomato cream gravy with tender boneless chicken breast cubes, topped with fresh dairy butter and kasuri methi.', 1180, '/hero-bg.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '{}'::jsonb, '[{"name":"Half (serves 2)","priceDelta":0},{"name":"Full (serves 4)","priceDelta":970}]'::jsonb, '[{"name":"Garlic Butter Naan","price":110},{"name":"Extra Makhni Gravy","price":150}]'::jsonb),
+('m11', 'Peshawari Mutton Shinwari Karahi', 'Karahi & Handi', 'Prime mutton cuts simmered in pure animal fat and butter with salt, green chilies and fresh tomatoes in a traditional charcoal wok.', 1850, '/hero-bg.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '{}'::jsonb, '[{"name":"Half KG (serves 2)","priceDelta":0},{"name":"Full KG (serves 4)","priceDelta":1600}]'::jsonb, '[{"name":"Tandoori Roti (2 pcs)","price":70},{"name":"Roghni Naan","price":80}]'::jsonb),
+('m3', 'Smoky Beef Seekh Kebabs (4 Pcs)', 'BBQ & Kebabs', 'Melt-in-mouth prime beef mince seasoned with roasted cumin, brown onion paste, coriander seeds and charcoal grilled over hot embers.', 780, '/hero-bg.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '{}'::jsonb, '[{"name":"Standard (4 pcs)","priceDelta":0},{"name":"Platter (8 pcs)","priceDelta":680}]'::jsonb, '[{"name":"Tandoori Paratha","price":90},{"name":"Mint Coriander Dip","price":40}]'::jsonb),
+('m12', 'Charcoal Grilled Chicken Malai Boti', 'BBQ & Kebabs', 'Creamy boneless chicken thigh cubes marinated in heavy malai, crushed green chilies, white pepper, and seared over charcoal.', 820, '/hero-bg.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '{}'::jsonb, '[{"name":"Single Skewer (8 pcs)","priceDelta":0},{"name":"Double Skewer (16 pcs)","priceDelta":740}]'::jsonb, '[{"name":"Garlic Naan","price":110},{"name":"Imli Chutney","price":50}]'::jsonb),
+('m13', 'Mutton Balochi Chops (3 Pcs)', 'BBQ & Kebabs', 'Tender mutton chops marinated in Balochi dried spices, ginger garlic paste and slow grilled till charred and crispy outside.', 1450, '/hero-bg.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '{}'::jsonb, '[{"name":"Standard (3 pcs)","priceDelta":0},{"name":"Feast (6 pcs)","priceDelta":1350}]'::jsonb, '[{"name":"Peshawari Chutney","price":60},{"name":"Roghni Naan","price":80}]'::jsonb),
+('m4', 'The Foodies Crunch Burger', 'Burgers & Fast Food', 'Crispy fried buttermilk chicken fillet tossed in spicy glaze, topped with cheddar cheese, tangy coleslaw, garlic aioli on a toasted brioche.', 620, '/hero-bg.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '{}'::jsonb, '[{"name":"Single Fillet","priceDelta":0},{"name":"Double Monster Fillet","priceDelta":280}]'::jsonb, '[{"name":"Seasoned Masala Fries","price":160},{"name":"Cheese Dip Shot","price":90}]'::jsonb),
+('m14', 'Double Beef Smashed Cheeseburger', 'Burgers & Fast Food', 'Two seared prime beef patties, double melted cheddar, caramelized onions, crisp iceberg lettuce and house secret sauce on potato bun.', 840, '/hero-bg.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '{"gulberg-lahore":890,"f7-islamabad":790,"clifton-karachi":850}'::jsonb, '[{"name":"Double Patty","priceDelta":0},{"name":"Triple Monster Patty","priceDelta":310}]'::jsonb, '[{"name":"Crispy Curly Fries","price":190},{"name":"Truffle Mayo","price":80}]'::jsonb),
+('m15', 'Peri Peri Loaded Crispy Fries', 'Burgers & Fast Food', 'Skin-on golden fries smothered with spicy crispy chicken chunks, warm cheddar cheese sauce, garlic ranch and pickled jalapeños.', 420, '/hero-bg.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '{}'::jsonb, '[{"name":"Regular Box","priceDelta":0},{"name":"Party Sharing Platter","priceDelta":340}]'::jsonb, '[{"name":"Extra Cheddar Sauce","price":80},{"name":"Jalapeño Bombs (4 pcs)","price":140}]'::jsonb),
+('m5', 'Fresh Tandoori Roghni Naan', 'Tandoor & Breads', 'Soft leavened bread brushed with clarified butter, toasted white sesame seeds and baked against clay tandoor walls.', 80, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb),
+('m16', 'Roasted Garlic Butter Naan', 'Tandoor & Breads', 'Fresh clay oven tandoori bread slathered in melted butter, roasted minced garlic, and chopped coriander leaves.', 110, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb),
+('m17', 'Cheese Stuffed Tandoori Naan', 'Tandoor & Breads', 'Crispy outside, molten inside! Stuffed with mozzarella & mild cheddar cheese, herbs and brushed with butter.', 240, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb),
+('m6', 'Traditional Peshawari Qahwa with Cardamom', 'Beverages & Desserts', 'Brewed green tea leaves infused with green cardamom pods, cinnamon bark, served with saffron candy crystals.', 120, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb),
+('m7', 'Shahi Malai Kulfi on Stick', 'Beverages & Desserts', 'Dense, creamy frozen dessert made from reduced whole milk, infused with roasted pistachios, almonds, and rose essence.', 220, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb),
+('m18', 'Artisanal Fresh Mint Margarita', 'Beverages & Desserts', 'Fresh mint leaves blended with fresh lime juice, black rock salt, and ice-cold soda. The ultimate refreshing palate cleanser.', 260, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb),
+('m19', 'Special Karak Doodh Patti Chai', 'Beverages & Desserts', 'Slow-simmered rich full-cream milk tea brewed with cardamom pods and premium CTC black tea leaves.', 130, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb),
+('m20', 'Hot Gulab Jamun with Rabri (2 Pcs)', 'Beverages & Desserts', 'Soft hot fried dumplings soaked in rose cardamom syrup, served on a chilled bed of thickened pistachio malai rabri.', 290, '/food-biryani.jpg', true, '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb, '{}'::jsonb, '[]'::jsonb, '[]'::jsonb)
 ON CONFLICT (id) DO UPDATE SET
     name = EXCLUDED.name,
     category = EXCLUDED.category,
@@ -627,6 +777,7 @@ ON CONFLICT (id) DO UPDATE SET
     description = EXCLUDED.description,
     is_available = EXCLUDED.is_available,
     branch_availability = EXCLUDED.branch_availability,
+    branch_price_overrides = EXCLUDED.branch_price_overrides,
     sizes = EXCLUDED.sizes,
     extras = EXCLUDED.extras;
 
@@ -664,4 +815,19 @@ INSERT INTO deal_cards (id, title, subtitle, price, tag, image_url, category_lin
 VALUES
 ('primary-deal', 'Royal Chicken Dum Biryani', 'Slow-steamed in copper handi with saffron & house spices', 'Rs. 650', '🌟 TODAY''S CHEF SPECIAL', '/food-biryani.jpg', 'Biryani & Rice')
 ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, price = EXCLUDED.price;
+
+INSERT INTO announcements (id, title, tag, description, valid_until, branch_id, branch_name, discount_percent, badge_color)
+VALUES
+('ann-1', 'Midnight Biryani & Karahi Feast: Flat 20% Off', 'HOT DEAL', 'Enjoy 20% off all Mutton & Chicken Karahi orders between 10:00 PM and 2:00 AM across all branches.', 'Tonight 02:00 AM', NULL, NULL, 20, '#EF4444'),
+('ann-2', 'Gulberg Rooftop Terrace Live BBQ Night', 'BRANCH SPECIAL', 'Join us on the Gulberg Rooftop for live open-flame charcoal Seekh Kababs & Mutton Chops every Friday & Saturday.', 'Every Weekend', 'gulberg-lahore', 'Gulberg Lahore', NULL, '#F59E0B'),
+('ann-3', 'Free Delivery on Doorstep Orders above Rs. 1500', 'ANNOUNCEMENT', 'Zero delivery fee on all online delivery orders exceeding Rs. 1500 via the mobile app.', 'Valid this Month', NULL, NULL, NULL, '#10B981')
+ON CONFLICT (id) DO NOTHING;
+
+INSERT INTO notifications (id, title, message, type, category, branch_id, sender_id, sender_name, sender_role, target_roles, read_by)
+VALUES
+('notif-seed-1', 'Welcome to Foodies Cafe Live Alerts', 'Real-time order updates for Dine-In, Takeaway Pickup & Doorstep Delivery are active.', 'success', 'system', 'all', 'user-owner', 'Malik Jahangir', 'platform_owner', '["all"]'::jsonb, '[]'::jsonb),
+('notif-seed-2', 'Takeaway Express Counter Open', 'Place a Takeaway order via Web or Mobile and receive an instant pickup notification as soon as it is packed.', 'info', 'takeaway', 'gulberg-lahore', 'user-cashier', 'Bilal Farooq', 'cashier', '["customer","cashier","branch_manager"]'::jsonb, '[]'::jsonb),
+('notif-seed-3', 'Rush Hour Kitchen Coordination Active', 'Cashier, Kitchen, Waiters & Delivery Riders receive automatic alerts when orders are placed or updated.', 'warning', 'staff_alert', 'all', 'user-bm', 'Rashid Mehmood', 'branch_manager', '["branch_manager","cashier","kitchen_staff","floor_staff","delivery_staff","platform_owner"]'::jsonb, '[]'::jsonb)
+ON CONFLICT (id) DO NOTHING;
 `;
+

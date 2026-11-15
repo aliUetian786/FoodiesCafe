@@ -1,9 +1,9 @@
 import { NextResponse } from 'next/server';
 import nodemailer from 'nodemailer';
-import fs from 'fs';
-import path from 'path';
 import crypto from 'crypto';
 import db from '@/lib/db';
+import { checkRateLimit, getClientIp } from '@/lib/rateLimit';
+import { signSessionToken } from '@/lib/auth';
 
 // Temporary in-memory OTP store with 5-minute expiry (fallback for local dev)
 // Key: normalized email, Value: { code: string; expiresAt: number }
@@ -47,12 +47,16 @@ function getDynamicMailConfig(clientOverrides?: {
   smtpHost?: string;
   smtpPort?: string | number;
 }): SmtpConfig {
-  // 1. Client explicitly passed configuration (from in-app modal)
-  if (clientOverrides?.accountEmail && clientOverrides?.accountApiKey) {
+  // 1. Optional test overrides (non-production only)
+  if (
+    process.env.NODE_ENV !== 'production' &&
+    clientOverrides?.accountEmail &&
+    clientOverrides?.accountApiKey
+  ) {
     const user = clientOverrides.accountEmail.trim();
     const pass = clientOverrides.accountApiKey.trim().replace(/\s+/g, '');
     const isGmail = user.toLowerCase().endsWith('@gmail.com') || user.toLowerCase().endsWith('@googlemail.com');
-    const host = clientOverrides.smtpHost?.trim() || (isGmail ? 'smtp.gmail.com' : 'smtp.gmail.com');
+    const host = clientOverrides.smtpHost?.trim() || 'smtp.gmail.com';
     const port = Number(clientOverrides.smtpPort) || 465;
 
     return {
@@ -65,76 +69,14 @@ function getDynamicMailConfig(clientOverrides?: {
     };
   }
 
-  // 2. Check process.env
-  let user = process.env.MAIL_ACCOUNT_USER || process.env.SMTP_USER || process.env.EMAIL_USER || '';
-  let pass = process.env.MAIL_ACCOUNT_KEY || process.env.SMTP_PASS || process.env.EMAIL_PASS || '';
-  let host = process.env.SMTP_HOST || '';
-  let port = Number(process.env.SMTP_PORT) || 465;
-  let from = process.env.EMAIL_FROM || '';
-
-  // 3. Dynamic disk check of mail_config.json (Server-stored configuration)
-  const jsonPaths = [
-    path.join(process.cwd(), 'mail_config.json'),
-    path.join(process.cwd(), '..', 'mail_config.json'),
-    '/home/shahwaizakram/FoodiesCafe/app/mail_config.json',
-    '/home/shahwaizakram/FoodiesCafe/mail_config.json',
-  ];
-  for (const cfgPath of jsonPaths) {
-    if (user && pass) break;
-    try {
-      if (fs.existsSync(cfgPath)) {
-        const raw = JSON.parse(fs.readFileSync(cfgPath, 'utf8'));
-        if (!user && raw.accountEmail) user = String(raw.accountEmail).trim();
-        if (!pass && raw.accountApiKey) pass = String(raw.accountApiKey).trim();
-        if (!host && raw.smtpHost) host = String(raw.smtpHost).trim();
-        if (!from && raw.emailFrom) from = String(raw.emailFrom).trim();
-      }
-    } catch (e) {}
-  }
-
-  // 4. Dynamic disk check of .env files (zero restart needed!)
-  const possiblePaths = [
-    path.join(process.cwd(), '.env'),
-    path.join(process.cwd(), '.env.local'),
-    path.join(process.cwd(), '..', '.env'),
-    '/home/shahwaizakram/FoodiesCafe/app/.env',
-    '/home/shahwaizakram/FoodiesCafe/.env',
-  ];
-
-  for (const envPath of possiblePaths) {
-    if (user && pass) break;
-    try {
-      if (fs.existsSync(envPath)) {
-        const content = fs.readFileSync(envPath, 'utf8');
-        const lines = content.split(/\r?\n/);
-
-        for (const line of lines) {
-          const trimmed = line.trim();
-          if (!trimmed || trimmed.startsWith('#') || !trimmed.includes('=')) continue;
-          const eqIdx = trimmed.indexOf('=');
-          const key = trimmed.slice(0, eqIdx).trim();
-          const val = trimmed.slice(eqIdx + 1).trim().replace(/^["']|["']$/g, '');
-          if (!val) continue;
-
-          if (!user && (key === 'MAIL_ACCOUNT_USER' || key === 'SMTP_USER' || key === 'EMAIL_USER')) {
-            user = val;
-          }
-          if (!pass && (key === 'MAIL_ACCOUNT_KEY' || key === 'SMTP_PASS' || key === 'EMAIL_PASS')) {
-            pass = val;
-          }
-          if (!host && key === 'SMTP_HOST') {
-            host = val;
-          }
-          if (!from && key === 'EMAIL_FROM') {
-            from = val;
-          }
-        }
-      }
-    } catch (e) {}
-  }
-
-  user = user.trim();
-  pass = pass.trim().replace(/\s+/g, ''); // strip spaces from Google app passwords
+  // 2. Read exclusively from environment variables (no hardcoded disk paths)
+  const user = (process.env.MAIL_ACCOUNT_USER || process.env.SMTP_USER || process.env.EMAIL_USER || '').trim();
+  const pass = (process.env.MAIL_ACCOUNT_KEY || process.env.SMTP_PASS || process.env.EMAIL_PASS || '')
+    .trim()
+    .replace(/\s+/g, '');
+  const host = (process.env.SMTP_HOST || '').trim();
+  const port = Number(process.env.SMTP_PORT) || 465;
+  const from = (process.env.EMAIL_FROM || '').trim();
 
   if (!user || !pass) {
     return {
@@ -148,8 +90,8 @@ function getDynamicMailConfig(clientOverrides?: {
   }
 
   const isGmail = user.toLowerCase().endsWith('@gmail.com') || user.toLowerCase().endsWith('@googlemail.com');
-  const finalHost = host.trim() || (isGmail ? 'smtp.gmail.com' : 'smtp.gmail.com');
-  const finalFrom = from.trim() || `"FoodiesCafe" <${user}>`;
+  const finalHost = host || 'smtp.gmail.com';
+  const finalFrom = from || `"FoodiesCafe" <${user}>`;
 
   return {
     user,
@@ -192,92 +134,17 @@ export async function POST(req: Request) {
     const { action, email, code, emailToken, clientMailConfig } = body;
 
     // ========================================================
-    // ACTION: SAVE SERVER CONFIG (Admin / Owner Settings)
+    // ACTION: SAVE SERVER CONFIG (Disabled disk writing; env only)
     // ========================================================
     if (action === 'save_server_config') {
-      const { accountEmail, accountApiKey, emailFrom, smtpHost, smtpPort } = body;
-      if (!accountEmail || !accountApiKey) {
-        return NextResponse.json(
-          { error: 'Account email and 16-character App Password are required.' },
-          { status: 400 }
-        );
-      }
-
-      const cleanUser = String(accountEmail).trim();
-      const cleanPass = String(accountApiKey).trim().replace(/\s+/g, '');
-      const isGmail = cleanUser.toLowerCase().endsWith('@gmail.com') || cleanUser.toLowerCase().endsWith('@googlemail.com');
-      const finalHost = (smtpHost && String(smtpHost).trim()) || (isGmail ? 'smtp.gmail.com' : 'smtp.gmail.com');
-      const finalPort = Number(smtpPort) || 465;
-      const finalFrom = (emailFrom && String(emailFrom).trim()) || `"FoodiesCafe" <${cleanUser}>`;
-
-      // 1. Verify credentials with SMTP server before persisting
-      try {
-        const testTransporter = nodemailer.createTransport({
-          host: finalHost,
-          port: finalPort,
-          secure: finalPort === 465,
-          auth: { user: cleanUser, pass: cleanPass },
-          tls: { rejectUnauthorized: false },
-        });
-        await testTransporter.verify();
-      } catch (authErr: any) {
-        let msg = authErr.message || 'SMTP Authentication failed.';
-        if (authErr.code === 'EAUTH' || msg.includes('BadCredentials')) {
-          msg = 'Google / SMTP Authentication Failed: Please make sure you are using a 16-letter Google "App Password" (from https://myaccount.google.com/apppasswords), NOT your normal Google password!';
-        }
-        return NextResponse.json({ success: false, error: msg }, { status: 400 });
-      }
-
-      // 2. Write to mail_config.json
-      const configPayload = {
-        accountEmail: cleanUser,
-        accountApiKey: cleanPass,
-        emailFrom: finalFrom,
-        smtpHost: finalHost,
-        smtpPort: finalPort,
-        updatedAt: new Date().toISOString(),
-      };
-      const jsonPaths = [
-        path.join(process.cwd(), 'mail_config.json'),
-        '/home/shahwaizakram/FoodiesCafe/app/mail_config.json',
-        '/home/shahwaizakram/FoodiesCafe/mail_config.json',
-      ];
-      for (const p of jsonPaths) {
-        try {
-          fs.writeFileSync(p, JSON.stringify(configPayload, null, 2), 'utf8');
-        } catch (e) {}
-      }
-
-      // 3. Update .env files
-      const envPaths = [
-        path.join(process.cwd(), '.env'),
-        '/home/shahwaizakram/FoodiesCafe/app/.env',
-        '/home/shahwaizakram/FoodiesCafe/.env',
-      ];
-      for (const envPath of envPaths) {
-        try {
-          if (fs.existsSync(envPath)) {
-            let envContent = fs.readFileSync(envPath, 'utf8');
-            if (/^\s*MAIL_ACCOUNT_USER\s*=/m.test(envContent)) {
-              envContent = envContent.replace(/^\s*MAIL_ACCOUNT_USER\s*=.*$/m, `MAIL_ACCOUNT_USER="${cleanUser}"`);
-            } else {
-              envContent += `\nMAIL_ACCOUNT_USER="${cleanUser}"`;
-            }
-            if (/^\s*MAIL_ACCOUNT_KEY\s*=/m.test(envContent)) {
-              envContent = envContent.replace(/^\s*MAIL_ACCOUNT_KEY\s*=.*$/m, `MAIL_ACCOUNT_KEY="${cleanPass}"`);
-            } else {
-              envContent += `\nMAIL_ACCOUNT_KEY="${cleanPass}"`;
-            }
-            fs.writeFileSync(envPath, envContent, 'utf8');
-          }
-        } catch (e) {}
-      }
-
-      return NextResponse.json({
-        success: true,
-        message: `Automated email sender configured successfully for ${cleanUser}! All customers will now automatically receive verification emails from this account.`,
-        accountEmail: cleanUser,
-      });
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            'Writing SMTP secrets to disk from the browser is disabled for security. Configure MAIL_ACCOUNT_USER and MAIL_ACCOUNT_KEY via environment variables.',
+        },
+        { status: 403 }
+      );
     }
 
     // ========================================================
@@ -309,6 +176,9 @@ export async function POST(req: Request) {
           tls: {
             rejectUnauthorized: false,
           },
+          connectionTimeout: 5000,
+          greetingTimeout: 5000,
+          socketTimeout: 10000,
         });
 
         // Verify transporter credentials
@@ -367,11 +237,25 @@ export async function POST(req: Request) {
     }
 
     const normalizedEmail = email.trim().toLowerCase();
+    const clientIp = getClientIp(req);
 
     // ========================================================
     // ACTION: VERIFY CODE
     // ========================================================
     if (action === 'verify') {
+      const rlVerify = await checkRateLimit({
+        scope: 'otp_verify',
+        identifier: `${normalizedEmail}:${clientIp}`,
+        maxRequests: 8,
+        windowSeconds: 600,
+      });
+      if (!rlVerify.allowed) {
+        return NextResponse.json(
+          { error: `Too many verification attempts. Please wait ${rlVerify.resetInSeconds}s.` },
+          { status: 429 }
+        );
+      }
+
       if (!code || typeof code !== 'string') {
         return NextResponse.json(
           { error: 'Please provide the 4-digit verification code.' },
@@ -382,8 +266,8 @@ export async function POST(req: Request) {
       const inputCode = code.trim();
       let isValid = false;
 
-      // 1. Master code bypass for demo / testing
-      if (inputCode === '1234' || inputCode === '5829') {
+      // 1. Master code bypass for local dev / testing ONLY (strictly disabled in production)
+      if (process.env.NODE_ENV !== 'production' && (inputCode === '1234' || inputCode === '5829')) {
         isValid = true;
       }
 
@@ -434,17 +318,54 @@ export async function POST(req: Request) {
       // Cleanup in-memory if present
       otpStore.delete(normalizedEmail);
 
-      return NextResponse.json({
+      const isMobileApp = body?.platform === 'app' || body?.platform === 'mobile';
+      const tokenDurationMs = isMobileApp
+        ? 30 * 24 * 60 * 60 * 1000 // 30 days for mobile app
+        : 24 * 60 * 60 * 1000;      // 24 hours for web
+
+      const sessionToken = signSessionToken({
+        userId: `cust-${normalizedEmail}`,
+        role: 'customer',
+        exp: Date.now() + tokenDurationMs,
+      });
+
+      const response = NextResponse.json({
         success: true,
         message: 'Email successfully verified!',
         email: normalizedEmail,
+        sessionToken,
+        expiresInMs: tokenDurationMs,
       });
+
+      const maxAgeSeconds = Math.floor(tokenDurationMs / 1000);
+      response.cookies.set('foodies_customer_session', sessionToken, {
+        httpOnly: false,
+        secure: process.env.NODE_ENV === 'production',
+        sameSite: 'lax',
+        path: '/',
+        maxAge: maxAgeSeconds,
+      });
+
+      return response;
     }
 
     // ========================================================
     // ACTION: SEND VERIFICATION CODE
     // ========================================================
     if (action === 'send') {
+      const rlSend = await checkRateLimit({
+        scope: 'otp_send',
+        identifier: `${normalizedEmail}:${clientIp}`,
+        maxRequests: 5,
+        windowSeconds: 600,
+      });
+      if (!rlSend.allowed) {
+        return NextResponse.json(
+          { error: `Too many OTP requests. Please try again in ${rlSend.resetInSeconds}s.` },
+          { status: 429 }
+        );
+      }
+
       // Generate secure 4-digit OTP code
       const generatedCode = String(Math.floor(1000 + Math.random() * 9000));
       const expiresAt = Date.now() + 5 * 60 * 1000; // 5 minutes validity
@@ -454,19 +375,11 @@ export async function POST(req: Request) {
 
       // Save to PostgreSQL if available
       try {
-        await db.query(`
-          CREATE TABLE IF NOT EXISTS email_otps (
-            email VARCHAR(255) PRIMARY KEY,
-            code VARCHAR(10) NOT NULL,
-            expires_at BIGINT NOT NULL
-          );
-        `);
-        await db.query(`
-          INSERT INTO email_otps (email, code, expires_at)
-          VALUES ($1, $2, $3)
-          ON CONFLICT (email) DO UPDATE
-          SET code = EXCLUDED.code, expires_at = EXCLUDED.expires_at;
-        `, [normalizedEmail, generatedCode, expiresAt]);
+        await db.query(`DELETE FROM email_otps WHERE email = $1`, [normalizedEmail]);
+        await db.query(
+          `INSERT INTO email_otps (email, code, expires_at) VALUES ($1, $2, $3)`,
+          [normalizedEmail, generatedCode, expiresAt]
+        );
       } catch (dbErr) {
         // Non-blocking: signed token guarantees serverless verification even without DB
       }
@@ -487,6 +400,9 @@ export async function POST(req: Request) {
             tls: {
               rejectUnauthorized: false,
             },
+            connectionTimeout: 5000,
+            greetingTimeout: 5000,
+            socketTimeout: 10000,
           });
 
           const emailHtml = `

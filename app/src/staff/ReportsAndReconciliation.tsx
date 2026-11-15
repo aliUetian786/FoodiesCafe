@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useApp } from '@/context/AppContext';
+import { HistoricalLoadingModal } from '@/components/common/HistoricalLoadingModal';
 import {
   FileSpreadsheet,
   Download,
@@ -95,10 +96,14 @@ export const ReportsScreen: React.FC = () => {
     setDateRange(scope);
     if (scope === 'today') {
       filterOrdersToToday();
-    } else {
-      if (!hasLoadedOlderOrders) {
-        await fetchOlderOrders(selectedBranch === 'all' ? undefined : selectedBranch, scope);
-      }
+    } else if (scope !== 'custom') {
+      await fetchOlderOrders(selectedBranch === 'all' ? undefined : selectedBranch, scope);
+    }
+  };
+
+  const handleCustomDateFetch = async (start: string, end: string) => {
+    if (start && end) {
+      await fetchOlderOrders(selectedBranch === 'all' ? undefined : selectedBranch, 'custom', start, end);
     }
   };
 
@@ -327,7 +332,7 @@ export const ReportsScreen: React.FC = () => {
           <option value="week">📅 Past 7 Days</option>
           <option value="month">📅 This Month (30 Days)</option>
           <option value="custom">📅 Custom Date Range</option>
-          <option value="all">📂 All Time History</option>
+          <option value="all">📅 All Time History</option>
         </select>
 
         {dateRange === 'custom' && (
@@ -335,7 +340,10 @@ export const ReportsScreen: React.FC = () => {
             <input
               type="date"
               value={customStart}
-              onChange={(e) => setCustomStart(e.target.value)}
+              onChange={(e) => {
+                setCustomStart(e.target.value);
+                if (e.target.value && customEnd) handleCustomDateFetch(e.target.value, customEnd);
+              }}
               style={{
                 padding: '6px 10px',
                 borderRadius: '6px',
@@ -349,7 +357,10 @@ export const ReportsScreen: React.FC = () => {
             <input
               type="date"
               value={customEnd}
-              onChange={(e) => setCustomEnd(e.target.value)}
+              onChange={(e) => {
+                setCustomEnd(e.target.value);
+                if (customStart && e.target.value) handleCustomDateFetch(customStart, e.target.value);
+              }}
               style={{
                 padding: '6px 10px',
                 borderRadius: '6px',
@@ -361,13 +372,9 @@ export const ReportsScreen: React.FC = () => {
             />
           </div>
         )}
-
-        {isFetchingOlderOrders && (
-          <span style={{ fontSize: '12px', color: 'var(--primary)', fontWeight: 700, marginLeft: 'auto' }}>
-            Fetching archive records from database...
-          </span>
-        )}
       </div>
+
+      <HistoricalLoadingModal visible={isFetchingOlderOrders} />
 
       {/* SUMMARY KPI CARDS (Real data) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px', flexShrink: 0 }}>

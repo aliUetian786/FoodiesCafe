@@ -3,6 +3,8 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
 import { ToastContainer } from '@/components/common/ToastContainer';
+import { BranchItemUnavailableModal } from '@/components/common/BranchItemUnavailableModal';
+import { AllBranchesClosedModal } from '@/components/common/AllBranchesClosedModal';
 import { Flame } from 'lucide-react';
 
 // Customer Frontend Components (Strictly isolated in src/customer/)
@@ -12,13 +14,17 @@ import { MarketingHome } from '@/customer/MarketingHome';
 import { CustomerMenu } from '@/customer/CustomerMenu';
 import { TableSelectionScreen as CustomerTableQR } from '@/customer/CustomerTableQR';
 import { OrderTrackingScreen as CustomerTracking } from '@/customer/CustomerTracking';
-import { EditOrderScreen as CustomerOrderEdit } from '@/customer/CustomerOrderEdit';
 import { OrderHistoryScreen as CustomerHistory } from '@/customer/CustomerHistory';
-import { SupportScreen as CustomerSupport } from '@/customer/CustomerSupport';
 import { ProfileScreen as CustomerProfile } from '@/customer/CustomerProfile';
 
 export default function CustomerMainPage() {
-  const { currentUser } = useApp();
+  const { currentUser, branches, orderType, hasConfirmedOrderType, cart } = useApp();
+
+  // Check if all branches are closed for the day / late-night timing
+  const allBranchesClosed = branches.length > 0 && branches.every((b) => !b.isOpen);
+  const [closedModalOpen, setClosedModalOpen] = useState(false);
+  const [closedModalContext, setClosedModalContext] = useState<'home' | 'checkout_blocked'>('home');
+  const [dismissedHomeClosedModal, setDismissedHomeClosedModal] = useState(false);
 
   // Customer web defaults to home page on refresh, or directly to table-qr when table QR code is scanned
   const [currentView, setCurrentView] = useState<string>(() => {
@@ -31,35 +37,55 @@ export default function CustomerMainPage() {
     return 'home';
   });
   const [cartOpen, setCartOpen] = useState(false);
-  const [checkoutInitialStep, setCheckoutInitialStep] = useState<'order_review' | 'auth' | 'fulfillment'>('order_review');
+  const [checkoutInitialStep, setCheckoutInitialStep] = useState<'order_review' | 'auth' | 'fulfillment' | 'details' | 'dine_in_seating' | 'branch_map' | 'payment'>('order_review');
   const [orderNowHover, setOrderNowHover] = useState(false);
 
-  // When clicking Cart in header: review order items first
+  // Automatically trigger pop-up on Home screen when all branches are closed
+  useEffect(() => {
+    if (!allBranchesClosed) {
+      setDismissedHomeClosedModal(false);
+      setClosedModalOpen(false);
+      return;
+    }
+    if (currentView === 'home' && !dismissedHomeClosedModal) {
+      setClosedModalContext('home');
+      setClosedModalOpen(true);
+    }
+  }, [allBranchesClosed, currentView, dismissedHomeClosedModal]);
+
+  // When clicking Cart in header: block proceeding to checkout if all branches are closed
   const handleOpenCart = () => {
+    if (allBranchesClosed) {
+      setCartOpen(false);
+      setClosedModalContext('checkout_blocked');
+      setClosedModalOpen(true);
+      return;
+    }
+    // On Laptop / Desktop (>860px), route to menu for the full-width 2-column checkout experience
+    if (typeof window !== 'undefined' && window.innerWidth > 860) {
+      setCurrentView('menu');
+      setCartOpen(false);
+      return;
+    }
     setCheckoutInitialStep('order_review');
     setCartOpen(true);
   };
 
-  // When clicking Proceed to Checkout from menu card: show login if guest, otherwise delivery options
+  // When clicking Proceed to Checkout from menu card: block if all branches are closed
   const handleProceedToCheckout = () => {
-    let isLoggedIn = Boolean(
-      currentUser &&
-      currentUser.name &&
-      currentUser.name !== 'Guest Customer' &&
-      currentUser.role === 'customer'
-    );
-    if (!isLoggedIn && typeof window !== 'undefined') {
-      try {
-        const saved = localStorage.getItem('foodies_customer_user');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          if (parsed && parsed.name && parsed.name !== 'Guest Customer' && parsed.role === 'customer') {
-            isLoggedIn = true;
-          }
-        }
-      } catch (e) {}
+    if (allBranchesClosed) {
+      setCartOpen(false);
+      setClosedModalContext('checkout_blocked');
+      setClosedModalOpen(true);
+      return;
     }
-    setCheckoutInitialStep(isLoggedIn ? 'fulfillment' : 'auth');
+    // On Laptop / Desktop (>860px), route to menu for the full-width 2-column checkout experience
+    if (typeof window !== 'undefined' && window.innerWidth > 860) {
+      setCurrentView('menu');
+      setCartOpen(false);
+      return;
+    }
+    setCheckoutInitialStep('order_review');
     setCartOpen(true);
   };
 
@@ -81,6 +107,34 @@ export default function CustomerMainPage() {
     }
   }, [currentView]);
 
+  // Whenever customer logs in or signs up:
+  // If they were on home, open home. If they logged in during checkout or browsing menu, keep them on their flow
+  const prevCustomerUserKeyRef = React.useRef<string>(
+    currentUser?.id && currentUser.role === 'customer' && currentUser.id !== 'user-guest'
+      ? `${currentUser.id}_${currentUser.role}`
+      : 'guest'
+  );
+  useEffect(() => {
+    const currentKey =
+      currentUser?.id && currentUser.role === 'customer' && currentUser.id !== 'user-guest'
+        ? `${currentUser.id}_${currentUser.role}`
+        : 'guest';
+    const prevKey = prevCustomerUserKeyRef.current;
+
+    if (prevKey !== currentKey && currentKey !== 'guest') {
+      // Do not interrupt checkout or menu flow if cart has items or user was checking out
+      if (currentView !== 'menu' && !cartOpen && cart.length === 0) {
+        setCurrentView('home');
+        setCartOpen(false);
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('foodies_customer_view');
+          window.scrollTo(0, 0);
+        }
+      }
+    }
+    prevCustomerUserKeyRef.current = currentKey;
+  }, [currentUser?.id, currentUser?.role, currentView, cartOpen, cart.length]);
+
   // Customer screens router
   const renderCustomerContent = () => {
     switch (currentView) {
@@ -98,12 +152,8 @@ export default function CustomerMainPage() {
         return <CustomerTableQR onNavigate={setCurrentView} />;
       case 'order-tracking':
         return <CustomerTracking onNavigate={setCurrentView} />;
-      case 'order-edit':
-        return <CustomerOrderEdit onNavigate={setCurrentView} />;
       case 'order-history':
         return <CustomerHistory onNavigate={setCurrentView} />;
-      case 'support':
-        return <CustomerSupport onNavigate={setCurrentView} />;
       case 'notifications':
       case 'profile':
         return <CustomerProfile onNavigate={setCurrentView} />;
@@ -116,9 +166,6 @@ export default function CustomerMainPage() {
     <div
       style={{
         minHeight: '100vh',
-        height: currentView === 'support' ? '100vh' : undefined,
-        maxHeight: currentView === 'support' ? '100vh' : undefined,
-        overflow: currentView === 'support' ? 'hidden' : undefined,
         display: 'flex',
         flexDirection: 'column',
         backgroundColor: 'var(--bg-main)',
@@ -144,11 +191,6 @@ export default function CustomerMainPage() {
           maxWidth: '100vw',
           overflowX: 'clip',
           paddingTop: '72px',
-          height: currentView === 'support' ? 'calc(100vh - 72px)' : undefined,
-          maxHeight: currentView === 'support' ? 'calc(100vh - 72px)' : undefined,
-          overflowY: currentView === 'support' ? 'hidden' : undefined,
-          display: currentView === 'support' ? 'flex' : undefined,
-          flexDirection: currentView === 'support' ? 'column' : undefined,
           boxSizing: 'border-box',
           animation: 'customerPageTransition 0.24s cubic-bezier(0.16, 1, 0.3, 1)',
         }}
@@ -204,6 +246,27 @@ export default function CustomerMainPage() {
 
       {/* Global Toast Alerts */}
       <ToastContainer />
+
+      {/* Branch Item Unavailable Alert Modal */}
+      <BranchItemUnavailableModal />
+
+      {/* All Branches Closed Pop-up Modal (Home & Checkout Block After Menu) */}
+      <AllBranchesClosedModal
+        isOpen={closedModalOpen}
+        onClose={() => {
+          setClosedModalOpen(false);
+          if (closedModalContext === 'home') {
+            setDismissedHomeClosedModal(true);
+          }
+        }}
+        onBrowseMenu={() => {
+          setDismissedHomeClosedModal(true);
+          setClosedModalOpen(false);
+          setCurrentView('menu');
+        }}
+        branches={branches}
+        context={closedModalContext}
+      />
 
       {/* Floating button animation and responsive styling */}
       <style jsx>{`

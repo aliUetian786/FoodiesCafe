@@ -1,71 +1,153 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
-import { Order } from '@/types/cafe';
+import { Order, getCancellationAttribution } from '@/types/cafe';
 import {
   Receipt,
-  FileText,
+  RotateCcw,
+  X,
+  Printer,
+  Calendar,
   Clock,
   MapPin,
-  Banknote,
-  Printer,
-  ChevronRight,
-  ArrowRight,
-  ShieldCheck,
   ShoppingBag,
+  ArrowRight,
+  CheckCircle2,
+  RefreshCw,
 } from 'lucide-react';
+import { HistoricalLoadingModal } from '@/components/common/HistoricalLoadingModal';
+import { CustomerLoginModal } from './CustomerLoginModal';
 
-export const OrderHistoryScreen: React.FC<{ onNavigate: (v: string) => void }> = ({ onNavigate }) => {
-  const { orders, currentUser, addToCart, addToast } = useApp();
+interface CustomerHistoryProps {
+  onNavigate: (view: string) => void;
+}
+
+function getDisplayStatus(status: string, orderType: string = 'delivery', ord?: Order) {
+  const s = (status || '').toLowerCase();
+  const t = (orderType || '').toLowerCase();
+
+  if (s === 'cancelled') {
+    const cancelAttr = ord ? getCancellationAttribution(ord) : null;
+    const label = cancelAttr?.isCustomer ? 'CANCELLED (BY YOU)' : (cancelAttr?.badge || 'CANCELLED');
+    return { label, color: '#DC2626', bg: '#FEE2E2' };
+  }
+  if (t === 'dine_in' || s === 'served') {
+    return { label: 'SERVED', color: '#4F46E5', bg: '#EEF2FF' };
+  }
+  if (t === 'takeaway' || s === 'taken') {
+    return { label: 'TAKEN', color: '#334155', bg: '#F1F5F9' };
+  }
+  return { label: 'DELIVERED', color: '#059669', bg: '#ECFDF5' };
+}
+
+export const OrderHistoryScreen: React.FC<CustomerHistoryProps> = ({ onNavigate }) => {
+  const {
+    orders,
+    currentUser,
+    addToCart,
+    addToast,
+    branches,
+    currentBranch,
+    menuItems,
+    fetchOlderOrders,
+    hasLoadedOlderOrders,
+    isFetchingOlderOrders,
+  } = useApp();
+  const [selectedReceipt, setSelectedReceipt] = useState<Order | null>(null);
+  const [loginModalOpen, setLoginModalOpen] = useState(false);
+
+  const isCustomerLoggedIn = Boolean(
+    currentUser &&
+    currentUser.name &&
+    currentUser.name !== 'Guest Customer' &&
+    currentUser.role === 'customer' &&
+    currentUser.id !== 'user-guest' &&
+    currentUser.id !== 'guest'
+  );
+
+  // Exception handler: properly load older days' data from database on demand
+  useEffect(() => {
+    if (isCustomerLoggedIn && !hasLoadedOlderOrders && !isFetchingOlderOrders) {
+      fetchOlderOrders();
+    }
+  }, [isCustomerLoggedIn, hasLoadedOlderOrders, isFetchingOlderOrders, fetchOlderOrders]);
 
   const normalizePhone = (p?: string) => (p || '').replace(/\D/g, '').slice(-10);
   const userPhoneClean = normalizePhone(currentUser?.phone);
 
-  // Comprehensive customer orders matching with multi-source fallback
-  const customerOrders = React.useMemo(() => {
+  // Comprehensive customer orders matching with multi-source fallback (only when logged in)
+  const customerOrders = useMemo(() => {
+    if (!isCustomerLoggedIn) {
+      return [];
+    }
+
     let localPlacedIds: string[] = [];
     let localCachedOrders: Order[] = [];
     if (typeof window !== 'undefined') {
       try {
         localPlacedIds = JSON.parse(localStorage.getItem('foodies_customer_order_ids') || '[]');
         localCachedOrders = JSON.parse(localStorage.getItem('foodies_customer_history_cache') || '[]');
-      } catch (e) {}
+      } catch (e) { }
     }
 
     const pool = [...orders];
     localCachedOrders.forEach((co) => {
-      if (!pool.some((o) => o.id === co.id || o.orderNumber === co.orderNumber)) {
+      const idx = pool.findIndex((o) => o.id === co.id || o.orderNumber === co.orderNumber);
+      if (idx === -1) {
         pool.push(co);
+      } else {
+        if (co.status === 'cancelled' && pool[idx].status !== 'cancelled') {
+          pool[idx] = { ...pool[idx], status: 'cancelled' };
+        }
       }
     });
 
     return pool.filter((o) => {
-      // 1. Placed on this device/browser
-      if (localPlacedIds.includes(o.id) || localPlacedIds.includes(o.orderNumber)) return true;
-      // 2. Phone match
-      if (userPhoneClean && normalizePhone(o.customerPhone) === userPhoneClean) return true;
-      // 3. Customer ID match
+      // 1. Customer ID match
       if (currentUser?.id && currentUser.id !== 'user-guest' && o.customerId === currentUser.id) return true;
-      // 4. Email match
+      // 2. Email match
       if (currentUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === currentUser.email.toLowerCase()) return true;
-      // 5. Customer name match if authenticated
+      // 3. Customer name match if authenticated
       if (currentUser?.name && currentUser.name !== 'Guest Customer' && o.customerName === currentUser.name) return true;
+      // 4. Phone match
+      if (userPhoneClean && normalizePhone(o.customerPhone) === userPhoneClean) return true;
+      // 5. Placed on this device/browser
+      if (localPlacedIds.includes(o.id) || localPlacedIds.includes(o.orderNumber)) return true;
       return false;
     });
-  }, [orders, userPhoneClean, currentUser]);
+  }, [orders, userPhoneClean, currentUser, isCustomerLoggedIn]);
 
-  const [selectedOrder, setSelectedOrder] = useState<Order | null>(customerOrders[0] || null);
+  // Exclude in-tracking and unpaid orders: strictly only paid orders appear in history
+  // List new orders in history at top (sorted strictly by createdAt descending)
+  const historyOrders = useMemo(() => {
+    return customerOrders
+      .filter(
+        (o) =>
+          (o.paymentStatus === 'paid' || o.paymentCollected === true || o.status === 'cancelled') &&
+          (o.status === 'completed' ||
+            o.status === 'delivered' ||
+            o.status === 'served' ||
+            o.status === 'taken' ||
+            o.status === 'cancelled')
+      )
+      .sort((a, b) => {
+        const tA = new Date(a.createdAt).getTime() || 0;
+        const tB = new Date(b.createdAt).getTime() || 0;
+        return tB - tA;
+      });
+  }, [customerOrders]);
 
-  React.useEffect(() => {
-    if (customerOrders.length > 0) {
-      if (!selectedOrder || !customerOrders.some((o) => o.id === selectedOrder.id)) {
-        setSelectedOrder(customerOrders[0]);
-      }
-    } else {
-      setSelectedOrder(null);
-    }
-  }, [customerOrders, selectedOrder]);
+  const hasActiveOrders = useMemo(() => {
+    return customerOrders.some(
+      (o) =>
+        o.status !== 'completed' &&
+        o.status !== 'delivered' &&
+        o.status !== 'served' &&
+        o.status !== 'taken' &&
+        o.status !== 'cancelled'
+    );
+  }, [customerOrders]);
 
   const handleReorder = (order: Order) => {
     order.items.forEach((item) => {
@@ -73,11 +155,14 @@ export const OrderHistoryScreen: React.FC<{ onNavigate: (v: string) => void }> =
         id: `cart-reorder-${Date.now()}-${Math.random()}`,
         menuItemId: item.menuItemId,
         name: item.name,
-        unitPrice: item.unitPrice,
-        quantity: item.quantity,
-        size: 'Standard',
+        unitPrice: Number(item.unitPrice),
+        quantity: item.quantity || 1,
+        size: item.size || 'Standard',
+        extras: item.extras || [],
+        instructions: item.instructions || '',
       });
     });
+
     addToast({
       type: 'success',
       title: 'Order Reordered! 🛒',
@@ -86,32 +171,17 @@ export const OrderHistoryScreen: React.FC<{ onNavigate: (v: string) => void }> =
     onNavigate('menu');
   };
 
-  const formatOrderDateTime = (dateStr?: string) => {
-    if (!dateStr) return '';
-    const lower = dateStr.toLowerCase();
-    if (lower.includes('ago') || lower.includes('just now')) {
-      const d = new Date();
-      if (lower.includes('15 min')) d.setMinutes(d.getMinutes() - 15);
-      else if (lower.includes('10 min')) d.setMinutes(d.getMinutes() - 10);
-      else if (lower.includes('1 hour') || lower.includes('hr')) d.setHours(d.getHours() - 1);
-      else if (lower.includes('2 hour') || lower.includes('hrs')) d.setHours(d.getHours() - 2);
-      return `${d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}, ${d.toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}`;
-    }
-    return dateStr;
-  };
+  // Thermal slip print action using clean hidden iframe
+  const handlePrintSlip = (ord: Order) => {
+    const liveTime = new Date().toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true });
+    const liveDate = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
+    const timestampStr = `${liveDate} at ${liveTime}`;
 
-  const handlePrintReceipt = () => {
-    const receiptEl = document.getElementById('printable-order-receipt');
-    if (!receiptEl) {
-      window.print();
-      return;
-    }
-
-    const existingIframe = document.getElementById('foodies-print-iframe');
+    const existingIframe = document.getElementById('foodies-history-print-iframe');
     if (existingIframe) existingIframe.remove();
 
     const iframe = document.createElement('iframe');
-    iframe.id = 'foodies-print-iframe';
+    iframe.id = 'foodies-history-print-iframe';
     iframe.style.position = 'fixed';
     iframe.style.right = '0';
     iframe.style.bottom = '0';
@@ -127,116 +197,321 @@ export const OrderHistoryScreen: React.FC<{ onNavigate: (v: string) => void }> =
       return;
     }
 
-    const clone = receiptEl.cloneNode(true) as HTMLElement;
-    clone.querySelectorAll('.no-print').forEach((el) => el.remove());
+    const orderBranch = branches.find((b) => b.id === ord.branchId) || currentBranch;
+    const st = getDisplayStatus(ord.status, ord.type);
 
     doc.open();
     doc.write(`
       <!DOCTYPE html>
       <html>
         <head>
-          <title>Order Paid Slip</title>
-          <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800;900&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+          <title>Order Receipt #${ord.orderNumber}</title>
           <style>
-            @page {
-              size: 80mm auto;
-              margin: 0 !important;
-              padding: 0 !important;
-            }
-            * {
-              box-sizing: border-box !important;
-              margin: 0;
-              padding: 0;
-              font-family: 'Plus Jakarta Sans', system-ui, -apple-system, sans-serif;
-              -webkit-print-color-adjust: exact !important;
-              print-color-adjust: exact !important;
-            }
-            html, body {
-              width: 80mm !important;
-              max-width: 80mm !important;
-              margin: 0 !important;
-              padding: 0 !important;
-              background: #FFFFFF !important;
-              color: #000000 !important;
-              height: auto !important;
-              min-height: 0 !important;
-              overflow: visible !important;
-            }
-            #printable-order-receipt {
-              width: 80mm !important;
-              max-width: 80mm !important;
-              margin: 0 !important;
-              padding: 6px 8px 4px 8px !important;
-              border: none !important;
-              border-radius: 0 !important;
-              background: #FFFFFF !important;
-              position: relative !important;
-              overflow: hidden !important;
-              box-shadow: none !important;
-              height: auto !important;
-              min-height: 0 !important;
-              page-break-inside: avoid !important;
-              break-inside: avoid !important;
-            }
-            .no-print { display: none !important; }
-            img {
-              -webkit-print-color-adjust: exact !important;
-              print-color-adjust: exact !important;
-            }
+            @page { size: 80mm auto; margin: 0; }
+            body { font-family: system-ui, -apple-system, sans-serif; padding: 16px; font-size: 13px; color: #111827; background: #FFF; }
+            .center { text-align: center; }
+            .header { border-bottom: 1px dashed #D1D5DB; padding-bottom: 12px; margin-bottom: 12px; }
+            .title { font-size: 20px; font-weight: 900; }
+            .brand { color: #D96528; }
+            .divider { border-top: 1px dashed #D1D5DB; margin: 10px 0; }
+            .row { display: flex; justify-content: space-between; margin: 4px 0; font-size: 12px; }
+            .item-row { display: flex; justify-content: space-between; margin: 6px 0; font-size: 13px; }
+            .total-row { display: flex; justify-content: space-between; font-size: 15px; font-weight: 850; margin-top: 6px; }
+            .print-time { background: #F3F4F6; padding: 4px 8px; border-radius: 4px; font-size: 11px; font-weight: 700; color: #374151; margin-top: 6px; display: inline-block; }
           </style>
         </head>
         <body>
-          ${clone.outerHTML}
+          <div class="header center">
+            <div class="title">Foodies<span class="brand">Cafe</span></div>
+            <div style="font-size: 11px; color: #6B7280; margin-top: 2px;">Official 80mm POS Thermal Receipt</div>
+            <div style="font-size: 11px; color: #6B7280;">GST Registered · NTN: 8492019-3</div>
+            <div style="font-size: 15px; font-weight: 850; margin-top: 6px;">Order #${ord.orderNumber}</div>
+            <div style="font-size: 11px; color: #4B5563; margin-top: 2px;">${ord.type.toUpperCase().replace('_', ' ')} · ${orderBranch?.name || 'Main Branch'}</div>
+            <div class="print-time">Printed Live: ${timestampStr}</div>
+          </div>
+          <div class="row"><span>Customer:</span><strong>${ord.customerName || 'Guest'}</strong></div>
+          <div class="row"><span>Status:</span><strong>${st.label}</strong></div>
+          ${ord.tableNumber ? `<div class="row"><span>Table:</span><strong>${ord.tableNumber}</strong></div>` : ''}
+          ${ord.deliveryAddress ? `<div class="row"><span>Delivery to:</span><strong>${ord.deliveryAddress}</strong></div>` : ''}
+          <div class="divider"></div>
+          <div>
+            ${ord.items.map((it) => `
+              <div class="item-row">
+                <span>${it.quantity}x ${it.name}${it.size ? ` (${it.size})` : ''}</span>
+                <strong>Rs. ${(Number(it.unitPrice) * Number(it.quantity)).toLocaleString()}</strong>
+              </div>
+            `).join('')}
+          </div>
+          <div class="divider"></div>
+          <div class="row"><span>Subtotal:</span><span>Rs. ${Number(ord.originalSubtotal || ord.total).toLocaleString()}</span></div>
+          <div class="row"><span>GST (16%):</span><span>Rs. ${Number(ord.tax || 0).toLocaleString()}</span></div>
+          <div class="total-row"><span>GRAND TOTAL:</span><span style="color: #D96528;">Rs. ${Number(ord.total).toLocaleString()}</span></div>
+          <div class="divider"></div>
+          <div class="center" style="font-size: 11px; color: #6B7280; margin-top: 10px;">
+            Thank you for dining with FoodiesCafe!<br>
+            Exact time printed at that moment: ${liveTime}
+          </div>
         </body>
       </html>
     `);
     doc.close();
 
-    iframe.contentWindow?.focus();
     setTimeout(() => {
+      iframe.contentWindow?.focus();
       iframe.contentWindow?.print();
-      setTimeout(() => {
-        iframe.remove();
-      }, 2000);
-    }, 300);
+    }, 250);
+
+    addToast({
+      type: 'success',
+      title: 'Receipt Printed ✓',
+      message: `Bill for Order #${ord.orderNumber} printed live at ${liveTime}.`,
+    });
   };
 
-  return (
-    <div
-      className="foodies-order-history-view"
-      style={{
-        maxWidth: '1180px',
-        margin: '16px auto',
-        padding: '0 20px',
-        display: 'flex',
-        flexDirection: 'column',
-        gap: '16px',
-        height: 'calc(100vh - 105px)',
-        boxSizing: 'border-box',
-        overflow: 'hidden',
-      }}
-    >
-      {/* Static Header without ' & Itemized Receipts' or snapshot text */}
-      <div style={{ flexShrink: 0 }}>
-        <h1 style={{ fontSize: '28px', fontWeight: 850, color: 'var(--text-main)', margin: 0, letterSpacing: '-0.02em' }}>
-          Order History
-        </h1>
-      </div>
+  if (!isCustomerLoggedIn) {
+    return (
+      <div
+        className="foodies-history-wrapper"
+        style={{
+          maxWidth: '860px',
+          margin: '18px auto 40px',
+          padding: '0 16px',
+          boxSizing: 'border-box',
+        }}
+      >
+        <div style={{ marginBottom: '18px' }}>
+          <h1
+            style={{
+              fontSize: '24px',
+              fontWeight: 850,
+              color: 'var(--text-main)',
+              margin: 0,
+              letterSpacing: '-0.02em',
+            }}
+          >
+            Order History & Receipts
+          </h1>
+          <p
+            style={{
+              fontSize: '13.5px',
+              color: 'var(--text-muted)',
+              margin: '3px 0 0',
+            }}
+          >
+            Permanent record of all your delicious cafe orders
+          </p>
+        </div>
 
-      {customerOrders.length === 0 ? (
         <div
           style={{
-            flex: 1,
+            backgroundColor: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '20px',
+            padding: '50px 20px',
+            textAlign: 'center',
             display: 'flex',
             flexDirection: 'column',
             alignItems: 'center',
-            justifyContent: 'center',
-            backgroundColor: 'var(--bg-card)',
-            borderRadius: 'var(--radius-lg)',
-            border: '1px solid var(--border-color)',
-            padding: '40px 20px',
-            textAlign: 'center',
             gap: '12px',
+            boxShadow: 'var(--shadow-sm)',
+            marginTop: '30px',
+          }}
+        >
+          <div
+            style={{
+              width: '76px',
+              height: '76px',
+              borderRadius: '50%',
+              backgroundColor: 'rgba(217, 101, 40, 0.1)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--primary)',
+            }}
+          >
+            <Receipt size={38} />
+          </div>
+
+          <h3
+            style={{
+              fontSize: '22px',
+              fontWeight: 850,
+              color: 'var(--text-main)',
+              margin: 0,
+              letterSpacing: '-0.02em',
+            }}
+          >
+            Sign In to View Order History
+          </h3>
+
+          <p
+            style={{
+              fontSize: '14px',
+              color: 'var(--text-secondary)',
+              margin: 0,
+              maxWidth: '440px',
+              lineHeight: 1.6,
+            }}
+          >
+            Please sign in with your email to view your past orders, receipts, and easily reorder your favorites.
+          </p>
+
+          <div
+            style={{
+              display: 'flex',
+              gap: '12px',
+              marginTop: '16px',
+              flexWrap: 'wrap',
+              justifyContent: 'center',
+            }}
+          >
+            <button
+              onClick={() => setLoginModalOpen(true)}
+              style={{
+                backgroundColor: 'var(--primary)',
+                color: '#FFFFFF',
+                border: 'none',
+                borderRadius: '12px',
+                padding: '12px 24px',
+                fontWeight: 800,
+                fontSize: '14px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                boxShadow: '0 4px 14px var(--primary-glow)',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <span>Sign In with Email</span>
+              <ArrowRight size={16} />
+            </button>
+            <button
+              onClick={() => onNavigate('menu')}
+              style={{
+                backgroundColor: 'var(--bg-card)',
+                color: 'var(--text-secondary)',
+                border: '1.5px solid var(--border-color)',
+                borderRadius: '12px',
+                padding: '12px 22px',
+                fontWeight: 750,
+                fontSize: '14px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                transition: 'all 0.15s ease',
+              }}
+            >
+              <ShoppingBag size={16} />
+              <span>Browse Menu</span>
+              <ArrowRight size={15} />
+            </button>
+          </div>
+
+          <CustomerLoginModal
+            isOpen={loginModalOpen}
+            onClose={() => setLoginModalOpen(false)}
+            onSuccess={() => {
+              setLoginModalOpen(false);
+              onNavigate('home');
+            }}
+          />
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div
+      className="foodies-history-wrapper"
+      style={{
+        maxWidth: '860px',
+        margin: '18px auto 40px',
+        padding: '0 16px',
+        boxSizing: 'border-box',
+      }}
+    >
+      {/* Page Title & Subtitle */}
+      <div style={{ marginBottom: '18px', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <div>
+          <h1
+            style={{
+              fontSize: '24px',
+              fontWeight: 850,
+              color: 'var(--text-main)',
+              margin: 0,
+              letterSpacing: '-0.02em',
+            }}
+          >
+            Order History & Receipts
+          </h1>
+          <p
+            style={{
+              fontSize: '13.5px',
+              color: 'var(--text-muted)',
+              margin: '3px 0 0',
+            }}
+          >
+            Permanent record of all your delicious cafe orders
+          </p>
+        </div>
+      </div>
+
+      {/* Pop-up Circle Loading Sign when retrieving order records from database */}
+      <HistoricalLoadingModal visible={isFetchingOlderOrders} />
+
+      {/* Active Order Banner if active orders exist in tracking */}
+      {hasActiveOrders && (
+        <div
+          onClick={() => onNavigate('tracking')}
+          style={{
+            backgroundColor: '#EFF6FF',
+            border: '1.5px solid #BFDBFE',
+            borderRadius: '16px',
+            padding: '14px 18px',
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '18px',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            boxShadow: '0 2px 10px rgba(59, 130, 246, 0.08)',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            <span style={{ fontSize: '24px' }}>🛵</span>
+            <div>
+              <div style={{ fontSize: '14px', fontWeight: 800, color: '#1D4ED8' }}>
+                Active Order In Progress
+              </div>
+              <div style={{ fontSize: '12px', color: '#3B82F6', marginTop: '1px' }}>
+                Tap to view live tracking & status
+              </div>
+            </div>
+          </div>
+
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 800, color: '#1D4ED8' }}>
+            <span>Track</span>
+            <ArrowRight size={14} />
+          </div>
+        </div>
+      )}
+
+      {/* Empty State */}
+      {historyOrders.length === 0 ? (
+        <div
+          style={{
+            backgroundColor: 'var(--bg-card)',
+            border: '1px solid var(--border-color)',
+            borderRadius: '20px',
+            padding: '50px 20px',
+            textAlign: 'center',
+            display: 'flex',
+            flexDirection: 'column',
+            alignItems: 'center',
+            gap: '12px',
+            boxShadow: 'var(--shadow-sm)',
           }}
         >
           <div
@@ -245,427 +520,374 @@ export const OrderHistoryScreen: React.FC<{ onNavigate: (v: string) => void }> =
               height: '64px',
               borderRadius: '50%',
               backgroundColor: 'var(--primary-light)',
-              color: 'var(--primary)',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
+              color: 'var(--primary)',
             }}
           >
-            <ShoppingBag size={30} />
+            <Receipt size={32} />
           </div>
+
           <h3 style={{ fontSize: '18px', fontWeight: 850, color: 'var(--text-main)', margin: 0 }}>
-            No Orders Found
+            {hasActiveOrders ? 'Order Currently In Progress!' : 'No Previous Orders'}
           </h3>
-          <p style={{ fontSize: '13px', color: 'var(--text-muted)', margin: 0, maxWidth: '380px' }}>
-            No past orders linked to mobile number {currentUser?.phone || 'your account'} yet. Start ordering delicious meals from our kitchen!
+
+          <p style={{ fontSize: '13.5px', color: 'var(--text-muted)', margin: 0, maxWidth: '420px', lineHeight: 1.5 }}>
+            {hasActiveOrders
+              ? 'Your active order is being prepared and tracked live. Receipts will appear here once received!'
+              : 'Your past order receipts and completed deliveries will appear here.'}
           </p>
-          <button
-            onClick={() => onNavigate('menu')}
-            style={{
-              marginTop: '6px',
-              padding: '10px 22px',
-              borderRadius: 'var(--radius-md)',
-              backgroundColor: 'var(--primary)',
-              color: '#FFFFFF',
-              fontWeight: 800,
-              border: 'none',
-              cursor: 'pointer',
-              fontSize: '13px',
-              boxShadow: '0 4px 14px var(--primary-glow)',
-            }}
-          >
-            Browse Foodies Menu 🍲
-          </button>
+
+          <div style={{ display: 'flex', gap: '10px', marginTop: '8px' }}>
+            {hasActiveOrders ? (
+              <button
+                onClick={() => onNavigate('tracking')}
+                style={{
+                  backgroundColor: 'var(--primary)',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  borderRadius: '10px',
+                  padding: '10px 20px',
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 12px var(--primary-glow)',
+                }}
+              >
+                <span>Track Active Order</span>
+                <ArrowRight size={15} />
+              </button>
+            ) : (
+              <button
+                onClick={() => onNavigate('menu')}
+                style={{
+                  backgroundColor: 'var(--primary)',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  borderRadius: '10px',
+                  padding: '10px 20px',
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  boxShadow: '0 4px 12px var(--primary-glow)',
+                }}
+              >
+                <span>Browse Menu & Order</span>
+                <ArrowRight size={15} />
+              </button>
+            )}
+          </div>
         </div>
       ) : (
-        /* Static Sub-Cards Grid: Only Left Orders List and Right Receipt Card Scroll */
-        <div
-          className="foodies-history-master-layout"
-          style={{
-            display: 'grid',
-            gridTemplateColumns: '370px 1fr',
-            gap: '24px',
-            alignItems: 'stretch',
-            flex: 1,
-            minHeight: 0,
-            overflow: 'hidden',
-          }}
-        >
-          {/* Left Sub-Card: Scrollable Orders List */}
-          <div
-            className="foodies-history-left-subcard"
-            style={{
-              height: '100%',
-              overflowY: 'auto',
-              paddingRight: '6px',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '12px',
-            }}
-          >
-            {customerOrders.map((ord) => {
-            const isSelected = selectedOrder?.id === ord.id;
+        /* Orders List Feed */
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          {historyOrders.map((ord) => {
+            const st = getDisplayStatus(ord.status, ord.type, ord);
+            const dateStr = new Date(ord.createdAt).toLocaleDateString([], {
+              month: 'short',
+              day: 'numeric',
+              year: 'numeric',
+            });
+
             return (
               <div
                 key={ord.id}
-                onClick={() => setSelectedOrder(ord)}
                 style={{
                   backgroundColor: 'var(--bg-card)',
-                  borderRadius: 'var(--radius-lg)',
-                  border: isSelected ? '2px solid var(--primary)' : '1px solid var(--border-color)',
-                  padding: '18px',
-                  boxShadow: isSelected ? '0 4px 16px var(--primary-glow)' : 'var(--shadow-sm)',
-                  cursor: 'pointer',
+                  border: '1px solid var(--border-color)',
+                  borderRadius: '18px',
+                  padding: '18px 20px',
+                  boxShadow: '0 2px 12px var(--shadow-color)',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '10px',
+                  gap: '12px',
                   transition: 'all 0.15s ease',
-                  position: 'relative',
-                  overflow: 'hidden',
-                  flexShrink: 0,
                 }}
               >
-                {/* Cafe Logo Watermark at 135 Degrees */}
+                {/* Top Row: Order # and Status Badge */}
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <span style={{ fontSize: '16.5px', fontWeight: 850, color: 'var(--text-main)' }}>
+                      Order #{ord.orderNumber}
+                    </span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '5px', fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                      <Calendar size={12} />
+                      <span>{dateStr}</span>
+                    </div>
+                    {ord.status === 'cancelled' && (
+                      <div style={{ fontSize: '11px', color: '#DC2626', fontWeight: 700, marginTop: '2px' }}>
+                        {getCancellationAttribution(ord).isCustomer
+                          ? 'Cancelled by you'
+                          : (getCancellationAttribution(ord).badge === 'CANCELLED (BRANCH CLOSED)'
+                              ? 'Cancelled: Branch closed offline by staff'
+                              : 'Cancelled by cafe staff')}
+                      </div>
+                    )}
+                  </div>
+
+                  <span
+                    style={{
+                      backgroundColor: st.bg,
+                      color: st.color,
+                      padding: '4px 10px',
+                      borderRadius: '12px',
+                      fontSize: '11px',
+                      fontWeight: 850,
+                      letterSpacing: '0.04em',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    {st.label}
+                  </span>
+                </div>
+
+                {/* Dishes Summary Box */}
                 <div
                   style={{
-                    position: 'absolute',
-                    inset: 0,
+                    backgroundColor: 'var(--bg-main)',
+                    borderRadius: '12px',
+                    padding: '10px 14px',
                     display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    overflow: 'hidden',
-                    pointerEvents: 'none',
-                    zIndex: 0,
+                    flexDirection: 'column',
+                    gap: '5px',
+                    border: '1px solid var(--border-color)',
                   }}
                 >
-                  <img
-                    src="/logo.png"
-                    alt="Logo Watermark"
-                    style={{
-                      width: '75%',
-                      height: '75%',
-                      objectFit: 'contain',
-                      transform: 'rotate(135deg)',
-                      opacity: 0.12,
-                      display: 'block',
-                    }}
-                  />
+                  {ord.items.map((it, idx) => (
+                    <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12.5px' }}>
+                      <span style={{ color: 'var(--text-main)', fontWeight: 650 }}>
+                        • {it.quantity}x {it.name} {it.size ? `(${it.size})` : ''}
+                      </span>
+                      <span style={{ color: 'var(--text-muted)', fontWeight: 700 }}>
+                        Rs. {(Number(it.unitPrice) * Number(it.quantity)).toLocaleString()}
+                      </span>
+                    </div>
+                  ))}
                 </div>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', position: 'relative', zIndex: 1 }}>
-                  <div style={{ fontWeight: 800, fontSize: '16px', color: 'var(--text-main)' }}>
-                    Order #{ord.orderNumber}
+                {/* Footer: Price & Payment on left, actions on right */}
+                <div
+                  style={{
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    paddingTop: '2px',
+                    flexWrap: 'wrap',
+                    gap: '10px',
+                  }}
+                >
+                  <div>
+                    <div style={{ fontSize: '16.5px', fontWeight: 900, color: 'var(--primary)' }}>
+                      Rs. {Number(ord.total).toLocaleString()}
+                    </div>
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>
+                      {ord.paymentMethod || 'Cash Payment'}
+                    </div>
                   </div>
-                  <span
-                    style={{
-                      fontSize: '11px',
-                      fontWeight: 800,
-                      textTransform: 'uppercase',
-                      padding: '3px 8px',
-                      borderRadius: 'var(--radius-full)',
-                      backgroundColor: 'var(--status-preparing-bg)',
-                      color: 'var(--status-preparing-text)',
-                    }}
-                  >
-                    {ord.status}
-                  </span>
-                </div>
 
-                <div style={{ fontSize: '13px', color: 'var(--text-secondary)', position: 'relative', zIndex: 1 }}>
-                  {formatOrderDateTime(ord.createdAt)} · {ord.type.toUpperCase()} {ord.tableNumber ? `(Table ${ord.tableNumber})` : ''}
-                </div>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                    {/* Receipt Button */}
+                    <button
+                      onClick={() => setSelectedReceipt(ord)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        backgroundColor: 'var(--bg-card)',
+                        border: '1px solid var(--border-color)',
+                        borderRadius: '8px',
+                        padding: '6px 12px',
+                        fontSize: '12px',
+                        fontWeight: 750,
+                        color: 'var(--primary)',
+                        cursor: 'pointer',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <Receipt size={13} color="var(--primary)" />
+                      Receipt
+                    </button>
 
-                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', position: 'relative', zIndex: 1 }}>
-                  <span style={{ fontSize: '16px', fontWeight: 800, color: 'var(--primary)' }}>
-                    Rs. {ord.total.toLocaleString()}
-                  </span>
-
-                  <span
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '4px',
-                      color: isSelected ? 'var(--primary)' : 'var(--text-muted)',
-                      fontSize: '12px',
-                      fontWeight: 700,
-                    }}
-                  >
-                    <ChevronRight size={16} />
-                  </span>
+                    {/* Reorder Button */}
+                    <button
+                      onClick={() => handleReorder(ord)}
+                      style={{
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '5px',
+                        backgroundColor: 'var(--primary)',
+                        color: '#FFFFFF',
+                        border: 'none',
+                        borderRadius: '8px',
+                        padding: '6px 14px',
+                        fontSize: '12px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        boxShadow: '0 2px 8px var(--primary-glow)',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <RotateCcw size={13} />
+                      Reorder
+                    </button>
+                  </div>
                 </div>
               </div>
             );
           })}
         </div>
+      )}
 
-        {/* Right Sub-Card: Scrollable Printable Receipt (Order Detail Card) */}
-        {selectedOrder && (
+      {/* ================= 80MM THERMAL RECEIPT / BILL MODAL ================= */}
+      {selectedReceipt && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(0,0,0,0.5)',
+            zIndex: 1000,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '20px',
+            backdropFilter: 'blur(3px)',
+          }}
+          onClick={(e) => {
+            if (e.target === e.currentTarget) setSelectedReceipt(null);
+          }}
+        >
           <div
-            id="printable-order-receipt"
-            className="foodies-history-right-subcard"
             style={{
               backgroundColor: '#FFFFFF',
-              borderRadius: 'var(--radius-lg)',
-              border: '1.5px solid var(--border-color)',
-              padding: '28px',
-              boxShadow: 'var(--shadow-md)',
+              color: '#111827',
+              borderRadius: '18px',
+              width: '100%',
+              maxWidth: '380px',
+              padding: '22px',
+              boxShadow: 'var(--shadow-xl)',
               display: 'flex',
               flexDirection: 'column',
-              gap: '16px',
+              fontFamily: 'system-ui, -apple-system, sans-serif',
               position: 'relative',
-              height: '100%',
-              overflowY: 'auto',
-              boxSizing: 'border-box',
+              overflow: 'hidden',
             }}
           >
-            {/* Cafe Logo at 135 Degrees adjusted to card size */}
-            <div
-              style={{
-                position: 'absolute',
-                inset: 0,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                overflow: 'hidden',
-                pointerEvents: 'none',
-                zIndex: 0,
-              }}
-            >
-              <img
-                src="/logo.png"
-                alt="Cafe Logo Watermark"
+            {/* Header */}
+            <div style={{ textAlign: 'center', borderBottom: '1px dashed #D1D5DB', paddingBottom: '12px' }}>
+              <button
+                onClick={() => setSelectedReceipt(null)}
                 style={{
-                  width: '85%',
-                  height: '85%',
-                  objectFit: 'contain',
-                  transform: 'rotate(135deg)',
-                  opacity: 0.16,
-                  display: 'block',
-                  WebkitPrintColorAdjust: 'exact',
-                  printColorAdjust: 'exact',
+                  position: 'absolute',
+                  top: '14px',
+                  right: '14px',
+                  background: 'none',
+                  border: 'none',
+                  cursor: 'pointer',
+                  padding: '4px',
+                  color: '#9CA3AF',
                 }}
-              />
+              >
+                <X size={18} />
+              </button>
+              <div style={{ fontSize: '20px', fontWeight: 900 }}>Foodies<span style={{ color: '#D96528' }}>Cafe</span></div>
+              <div style={{ fontSize: '11px', color: '#6B7280', marginTop: '2px' }}>Official 80mm POS Thermal Receipt</div>
+              <div style={{ fontSize: '11px', color: '#6B7280' }}>GST Registered • NTN: 8492019-3</div>
             </div>
 
-            {/* Print Receipt Button placed at Top Right Corner (sticky) */}
-            <button
-              className="no-print"
-              onClick={handlePrintReceipt}
-              style={{
-                position: 'sticky',
-                top: 0,
-                alignSelf: 'flex-end',
-                marginTop: '-8px',
-                marginBottom: '-28px',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '7px 13px',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: 'var(--bg-card-subtle)',
-                border: '1px solid var(--border-color)',
-                color: 'var(--text-main)',
-                fontSize: '12px',
-                fontWeight: 800,
-                cursor: 'pointer',
-                boxShadow: 'var(--shadow-sm)',
-                zIndex: 10,
-              }}
-            >
-              <Printer size={14} color="var(--primary)" />
-              <span>Print Receipt</span>
-            </button>
-
-            {/* Receipt Header */}
-            <div style={{ textAlign: 'center', borderBottom: '1px dashed var(--border-color)', paddingBottom: '16px', position: 'relative', zIndex: 1 }}>
-              <div style={{ fontWeight: 800, fontSize: '20px', fontFamily: 'Outfit' }}>
-                Foodies<span style={{ color: 'var(--primary)' }}>Cafe</span>
+            {/* Meta */}
+            <div style={{ padding: '10px 0', borderBottom: '1px dashed #D1D5DB', display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '11.5px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#6B7280' }}>Order:</span>
+                <strong>#{selectedReceipt.orderNumber}</strong>
               </div>
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                Customer Cash Receipt · Tax Invoice
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#6B7280' }}>Date:</span>
+                <span>{new Date(selectedReceipt.createdAt).toLocaleDateString()}</span>
               </div>
-              <div style={{ fontSize: '13px', fontWeight: 800, marginTop: '8px', color: 'var(--text-main)' }}>
-                Order #{selectedOrder.orderNumber}
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#6B7280' }}>Type:</span>
+                <span style={{ fontWeight: 700 }}>{selectedReceipt.type.toUpperCase()}</span>
               </div>
-              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                {formatOrderDateTime(selectedOrder.createdAt)} · Cash Only
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#6B7280' }}>Status:</span>
+                <span style={{ fontWeight: 800, color: getDisplayStatus(selectedReceipt.status, selectedReceipt.type).color }}>
+                  {getDisplayStatus(selectedReceipt.status, selectedReceipt.type).label}
+                </span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#6B7280' }}>Printed:</span>
+                <span style={{ fontWeight: 800, color: '#D96528' }}>
+                  {selectedReceipt.createdAt ? new Date(selectedReceipt.createdAt).toLocaleTimeString('en-PK', { hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: true }) : 'Just now'}
+                </span>
               </div>
             </div>
 
-            {/* Itemized Table */}
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', position: 'relative', zIndex: 1 }}>
-              {selectedOrder.items.map((i, idx) => (
-                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13.5px' }}>
-                  <div>
-                    <span style={{ fontWeight: 700 }}>{i.name}</span> × {i.quantity}
-                    {i.isAddOn && (
-                      <span style={{ fontSize: '10px', color: 'var(--primary)', fontWeight: 800, marginLeft: '6px' }}>
-                        (ADD-ON)
-                      </span>
-                    )}
-                  </div>
-                  <span style={{ fontWeight: 700 }}>
-                    Rs. {(i.unitPrice * i.quantity).toLocaleString()}
-                  </span>
+            {/* Items List */}
+            <div style={{ maxHeight: '160px', overflowY: 'auto', padding: '8px 0', borderBottom: '1px dashed #D1D5DB', display: 'flex', flexDirection: 'column', gap: '6px' }}>
+              {selectedReceipt.items.map((it, idx) => (
+                <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontSize: '12px' }}>
+                  <span>{it.quantity}x {it.name}</span>
+                  <strong>Rs. {(Number(it.unitPrice) * Number(it.quantity)).toLocaleString()}</strong>
                 </div>
               ))}
             </div>
 
-            {/* Calculations */}
-            <div style={{ borderTop: '1px dashed var(--border-color)', paddingTop: '12px', display: 'flex', flexDirection: 'column', gap: '6px', position: 'relative', zIndex: 1 }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'var(--text-secondary)' }}>
-                <span>Subtotal</span>
-                <span>Rs. {selectedOrder.originalSubtotal.toLocaleString()}</span>
+            {/* Totals */}
+            <div style={{ padding: '10px 0', borderBottom: '1px dashed #D1D5DB', display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#6B7280' }}>Subtotal</span>
+                <span>Rs. {(selectedReceipt.originalSubtotal || selectedReceipt.total).toLocaleString()}</span>
               </div>
-              {selectedOrder.addOnSubtotal > 0 && (
-                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px', color: 'var(--primary)', fontWeight: 700 }}>
-                  <span>Add-ons Subtotal</span>
-                  <span>Rs. {selectedOrder.addOnSubtotal.toLocaleString()}</span>
-                </div>
-              )}
-              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '18px', fontWeight: 800, marginTop: '4px' }}>
-                <span>Total Amount Paid</span>
-                <span style={{ color: 'var(--primary)' }}>Rs. {selectedOrder.total.toLocaleString()}</span>
+              <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                <span style={{ color: '#6B7280' }}>GST (16%)</span>
+                <span>Rs. {(selectedReceipt.tax || 0).toLocaleString()}</span>
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '15px', fontWeight: 900, marginTop: '4px' }}>
+                <span>GRAND TOTAL</span>
+                <span style={{ color: '#D96528' }}>Rs. {Number(selectedReceipt.total).toLocaleString()}</span>
               </div>
             </div>
 
-            {/* Cash Badge & Problem link */}
-            <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '12px', borderRadius: 'var(--radius-md)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: '12.5px', position: 'relative', zIndex: 1 }}>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 700 }}>
-                <Banknote size={16} color="var(--primary)" />
-                <span>Payment Method: CASH</span>
-              </div>
-              <span style={{ color: '#16A34A', fontWeight: 800 }}>✓ Settled</span>
+            {/* Footer */}
+            <div style={{ textAlign: 'center', padding: '12px 0 10px', fontSize: '11px', color: '#6B7280' }}>
+              Thank you for dining with FoodiesCafe!<br />
+              Printed live at that exact moment
             </div>
 
-            {/* Bottom Row: Replaces previous 'full itemised receipt' with Reorder button */}
-            <div className="no-print" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '8px', position: 'relative', zIndex: 1 }}>
-              <button
-                type="button"
-                onClick={() => handleReorder(selectedOrder)}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '9px 18px',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'var(--primary)',
-                  color: '#FFFFFF',
-                  border: 'none',
-                  fontSize: '13px',
-                  fontWeight: 850,
-                  cursor: 'pointer',
-                  boxShadow: '0 4px 12px var(--primary-glow)',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                <ArrowRight size={15} />
-                <span>Reorder</span>
-              </button>
-
-              <button
-                onClick={() => onNavigate('support')}
-                style={{
-                  color: '#DC2626',
-                  fontSize: '13px',
-                  fontWeight: 700,
-                  cursor: 'pointer',
-                  textDecoration: 'underline',
-                  background: 'none',
-                  border: 'none',
-                }}
-              >
-                Report a problem with this order
-              </button>
-            </div>
+            {/* Print Button */}
+            <button
+              onClick={() => handlePrintSlip(selectedReceipt)}
+              style={{
+                backgroundColor: 'var(--primary)',
+                color: '#FFFFFF',
+                border: 'none',
+                borderRadius: '10px',
+                padding: '11px',
+                fontSize: '13.5px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                gap: '8px',
+                boxShadow: '0 4px 12px var(--primary-glow)',
+              }}
+            >
+              <Printer size={16} />
+              Print Thermal Slip
+            </button>
           </div>
-        )}
-      </div>
+        </div>
       )}
-
-      {/* Media print style and custom scrollbars */}
-      <style jsx>{`
-        .foodies-history-left-subcard::-webkit-scrollbar,
-        .foodies-history-right-subcard::-webkit-scrollbar {
-          width: 6px;
-        }
-        .foodies-history-left-subcard::-webkit-scrollbar-track,
-        .foodies-history-right-subcard::-webkit-scrollbar-track {
-          background: transparent;
-        }
-        .foodies-history-left-subcard::-webkit-scrollbar-thumb,
-        .foodies-history-right-subcard::-webkit-scrollbar-thumb {
-          background-color: var(--border-color);
-          border-radius: 999px;
-        }
-        .foodies-history-left-subcard::-webkit-scrollbar-thumb:hover,
-        .foodies-history-right-subcard::-webkit-scrollbar-thumb:hover {
-          background-color: var(--text-muted);
-        }
-
-        @media (max-width: 900px) {
-          .foodies-order-history-view {
-            height: auto !important;
-            overflow: visible !important;
-            padding-bottom: 80px !important;
-          }
-          .foodies-history-master-layout {
-            grid-template-columns: 1fr !important;
-            height: auto !important;
-            overflow: visible !important;
-          }
-          .foodies-history-left-subcard {
-            max-height: 280px !important;
-            overflow-y: auto !important;
-          }
-          .foodies-history-right-subcard {
-            height: auto !important;
-            max-height: none !important;
-            overflow-y: visible !important;
-          }
-        }
-
-        @media print {
-          @page {
-            size: 80mm auto;
-            margin: 0;
-          }
-          html, body {
-            margin: 0 !important;
-            padding: 4mm 2mm !important;
-            width: 80mm !important;
-            background: #FFFFFF !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-          body * {
-            visibility: hidden !important;
-          }
-          #printable-order-receipt,
-          #printable-order-receipt * {
-            visibility: visible !important;
-            -webkit-print-color-adjust: exact !important;
-            print-color-adjust: exact !important;
-          }
-          #printable-order-receipt {
-            position: absolute !important;
-            left: 0 !important;
-            top: 0 !important;
-            width: 80mm !important;
-            max-width: 80mm !important;
-            margin: 0 auto !important;
-            padding: 16px 12px !important;
-            border: 1px dashed #CBD5E1 !important;
-            border-radius: 6px !important;
-            box-shadow: none !important;
-            background: #FFFFFF !important;
-            color: #000000 !important;
-          }
-          .no-print {
-            display: none !important;
-          }
-        }
-      `}</style>
     </div>
   );
 };
+
+export { OrderHistoryScreen as CustomerHistory };

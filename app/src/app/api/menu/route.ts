@@ -1,54 +1,90 @@
 import { NextResponse } from 'next/server';
+import crypto from 'crypto';
 import { query } from '@/lib/db';
+import { cacheGet, cacheSet, cacheInvalidatePrefix } from '@/lib/redis';
 import { INITIAL_MENU, INITIAL_CATEGORIES } from '@/database/embeddedSeed';
+import { broadcastRealtimeEvent } from '@/lib/realtime';
+import { requireAuth, writeAuditLog } from '@/lib/auth';
 
-export async function GET() {
+export async function GET(request: Request) {
   try {
-    const itemsRes = await query(
-      `SELECT id, name, category, description,
-              base_price as "basePrice",
-              image,
-              is_available as "isAvailable",
-              branch_availability as "branchAvailability",
-              branch_price_overrides as "branchPriceOverrides",
-              sizes, extras
-       FROM menu_items
-       ORDER BY category ASC, name ASC`
+    let payload = await cacheGet<{ menuItems: any[]; categories: string[]; etag: string }>('menu:all');
+
+    if (!payload) {
+      const [itemsRes, catsRes] = await Promise.all([
+        query(
+          `SELECT id, name, category, description,
+                  base_price as "basePrice",
+                  image,
+                  is_available as "isAvailable",
+                  branch_availability as "branchAvailability",
+                  branch_price_overrides as "branchPriceOverrides",
+                  sizes, extras
+           FROM menu_items
+           ORDER BY category ASC, name ASC`
+        ),
+        query(`SELECT name FROM categories ORDER BY display_order ASC`),
+      ]);
+
+      const menuItems = (itemsRes?.rows || []).map((row: any) => ({
+        ...row,
+        basePrice: Number(row.basePrice) || 0,
+        branchAvailability:
+          typeof row.branchAvailability === 'string'
+            ? JSON.parse(row.branchAvailability)
+            : row.branchAvailability || {},
+        branchPriceOverrides:
+          typeof row.branchPriceOverrides === 'string'
+            ? JSON.parse(row.branchPriceOverrides)
+            : row.branchPriceOverrides || {},
+        sizes:
+          typeof row.sizes === 'string'
+            ? JSON.parse(row.sizes)
+            : row.sizes || [],
+        extras:
+          typeof row.extras === 'string'
+            ? JSON.parse(row.extras)
+            : row.extras || [],
+      }));
+
+      const categories =
+        catsRes?.rows && catsRes.rows.length > 0
+          ? catsRes.rows.map((r: any) => r.name)
+          : INITIAL_CATEGORIES;
+
+      const finalItems = menuItems.length > 0 ? menuItems : INITIAL_MENU;
+      const etag = `"menu-${crypto
+        .createHash('sha1')
+        .update(JSON.stringify({ items: finalItems, categories }))
+        .digest('hex')
+        .slice(0, 16)}"`;
+
+      payload = { menuItems: finalItems, categories, etag };
+      await cacheSet('menu:all', payload, 60);
+    }
+
+    if (request.headers.get('if-none-match') === payload.etag) {
+      return new NextResponse(null, {
+        status: 304,
+        headers: {
+          ETag: payload.etag,
+          'Cache-Control': 'public, max-age=15, stale-while-revalidate=45',
+        },
+      });
+    }
+
+    return NextResponse.json(
+      {
+        menuItems: payload.menuItems,
+        categories: payload.categories,
+      },
+      {
+        headers: {
+          ETag: payload.etag,
+          'Cache-Control': 'public, max-age=15, stale-while-revalidate=45',
+        },
+      }
     );
-
-    const catsRes = await query(
-      `SELECT name FROM categories ORDER BY display_order ASC`
-    );
-
-    const menuItems = (itemsRes?.rows || []).map((row: any) => ({
-      ...row,
-      basePrice: Number(row.basePrice) || 0,
-      branchAvailability:
-        typeof row.branchAvailability === 'string'
-          ? JSON.parse(row.branchAvailability)
-          : row.branchAvailability || {},
-      branchPriceOverrides:
-        typeof row.branchPriceOverrides === 'string'
-          ? JSON.parse(row.branchPriceOverrides)
-          : row.branchPriceOverrides || {},
-      sizes:
-        typeof row.sizes === 'string'
-          ? JSON.parse(row.sizes)
-          : row.sizes || [],
-      extras:
-        typeof row.extras === 'string'
-          ? JSON.parse(row.extras)
-          : row.extras || [],
-    }));
-
-    const categories = (catsRes?.rows && catsRes.rows.length > 0)
-      ? catsRes.rows.map((r: any) => r.name)
-      : INITIAL_CATEGORIES;
-
-    return NextResponse.json({
-      menuItems: menuItems.length > 0 ? menuItems : INITIAL_MENU,
-      categories,
-    });
   } catch (error: any) {
     return NextResponse.json({
       menuItems: INITIAL_MENU,
@@ -61,6 +97,9 @@ export async function GET() {
 
 export async function PATCH(request: Request) {
   try {
+    const { auth, errorResponse } = requireAuth(request, ['platform_owner', 'branch_manager', 'cashier']);
+    if (errorResponse) return errorResponse;
+
     const body = await request.json();
     const itemId = body.itemId || body.id;
 
@@ -121,6 +160,16 @@ export async function PATCH(request: Request) {
     const sql = `UPDATE menu_items SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = $${idx} RETURNING *`;
     const res = await query(sql, values);
 
+    await Promise.all([
+      cacheInvalidatePrefix('menu:'),
+      cacheInvalidatePrefix('catalog:'),
+      cacheInvalidatePrefix('sync:payload:'),
+    ]);
+
+    try {
+      broadcastRealtimeEvent({ type: 'MENU_UPDATED' });
+    } catch {}
+
     return NextResponse.json({ success: true, item: res.rows[0] });
   } catch (error: any) {
     return NextResponse.json(
@@ -132,6 +181,9 @@ export async function PATCH(request: Request) {
 
 export async function POST(request: Request) {
   try {
+    const { auth, errorResponse } = requireAuth(request, ['platform_owner', 'branch_manager', 'cashier']);
+    if (errorResponse) return errorResponse;
+
     const body = await request.json();
     const {
       id = `m-${Date.now()}`,
@@ -190,6 +242,15 @@ export async function POST(request: Request) {
     ];
 
     const res = await query(sql, values);
+    await Promise.all([
+      cacheInvalidatePrefix('menu:'),
+      cacheInvalidatePrefix('catalog:'),
+      cacheInvalidatePrefix('sync:payload:'),
+    ]);
+
+    try {
+      broadcastRealtimeEvent({ type: 'MENU_UPDATED' });
+    } catch {}
     return NextResponse.json({ success: true, item: res.rows[0] });
   } catch (error: any) {
     return NextResponse.json(
@@ -201,6 +262,9 @@ export async function POST(request: Request) {
 
 export async function DELETE(request: Request) {
   try {
+    const { auth, errorResponse } = requireAuth(request, ['platform_owner', 'branch_manager', 'cashier']);
+    if (errorResponse) return errorResponse;
+
     const { searchParams } = new URL(request.url);
     const itemId = searchParams.get('id') || searchParams.get('itemId');
 
@@ -209,6 +273,15 @@ export async function DELETE(request: Request) {
     }
 
     await query(`DELETE FROM menu_items WHERE id = $1`, [itemId]);
+    await Promise.all([
+      cacheInvalidatePrefix('menu:'),
+      cacheInvalidatePrefix('catalog:'),
+      cacheInvalidatePrefix('sync:payload:'),
+    ]);
+
+    try {
+      broadcastRealtimeEvent({ type: 'MENU_UPDATED' });
+    } catch {}
     return NextResponse.json({ success: true, deletedId: itemId });
   } catch (error: any) {
     return NextResponse.json(
@@ -217,3 +290,5 @@ export async function DELETE(request: Request) {
     );
   }
 }
+
+export const PUT = PATCH;

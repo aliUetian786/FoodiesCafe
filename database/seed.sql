@@ -4,7 +4,7 @@
 -- ============================================================================
 
 -- 1. Branches Seed
-INSERT INTO branches (id, name, city, address, phone, opening_hours, is_open, is_busy, prep_time_estimate_min, full_edit_window_min, stop_add_ons_min_before_ready, delivery_enabled, max_order_distance_km, table_qr_max_distance_meters, payment_settings)
+INSERT INTO branches (id, name, city, address, phone, opening_hours, is_open, is_busy, prep_time_estimate_min, full_edit_window_min, stop_add_ons_min_before_ready, delivery_enabled, max_order_distance_km, table_qr_max_distance_meters, min_delivery_amount, payment_settings)
 VALUES
 (
     'gulberg-lahore',
@@ -21,6 +21,7 @@ VALUES
     true,
     50,
     300,
+    500,
     '{"dine_in":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"takeaway":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"delivery":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":true}}'::jsonb
 ),
 (
@@ -38,6 +39,7 @@ VALUES
     true,
     50,
     300,
+    500,
     '{"dine_in":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"takeaway":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"delivery":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false}}'::jsonb
 ),
 (
@@ -55,6 +57,7 @@ VALUES
     true,
     50,
     300,
+    500,
     '{"dine_in":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"takeaway":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"delivery":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":true}}'::jsonb
 )
 ON CONFLICT (id) DO UPDATE SET
@@ -82,7 +85,6 @@ VALUES
 ('user-cust', 'Zeeshan Ahmed', '+92 301 5551234', 'zeeshan@example.com', 'House 14, Street 9, Model Town, Lahore', 'customer', NULL, 'active', 0, 'password123', NULL, 0, NULL),
 ('user-owner', 'Malik Jahangir', '+92 300 0000001', 'owner@foodiescafe.pk', NULL, 'platform_owner', NULL, 'active', 0, 'password123', NULL, 0, NULL),
 ('user-bm', 'Rashid Mehmood', '+92 300 2223344', 'manager.gulberg@foodiescafe.pk', NULL, 'branch_manager', 'gulberg-lahore', 'active', 0, 'password123', NULL, 0, NULL),
-('user-rep', 'Zara Noor', '+92 300 4445566', 'rep.gulberg@foodiescafe.pk', NULL, 'branch_representative', 'gulberg-lahore', 'active', 0, 'password123', NULL, 0, NULL),
 ('user-kitchen', 'Chef Ustaad Aslam', '+92 300 6667788', 'kitchen.gulberg@foodiescafe.pk', NULL, 'kitchen_staff', 'gulberg-lahore', 'active', 0, 'password123', NULL, 0, NULL),
 ('user-cashier', 'Bilal Farooq', '+92 300 8889900', 'cashier.gulberg@foodiescafe.pk', NULL, 'cashier', 'gulberg-lahore', 'active', 0, 'password123', NULL, 0, NULL),
 ('user-floor', 'Kashif Ali', '+92 300 1112233', 'floor.gulberg@foodiescafe.pk', NULL, 'floor_staff', 'gulberg-lahore', 'active', 0, 'password123', NULL, 0, NULL),
@@ -93,17 +95,15 @@ VALUES
 ('user-cashier-isb', 'Hamza Tariq', '+92 300 3338899', 'cashier.islamabad@foodiescafe.pk', NULL, 'cashier', 'f7-islamabad', 'active', 0, 'password123', NULL, 0, NULL),
 ('user-kitchen-isb', 'Chef Imran Khan', '+92 300 3337766', 'kitchen.islamabad@foodiescafe.pk', NULL, 'kitchen_staff', 'f7-islamabad', 'active', 0, 'password123', NULL, 0, NULL),
 ('user-floor-isb', 'Fahad Mustafa', '+92 300 3336655', 'floor.islamabad@foodiescafe.pk', NULL, 'floor_staff', 'f7-islamabad', 'active', 0, 'password123', NULL, 0, NULL),
-('user-rep-isb', 'Ayesha Siddiqui', '+92 300 3335544', 'rep.islamabad@foodiescafe.pk', NULL, 'branch_representative', 'f7-islamabad', 'active', 0, 'password123', NULL, 0, NULL),
 -- Karachi Staff
 ('user-bm-khi', 'Kamran Siddiqui', '+92 300 5556677', 'manager.karachi@foodiescafe.pk', NULL, 'branch_manager', 'clifton-karachi', 'active', 0, 'password123', NULL, 0, NULL),
 ('user-cashier-khi', 'Saad Ali', '+92 300 5558899', 'cashier.karachi@foodiescafe.pk', NULL, 'cashier', 'clifton-karachi', 'active', 0, 'password123', NULL, 0, NULL),
 ('user-kitchen-khi', 'Chef Zakir Hussain', '+92 300 5557766', 'kitchen.karachi@foodiescafe.pk', NULL, 'kitchen_staff', 'clifton-karachi', 'active', 0, 'password123', NULL, 0, NULL),
-('user-floor-khi', 'Rizwan Ahmed', '+92 300 5556655', 'floor.karachi@foodiescafe.pk', NULL, 'floor_staff', 'clifton-karachi', 'active', 0, 'password123', NULL, 0, NULL),
-('user-rep-khi', 'Mahnoor Baloch', '+92 300 5555544', 'rep.karachi@foodiescafe.pk', NULL, 'branch_representative', 'clifton-karachi', 'active', 0, 'password123', NULL, 0, NULL)
+('user-floor-khi', 'Rizwan Ahmed', '+92 300 5556655', 'floor.karachi@foodiescafe.pk', NULL, 'floor_staff', 'clifton-karachi', 'active', 0, 'password123', NULL, 0, NULL)
 ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, branch_id = EXCLUDED.branch_id, password_hash = EXCLUDED.password_hash, rider_availability = COALESCE(users.rider_availability, EXCLUDED.rider_availability);
 
 -- 4. Menu Items Seed (Full 20-Item Authentic Menu across all categories)
-INSERT INTO menu_items (id, name, category, description, base_price, image, is_available, branch_availability, sizes, extras)
+INSERT INTO menu_items (id, name, category, description, base_price, image, is_available, branch_availability, branch_price_overrides, sizes, extras)
 VALUES
 (
     'm1',
@@ -114,6 +114,7 @@ VALUES
     '/food-biryani.jpg',
     true,
     '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{"gulberg-lahore":750,"f7-islamabad":620,"clifton-karachi":680}'::jsonb,
     '[{"name":"Regular (Single)","priceDelta":0},{"name":"Jumbo (Double)","priceDelta":350}]'::jsonb,
     '[{"name":"Extra Zeera Raita","price":60},{"name":"Fresh Kachumber Salad","price":70},{"name":"Extra Boiled Egg","price":50}]'::jsonb
 ),
@@ -126,6 +127,7 @@ VALUES
     '/food-biryani.jpg',
     true,
     '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{"gulberg-lahore":1050,"f7-islamabad":920,"clifton-karachi":990}'::jsonb,
     '[{"name":"Single Pot","priceDelta":0},{"name":"Family Platter (Serves 3)","priceDelta":850}]'::jsonb,
     '[{"name":"Extra Zeera Raita","price":60},{"name":"Fresh Kachumber Salad","price":70}]'::jsonb
 ),
@@ -138,6 +140,7 @@ VALUES
     '/food-biryani.jpg',
     true,
     '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
     '[{"name":"Standard Matka","priceDelta":0},{"name":"Jumbo Matka","priceDelta":320}]'::jsonb,
     '[{"name":"Mint Raita","price":60},{"name":"Spicy Chutney","price":50}]'::jsonb
 ),
@@ -150,6 +153,7 @@ VALUES
     '/hero-bg.jpg',
     true,
     '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{"gulberg-lahore":1350,"f7-islamabad":1180,"clifton-karachi":1280}'::jsonb,
     '[{"name":"Half (serves 2)","priceDelta":0},{"name":"Full (serves 4)","priceDelta":1100}]'::jsonb,
     '[{"name":"Roghni Naan","price":80},{"name":"Garlic Butter Naan","price":110},{"name":"Mint Chutney","price":50}]'::jsonb
 ),
@@ -162,6 +166,7 @@ VALUES
     '/hero-bg.jpg',
     true,
     '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
     '[{"name":"Half (serves 2)","priceDelta":0},{"name":"Full (serves 4)","priceDelta":970}]'::jsonb,
     '[{"name":"Garlic Butter Naan","price":110},{"name":"Extra Makhni Gravy","price":150}]'::jsonb
 ),
@@ -174,6 +179,7 @@ VALUES
     '/hero-bg.jpg',
     true,
     '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
     '[{"name":"Half KG (serves 2)","priceDelta":0},{"name":"Full KG (serves 4)","priceDelta":1600}]'::jsonb,
     '[{"name":"Tandoori Roti (2 pcs)","price":70},{"name":"Roghni Naan","price":80}]'::jsonb
 ),
@@ -186,6 +192,7 @@ VALUES
     '/hero-bg.jpg',
     true,
     '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
     '[{"name":"Standard (4 pcs)","priceDelta":0},{"name":"Platter (8 pcs)","priceDelta":680}]'::jsonb,
     '[{"name":"Tandoori Paratha","price":90},{"name":"Mint Coriander Dip","price":40}]'::jsonb
 ),
@@ -198,6 +205,7 @@ VALUES
     '/hero-bg.jpg',
     true,
     '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
     '[{"name":"Single Skewer (8 pcs)","priceDelta":0},{"name":"Double Skewer (16 pcs)","priceDelta":740}]'::jsonb,
     '[{"name":"Garlic Naan","price":110},{"name":"Imli Chutney","price":50}]'::jsonb
 ),
@@ -210,6 +218,7 @@ VALUES
     '/hero-bg.jpg',
     true,
     '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
     '[{"name":"Standard (3 pcs)","priceDelta":0},{"name":"Feast (6 pcs)","priceDelta":1350}]'::jsonb,
     '[{"name":"Peshawari Chutney","price":60},{"name":"Roghni Naan","price":80}]'::jsonb
 ),
@@ -222,6 +231,7 @@ VALUES
     '/hero-bg.jpg',
     true,
     '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
     '[{"name":"Single Fillet","priceDelta":0},{"name":"Double Monster Fillet","priceDelta":280}]'::jsonb,
     '[{"name":"Seasoned Masala Fries","price":160},{"name":"Cheese Dip Shot","price":90}]'::jsonb
 ),
@@ -234,6 +244,7 @@ VALUES
     '/hero-bg.jpg',
     true,
     '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{"gulberg-lahore":890,"f7-islamabad":790,"clifton-karachi":850}'::jsonb,
     '[{"name":"Double Patty","priceDelta":0},{"name":"Triple Monster Patty","priceDelta":310}]'::jsonb,
     '[{"name":"Crispy Curly Fries","price":190},{"name":"Truffle Mayo","price":80}]'::jsonb
 ),
@@ -246,6 +257,7 @@ VALUES
     '/hero-bg.jpg',
     true,
     '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
     '[{"name":"Regular Box","priceDelta":0},{"name":"Party Sharing Platter","priceDelta":340}]'::jsonb,
     '[{"name":"Extra Cheddar Sauce","price":80},{"name":"Jalapeño Bombs (4 pcs)","price":140}]'::jsonb
 ),
@@ -258,6 +270,7 @@ VALUES
     '/food-biryani.jpg',
     true,
     '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
     '[]'::jsonb,
     '[]'::jsonb
 ),
@@ -270,6 +283,7 @@ VALUES
     '/food-biryani.jpg',
     true,
     '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
     '[]'::jsonb,
     '[]'::jsonb
 ),
@@ -282,6 +296,7 @@ VALUES
     '/food-biryani.jpg',
     true,
     '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
     '[]'::jsonb,
     '[]'::jsonb
 ),
@@ -294,6 +309,7 @@ VALUES
     '/food-biryani.jpg',
     true,
     '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
     '[]'::jsonb,
     '[]'::jsonb
 ),
@@ -306,6 +322,7 @@ VALUES
     '/food-biryani.jpg',
     true,
     '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
     '[]'::jsonb,
     '[]'::jsonb
 ),
@@ -318,6 +335,7 @@ VALUES
     '/food-biryani.jpg',
     true,
     '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
     '[]'::jsonb,
     '[]'::jsonb
 ),
@@ -330,6 +348,7 @@ VALUES
     '/food-biryani.jpg',
     true,
     '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
     '[]'::jsonb,
     '[]'::jsonb
 ),
@@ -342,6 +361,7 @@ VALUES
     '/food-biryani.jpg',
     true,
     '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
     '[]'::jsonb,
     '[]'::jsonb
 )
@@ -352,6 +372,7 @@ ON CONFLICT (id) DO UPDATE SET
     description = EXCLUDED.description,
     is_available = EXCLUDED.is_available,
     branch_availability = EXCLUDED.branch_availability,
+    branch_price_overrides = EXCLUDED.branch_price_overrides,
     sizes = EXCLUDED.sizes,
     extras = EXCLUDED.extras;
 
@@ -408,10 +429,7 @@ VALUES
 ('primary-deal', 'Royal Chicken Dum Biryani', 'Slow-steamed in copper handi with saffron & house spices', 'Rs. 650', '🌟 TODAY''S CHEF SPECIAL', '/food-biryani.jpg', 'Biryani & Rice')
 ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, price = EXCLUDED.price;
 
--- 9. Clean Purge of Legacy Mock Orders, Refunds, and Sessions
-DELETE FROM refund_requests WHERE id LIKE 'ref-%' OR id LIKE 'ref-pending-%' OR id LIKE 'ref-approved-%';
-DELETE FROM table_sessions WHERE id LIKE 'sess-%';
-DELETE FROM orders WHERE id LIKE 'ord-seed-%' OR order_number IN ('FC-6744', 'FC-7819', 'FC-8812', 'FC-9021');
+-- 9. Legacy Mock Cleanup
 DELETE FROM cash_shifts WHERE id IN ('sh-yesterday-1', 'sh-yesterday-2');
 
 -- 10. Cash Shifts Seed (Clean Initial Drawer - Zero Mock Collections)
@@ -433,9 +451,79 @@ INSERT INTO cash_shifts (
     NULL,
     NULL,
     'open'
+),
+(
+    'sh-today-isb',
+    'user-cashier-isb',
+    'Hamza Tariq',
+    'f7-islamabad',
+    CURRENT_TIMESTAMP,
+    NULL,
+    0,
+    0,
+    0,
+    NULL,
+    NULL,
+    NULL,
+    'open'
+),
+(
+    'sh-today-khi',
+    'user-cashier-khi',
+    'Adeel Murtaza',
+    'clifton-karachi',
+    CURRENT_TIMESTAMP,
+    NULL,
+    0,
+    0,
+    0,
+    NULL,
+    NULL,
+    NULL,
+    'open'
 )
 ON CONFLICT (id) DO UPDATE SET
     opening_float = 0,
     cash_collected = 0,
     expected_cash = 0,
     status = 'open';
+
+-- 11. Announcements & Real Info Seed
+INSERT INTO announcements (
+    id, title, tag, description, valid_until, branch_id, branch_name, discount_percent, badge_color
+) VALUES
+(
+    'ann-1',
+    'Midnight Biryani & Karahi Feast: Flat 20% Off',
+    'HOT DEAL',
+    'Enjoy 20% off all Mutton & Chicken Karahi orders between 10:00 PM and 2:00 AM across all branches.',
+    'Tonight 02:00 AM',
+    NULL,
+    NULL,
+    20,
+    '#EF4444'
+),
+(
+    'ann-2',
+    'Gulberg Rooftop Terrace Live BBQ Night',
+    'BRANCH SPECIAL',
+    'Join us on the Gulberg Rooftop for live open-flame charcoal Seekh Kababs & Mutton Chops every Friday & Saturday.',
+    'Every Weekend',
+    'gulberg-lahore',
+    'Gulberg Lahore',
+    NULL,
+    '#F59E0B'
+),
+(
+    'ann-3',
+    'Free Delivery on Doorstep Orders above Rs. 1500',
+    'ANNOUNCEMENT',
+    'Zero delivery fee on all online delivery orders exceeding Rs. 1500 via the mobile app.',
+    'Valid this Month',
+    NULL,
+    NULL,
+    NULL,
+    '#10B981'
+)
+ON CONFLICT (id) DO NOTHING;
+

@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
 import { Order } from '@/types/cafe';
+import { HistoricalLoadingModal } from '@/components/common/HistoricalLoadingModal';
 import {
   ShoppingBag,
   Search,
@@ -12,7 +13,6 @@ import {
   Building2,
   Clock,
   ArrowRight,
-  Download,
   CheckCircle2,
   AlertCircle,
   X,
@@ -22,10 +22,22 @@ import {
   Bike,
 } from 'lucide-react';
 
-export const CustomersOrdersScreen: React.FC = () => {
+export interface CustomersOrdersScreenProps {
+  initialStatus?: 'all' | 'pending';
+  isBranchOrders?: boolean;
+  title?: string;
+}
+
+export const CustomersOrdersScreen: React.FC<CustomersOrdersScreenProps> = ({
+  initialStatus = 'all',
+  isBranchOrders = false,
+  title,
+}) => {
   const {
     orders,
     branches,
+    currentBranch,
+    currentRole,
     hasLoadedOlderOrders,
     isFetchingOlderOrders,
     fetchOlderOrders,
@@ -33,11 +45,13 @@ export const CustomersOrdersScreen: React.FC = () => {
     addToast,
   } = useApp();
 
+  const isManager = currentRole === 'branch_manager' || isBranchOrders;
+
   // Filters state
   const [search, setSearch] = useState('');
-  const [selectedBranch, setSelectedBranch] = useState('all');
+  const [selectedBranch, setSelectedBranch] = useState(isManager ? currentBranch.id : 'all');
   const [typeFilter, setTypeFilter] = useState('all');
-  const [statusFilter, setStatusFilter] = useState('all');
+  const [statusFilter, setStatusFilter] = useState(initialStatus === 'pending' ? 'active' : 'all');
   const [paymentFilter, setPaymentFilter] = useState('all');
   const [dateScope, setDateScope] = useState<'today' | 'yesterday' | 'week' | 'month' | 'custom' | 'all'>('today');
   const [customStartDate, setCustomStartDate] = useState('');
@@ -110,9 +124,7 @@ export const CustomersOrdersScreen: React.FC = () => {
     if (scope === 'today') {
       filterOrdersToToday();
     } else {
-      if (!hasLoadedOlderOrders) {
-        await fetchOlderOrders(selectedBranch === 'all' ? undefined : selectedBranch, scope);
-      }
+      await fetchOlderOrders(selectedBranch === 'all' ? undefined : selectedBranch, scope);
     }
   };
 
@@ -137,18 +149,35 @@ export const CustomersOrdersScreen: React.FC = () => {
     // Status
     let matchesStatus = true;
     if (statusFilter === 'active') {
-      matchesStatus = ord.status !== 'completed' && ord.status !== 'cancelled';
+      matchesStatus = ord.status !== 'completed' && ord.status !== 'cancelled' && ord.status !== 'delivered';
+    } else if (statusFilter === 'completed') {
+      matchesStatus = ord.status === 'completed' || ord.status === 'delivered';
     } else if (statusFilter !== 'all') {
       matchesStatus = ord.status === statusFilter;
     }
 
-    // Payment
-    const matchesPayment = paymentFilter === 'all' || ord.paymentStatus === paymentFilter;
+    // Payment / Collections: Paid orders appear in Order History. Cancelled orders also appear here as cancelled.
+    const isPaid = ord.paymentStatus === 'paid' || ord.paymentCollected === true;
+    const isCancelled = ord.status === 'cancelled';
+    if (!isPaid && !isCancelled) return false;
+
+    let matchesPayment = true;
+    if (paymentFilter !== 'all') {
+      const m = (ord.paymentMethod || '').toLowerCase();
+      const isCash = m.includes('cash') || m.includes('cod') || !m;
+      if (paymentFilter === 'paid_cash') {
+        matchesPayment = isPaid && isCash;
+      } else if (paymentFilter === 'paid_online') {
+        matchesPayment = isPaid && !isCash;
+      } else if (paymentFilter === 'refunded') {
+        matchesPayment = ord.paymentStatus === 'refunded';
+      }
+    }
 
     // Date
     let matchesDate = true;
     if (dateScope === 'today') {
-      matchesDate = isToday(ord.createdAt) || (ord.status !== 'completed' && ord.status !== 'cancelled');
+      matchesDate = isToday(ord.createdAt);
     } else if (dateScope === 'yesterday') {
       matchesDate = isYesterday(ord.createdAt);
     } else if (dateScope === 'week') {
@@ -165,6 +194,7 @@ export const CustomersOrdersScreen: React.FC = () => {
   const getStatusBadge = (status: string) => {
     switch (status) {
       case 'completed':
+      case 'delivered':
         return { bg: '#DCFCE7', color: '#15803D', label: 'Completed' };
       case 'preparing':
         return { bg: 'var(--status-preparing-bg)', color: 'var(--status-preparing-text)', label: 'Preparing' };
@@ -188,7 +218,7 @@ export const CustomersOrdersScreen: React.FC = () => {
       style={{
         display: 'flex',
         flexDirection: 'column',
-        gap: '20px',
+        gap: '8px',
         height: '100%',
         maxHeight: '100%',
         overflowY: 'auto',
@@ -196,174 +226,101 @@ export const CustomersOrdersScreen: React.FC = () => {
         paddingRight: '4px',
       }}
     >
-      {/* Header Banner */}
+      {/* Prominent Loading Pop-up Sign Modal */}
+      <HistoricalLoadingModal visible={isFetchingOlderOrders} />
+
+      {/* ========================================================================= */}
+      {/* STATIC TOP CONTROL BAR: SINGLE HORIZONTAL LINE FOR ALL FILTERS & ACTIONS    */}
+      {/* ========================================================================= */}
       <div
         style={{
+          flexShrink: 0,
           backgroundColor: 'var(--bg-card)',
+          border: '1px solid var(--border-color)',
           borderRadius: 'var(--radius-lg)',
-          border: '1px solid var(--border-color)',
-          padding: '18px 24px',
+          padding: '6px 10px',
           boxShadow: 'var(--shadow-sm)',
+          marginBottom: '2px',
           display: 'flex',
-          justifyContent: 'space-between',
           alignItems: 'center',
-          flexWrap: 'wrap',
-          gap: '14px',
-          flexShrink: 0,
+          gap: '6px',
+          flexWrap: 'nowrap',
+          overflow: 'hidden',
+          minHeight: '44px',
+          boxSizing: 'border-box',
+          width: '100%',
         }}
       >
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div
-            style={{
-              width: '42px',
-              height: '42px',
-              borderRadius: '12px',
-              backgroundColor: 'var(--primary-light)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              color: 'var(--primary)',
-            }}
-          >
-            <ShoppingBag size={22} />
-          </div>
-          <div>
-            <h1 style={{ fontSize: '22px', fontWeight: 800, margin: 0, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
-              All-Branch Real Customer Orders
-            </h1>
-            <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: '2px 0 0' }}>
-              Real-time orders ledger · Defaults to Today's data · On-demand historical records from PostgreSQL
-            </p>
-          </div>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          {!hasLoadedOlderOrders ? (
+        {/* Channel / Order Type Buttons: All, Takeaway, Dine-In, Delivery (Like Order Hub) */}
+        <div style={{ display: 'flex', gap: '3px', alignItems: 'center', flexShrink: 0 }}>
+          {[
+            { id: 'all', label: 'All' },
+            { id: 'takeaway', label: 'Takeaway 🛍️' },
+            { id: 'dine_in', label: 'Dine-In 🍽️' },
+            { id: 'delivery', label: 'Delivery 🛵' },
+          ].map((ch) => (
             <button
-              onClick={() => fetchOlderOrders(selectedBranch === 'all' ? undefined : selectedBranch, 'all')}
-              disabled={isFetchingOlderOrders}
+              key={ch.id}
+              onClick={() => setTypeFilter(ch.id)}
               style={{
-                padding: '9px 16px',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: 'var(--bg-card-subtle)',
-                border: '1px solid var(--border-color)',
-                color: 'var(--primary)',
+                padding: '5px 9px',
+                borderRadius: '5px',
+                border: typeFilter === ch.id ? '1px solid var(--primary)' : '1px solid var(--border-color)',
+                backgroundColor: typeFilter === ch.id ? 'var(--primary)' : 'transparent',
+                color: typeFilter === ch.id ? '#FFFFFF' : 'var(--text-main)',
+                fontSize: '11.5px',
                 fontWeight: 750,
-                fontSize: '12.5px',
                 cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
+                whiteSpace: 'nowrap',
+                transition: 'all 0.15s ease',
               }}
             >
-              <Download size={15} />
-              <span>{isFetchingOlderOrders ? 'Loading Archive...' : '📂 Fetch Older Archive'}</span>
+              {ch.label}
             </button>
-          ) : (
-            <button
-              onClick={() => filterOrdersToToday()}
-              style={{
-                padding: '9px 16px',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: 'var(--bg-card-subtle)',
-                border: '1px solid var(--border-color)',
-                color: '#16A34A',
-                fontWeight: 750,
-                fontSize: '12.5px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-            >
-              <Clock size={15} />
-              <span>⚡ Reset to Today Only</span>
-            </button>
-          )}
-        </div>
-      </div>
-
-      {/* Filter and Date Bar */}
-      <div
-        style={{
-          backgroundColor: 'var(--bg-card)',
-          borderRadius: 'var(--radius-md)',
-          border: '1px solid var(--border-color)',
-          padding: '14px 18px',
-          display: 'flex',
-          gap: '12px',
-          alignItems: 'center',
-          flexWrap: 'wrap',
-          boxShadow: 'var(--shadow-sm)',
-          flexShrink: 0,
-        }}
-      >
-        {/* Search */}
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            backgroundColor: 'var(--bg-input)',
-            border: '1px solid var(--border-color)',
-            borderRadius: 'var(--radius-md)',
-            padding: '7px 12px',
-            flex: 1,
-            minWidth: '220px',
-          }}
-        >
-          <Search size={15} color="var(--text-muted)" />
-          <input
-            type="text"
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-            placeholder="Search Order #, customer name, phone, dish..."
-            style={{
-              border: 'none',
-              outline: 'none',
-              backgroundColor: 'transparent',
-              fontSize: '13px',
-              width: '100%',
-              color: 'var(--text-main)',
-            }}
-          />
+          ))}
         </div>
 
-        {/* Date Scope Filter */}
+        {/* Divider */}
+        <div style={{ width: '1px', height: '18px', backgroundColor: 'var(--border-color)', flexShrink: 0 }} />
+
+        {/* Date Scope Filter Dropdown (Positioned like Order Hub controls) */}
         <select
           value={dateScope}
           onChange={(e) => handleDateScopeChange(e.target.value as any)}
           style={{
-            padding: '8px 12px',
-            borderRadius: 'var(--radius-md)',
+            padding: '5px 10px',
+            borderRadius: '6px',
             border: '1px solid var(--border-color)',
             backgroundColor: 'var(--bg-input)',
             color: 'var(--text-main)',
-            fontSize: '12.5px',
+            fontSize: '11.5px',
             fontWeight: 750,
+            cursor: 'pointer',
+            flexShrink: 0,
+            outline: 'none',
           }}
         >
-          <option value="today">⚡ Today's Orders (Default)</option>
+          <option value="today">⚡ Today's Orders</option>
           <option value="yesterday">📅 Yesterday</option>
           <option value="week">📅 Past 7 Days</option>
           <option value="month">📅 This Month (30 Days)</option>
           <option value="custom">📅 Custom Date Range</option>
-          <option value="all">📂 All Time History</option>
+          <option value="all">📅 All Time History</option>
         </select>
 
         {/* Custom Date Pickers (if Custom selected) */}
         {dateScope === 'custom' && (
-          <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '4px', alignItems: 'center', flexShrink: 0 }}>
             <input
               type="date"
               value={customStartDate}
               onChange={(e) => setCustomStartDate(e.target.value)}
               style={{
-                padding: '6px 10px',
-                borderRadius: '6px',
+                padding: '4px 8px',
+                borderRadius: '5px',
                 border: '1px solid var(--border-color)',
                 backgroundColor: 'var(--bg-input)',
-                fontSize: '12px',
+                fontSize: '11px',
                 color: 'var(--text-main)',
               }}
             />
@@ -373,100 +330,66 @@ export const CustomersOrdersScreen: React.FC = () => {
               value={customEndDate}
               onChange={(e) => setCustomEndDate(e.target.value)}
               style={{
-                padding: '6px 10px',
-                borderRadius: '6px',
+                padding: '4px 8px',
+                borderRadius: '5px',
                 border: '1px solid var(--border-color)',
                 backgroundColor: 'var(--bg-input)',
-                fontSize: '12px',
+                fontSize: '11px',
                 color: 'var(--text-main)',
               }}
             />
           </div>
         )}
 
-        {/* Branch Filter */}
-        <select
-          value={selectedBranch}
-          onChange={(e) => setSelectedBranch(e.target.value)}
-          style={{
-            padding: '8px 12px',
-            borderRadius: 'var(--radius-md)',
-            border: '1px solid var(--border-color)',
-            backgroundColor: 'var(--bg-input)',
-            color: 'var(--text-main)',
-            fontSize: '12.5px',
-            fontWeight: 600,
-          }}
-        >
-          <option value="all">All Branches</option>
-          {branches.map((b) => (
-            <option key={b.id} value={b.id}>
-              {b.name}
-            </option>
-          ))}
-        </select>
+        {/* Divider */}
+        <div style={{ width: '1px', height: '18px', backgroundColor: 'var(--border-color)', flexShrink: 0 }} />
 
-        {/* Fulfillment Type Filter */}
-        <select
-          value={typeFilter}
-          onChange={(e) => setTypeFilter(e.target.value)}
+        {/* Search Input: Flexible and fits the remaining screen space (Like Order Hub) */}
+        <div
           style={{
-            padding: '8px 12px',
-            borderRadius: 'var(--radius-md)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '6px',
+            backgroundColor: 'var(--bg-card-subtle)',
             border: '1px solid var(--border-color)',
-            backgroundColor: 'var(--bg-input)',
-            color: 'var(--text-main)',
-            fontSize: '12.5px',
-            fontWeight: 600,
+            borderRadius: 'var(--radius-full)',
+            padding: '5px 10px',
+            flex: 1,
+            minWidth: '160px',
           }}
         >
-          <option value="all">All Order Types</option>
-          <option value="dine_in">🍽️ Dine-In</option>
-          <option value="takeaway">🛍️ Takeaway</option>
-          <option value="delivery">🛵 Delivery</option>
-        </select>
-
-        {/* Status Filter */}
-        <select
-          value={statusFilter}
-          onChange={(e) => setStatusFilter(e.target.value)}
-          style={{
-            padding: '8px 12px',
-            borderRadius: 'var(--radius-md)',
-            border: '1px solid var(--border-color)',
-            backgroundColor: 'var(--bg-input)',
-            color: 'var(--text-main)',
-            fontSize: '12.5px',
-            fontWeight: 600,
-          }}
-        >
-          <option value="all">All Prep Statuses</option>
-          <option value="active">Active In-Flight</option>
-          <option value="preparing">Now Preparing</option>
-          <option value="ready">Ready / Served</option>
-          <option value="completed">Completed</option>
-          <option value="cancelled">Cancelled</option>
-        </select>
-
-        {/* Payment Filter */}
-        <select
-          value={paymentFilter}
-          onChange={(e) => setPaymentFilter(e.target.value)}
-          style={{
-            padding: '8px 12px',
-            borderRadius: 'var(--radius-md)',
-            border: '1px solid var(--border-color)',
-            backgroundColor: 'var(--bg-input)',
-            color: 'var(--text-main)',
-            fontSize: '12.5px',
-            fontWeight: 600,
-          }}
-        >
-          <option value="all">All Payments</option>
-          <option value="paid">Paid</option>
-          <option value="unpaid">Unpaid</option>
-          <option value="refunded">Refunded</option>
-        </select>
+          <Search size={13} color="var(--text-muted)" />
+          <input
+            type="text"
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            placeholder="Search Order #, customer name, phone, dish..."
+            style={{
+              border: 'none',
+              outline: 'none',
+              backgroundColor: 'transparent',
+              fontSize: '12px',
+              width: '100%',
+              color: 'var(--text-main)',
+            }}
+          />
+          {search && (
+            <button
+              onClick={() => setSearch('')}
+              style={{
+                border: 'none',
+                background: 'transparent',
+                color: 'var(--text-muted)',
+                cursor: 'pointer',
+                padding: '0 2px',
+                display: 'flex',
+                alignItems: 'center',
+              }}
+            >
+              <X size={12} />
+            </button>
+          )}
+        </div>
       </div>
 
       {/* Orders Table Container (Scrollable when data is more than screen) */}
@@ -484,34 +407,37 @@ export const CustomersOrdersScreen: React.FC = () => {
         }}
       >
         <div style={{ overflowX: 'auto', overflowY: 'auto', flex: 1, maxHeight: 'calc(100vh - 290px)' }}>
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '12px' }}>
             <thead>
               <tr
                 style={{
                   backgroundColor: 'var(--bg-card-subtle)',
-                  borderBottom: '1px solid var(--border-color)',
+                  borderBottom: '1.5px solid var(--border-color)',
                   color: 'var(--text-muted)',
-                  fontSize: '11.5px',
+                  fontSize: '11px',
+                  fontWeight: 800,
                   textTransform: 'uppercase',
                   position: 'sticky',
                   top: 0,
                   zIndex: 10,
+                  height: '34px',
+                  lineHeight: '34px',
                 }}
               >
-                <th style={{ padding: '12px 18px' }}>Order #</th>
-                <th style={{ padding: '12px 18px' }}>Branch</th>
-                <th style={{ padding: '12px 18px' }}>Customer & Contact</th>
-                <th style={{ padding: '12px 18px' }}>Fulfillment</th>
-                <th style={{ padding: '12px 18px' }}>Prep Stage</th>
-                <th style={{ padding: '12px 18px' }}>Payment</th>
-                <th style={{ padding: '12px 18px', textAlign: 'right' }}>Total (PKR)</th>
-                <th style={{ padding: '12px 18px', textAlign: 'center' }}>Details</th>
+                <th style={{ padding: '0 12px', height: '34px' }}>Order #</th>
+                <th style={{ padding: '0 12px', height: '34px' }}>Branch</th>
+                <th style={{ padding: '0 12px', height: '34px' }}>Customer & Contact</th>
+                <th style={{ padding: '0 12px', height: '34px' }}>Fulfillment</th>
+                <th style={{ padding: '0 12px', height: '34px' }}>Prep Stage</th>
+                <th style={{ padding: '0 12px', height: '34px' }}>Payment</th>
+                <th style={{ padding: '0 12px', height: '34px', textAlign: 'right' }}>Total (PKR)</th>
+                <th style={{ padding: '0 12px', height: '34px', textAlign: 'center' }}>Details</th>
               </tr>
             </thead>
             <tbody>
               {filteredOrders.length === 0 ? (
                 <tr>
-                  <td colSpan={8} style={{ padding: '48px', textAlign: 'center', color: 'var(--text-muted)' }}>
+                  <td colSpan={8} style={{ padding: '36px', textAlign: 'center', color: 'var(--text-muted)' }}>
                     No customer orders found matching the selected filters.
                   </td>
                 </tr>
@@ -525,50 +451,71 @@ export const CustomersOrdersScreen: React.FC = () => {
                   return (
                     <tr
                       key={ord.id}
+                      onClick={() => setSelectedOrder(ord)}
                       style={{
                         borderBottom: '1px solid var(--border-color)',
-                        transition: 'background-color 0.15s ease',
+                        height: '38px',
+                        minHeight: '38px',
+                        cursor: 'pointer',
+                        transition: 'background-color 0.12s ease',
+                      }}
+                      onMouseEnter={(e) => {
+                        e.currentTarget.style.backgroundColor = 'var(--bg-card-subtle)';
+                      }}
+                      onMouseLeave={(e) => {
+                        e.currentTarget.style.backgroundColor = 'transparent';
                       }}
                     >
-                      <td style={{ padding: '14px 18px', fontWeight: 800, color: 'var(--text-main)', whiteSpace: 'nowrap' }}>
+                      <td style={{ padding: '0 12px', fontWeight: 800, color: 'var(--text-main)', whiteSpace: 'nowrap', fontSize: '12.5px' }}>
                         #{ord.orderNumber}
                       </td>
 
-                      <td style={{ padding: '14px 18px', color: 'var(--text-secondary)' }}>
-                        <div style={{ fontWeight: 650, color: 'var(--text-main)' }}>{branchName}</div>
+                      <td style={{ padding: '0 12px', color: 'var(--text-secondary)', whiteSpace: 'nowrap', fontSize: '12px' }}>
+                        <span style={{ fontWeight: 650, color: 'var(--text-main)' }}>{branchName}</span>
                       </td>
 
-                      <td style={{ padding: '14px 18px' }}>
-                        <div style={{ fontWeight: 750, color: 'var(--text-main)' }}>{ord.customerName}</div>
-                        <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>{ord.customerPhone}</div>
+                      <td style={{ padding: '0 12px', whiteSpace: 'nowrap', fontSize: '12px' }}>
+                        <span style={{ fontWeight: 750, color: 'var(--text-main)' }}>{ord.customerName}</span>
+                        {ord.customerPhone && (
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginLeft: '6px' }}>
+                            ({ord.customerPhone})
+                          </span>
+                        )}
                       </td>
 
-                      <td style={{ padding: '14px 18px' }}>
+                      <td style={{ padding: '0 12px', whiteSpace: 'nowrap' }}>
                         <span
                           style={{
-                            fontSize: '11px',
-                            fontWeight: 800,
-                            textTransform: 'uppercase',
-                            padding: '3px 8px',
-                            borderRadius: 'var(--radius-full)',
-                            backgroundColor: 'var(--bg-card-subtle)',
-                            color: 'var(--text-main)',
-                            border: '1px solid var(--border-color)',
+                            fontSize: '10.5px',
+                            fontWeight: 750,
+                            padding: '2px 7px',
+                            borderRadius: '4px',
+                            backgroundColor:
+                              ord.type === 'dine_in'
+                                ? 'rgba(234, 88, 12, 0.12)'
+                                : ord.type === 'takeaway'
+                                ? 'rgba(16, 185, 129, 0.12)'
+                                : 'rgba(59, 130, 246, 0.12)',
+                            color:
+                              ord.type === 'dine_in'
+                                ? '#EA580C'
+                                : ord.type === 'takeaway'
+                                ? '#059669'
+                                : '#2563EB',
                           }}
                         >
-                          {ord.type === 'dine_in' ? '🍽️ Dine-In' : ord.type === 'takeaway' ? '🛍️ Takeaway' : '🛵 Delivery'}
-                          {ord.tableNumber ? ` (T-${ord.tableNumber})` : ''}
+                          {ord.type === 'dine_in' ? `🍽️ Dine-In ${ord.tableNumber ? `(Table #${ord.tableNumber})` : ''}` : ord.type === 'takeaway' ? '🛍️ Takeaway' : '🛵 Delivery'}
                         </span>
                       </td>
 
-                      <td style={{ padding: '14px 18px' }}>
+                      <td style={{ padding: '0 12px', whiteSpace: 'nowrap' }}>
                         <span
                           style={{
-                            fontSize: '11px',
+                            fontSize: '10.5px',
                             fontWeight: 800,
                             textTransform: 'uppercase',
-                            padding: '3px 8px',
-                            borderRadius: 'var(--radius-full)',
+                            padding: '2px 7px',
+                            borderRadius: '4px',
                             backgroundColor: statusBadge.bg,
                             color: statusBadge.color,
                           }}
@@ -577,47 +524,50 @@ export const CustomersOrdersScreen: React.FC = () => {
                         </span>
                       </td>
 
-                      <td style={{ padding: '14px 18px' }}>
+                      <td style={{ padding: '0 12px', whiteSpace: 'nowrap', fontSize: '11.5px' }}>
                         <span
                           style={{
-                            fontSize: '11px',
+                            fontSize: '10.5px',
                             fontWeight: 800,
                             textTransform: 'uppercase',
-                            padding: '3px 8px',
-                            borderRadius: 'var(--radius-full)',
-                            backgroundColor: isRefunded ? '#FEE2E2' : isPaid ? '#DCFCE7' : '#FEF3C7',
-                            color: isRefunded ? '#B91C1C' : isPaid ? '#15803D' : '#B45309',
+                            padding: '2px 7px',
+                            borderRadius: '4px',
+                            backgroundColor: isRefunded ? '#FEE2E2' : isPaid ? '#DCFCE7' : 'var(--pay-unpaid-bg)',
+                            color: isRefunded ? '#B91C1C' : isPaid ? '#15803D' : 'var(--pay-unpaid-text)',
                           }}
                         >
                           {ord.paymentStatus}
                         </span>
-                        <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                          {ord.paymentMethod || 'Cash'}
-                        </div>
+                        <span style={{ fontSize: '10.5px', color: 'var(--text-muted)', marginLeft: '5px' }}>
+                          ({ord.paymentMethod || 'Cash'})
+                        </span>
                       </td>
 
-                      <td style={{ padding: '14px 18px', textAlign: 'right', fontWeight: 800, color: 'var(--primary)', fontSize: '14px' }}>
+                      <td style={{ padding: '0 12px', textAlign: 'right', fontWeight: 850, color: 'var(--primary)', fontSize: '13px', whiteSpace: 'nowrap' }}>
                         Rs. {Number(ord.total).toLocaleString()}
                       </td>
 
-                      <td style={{ padding: '14px 18px', textAlign: 'center' }}>
+                      <td style={{ padding: '0 12px', textAlign: 'center', whiteSpace: 'nowrap' }}>
                         <button
-                          onClick={() => setSelectedOrder(ord)}
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setSelectedOrder(ord);
+                          }}
                           style={{
-                            padding: '6px 12px',
-                            borderRadius: '6px',
+                            padding: '3px 8px',
+                            borderRadius: '5px',
                             backgroundColor: 'var(--bg-card-subtle)',
                             border: '1px solid var(--border-color)',
                             color: 'var(--primary)',
                             fontWeight: 750,
-                            fontSize: '11.5px',
+                            fontSize: '11px',
                             cursor: 'pointer',
                             display: 'inline-flex',
                             alignItems: 'center',
-                            gap: '4px',
+                            gap: '3px',
                           }}
                         >
-                          <Eye size={13} />
+                          <Eye size={11} />
                           <span>View</span>
                         </button>
                       </td>

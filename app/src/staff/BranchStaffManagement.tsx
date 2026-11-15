@@ -3,7 +3,8 @@
 import React, { useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { ModalConfirmation } from '@/components/common/ModalConfirmation';
-import { Role, User } from '@/types/cafe';
+import { Role, User, UserStatus } from '@/types/cafe';
+import { getBranchEmailSlug } from './BranchesAndStaff';
 import {
   Users,
   UserPlus,
@@ -53,6 +54,7 @@ export const BranchStaffManagementScreen: React.FC = () => {
   const [newStaffId, setNewStaffId] = useState('');
   const [newStaffRole, setNewStaffRole] = useState<Role>('cashier');
   const [newStaffPhone, setNewStaffPhone] = useState('');
+  const [newStaffInitial, setNewStaffInitial] = useState('');
   const [newStaffEmail, setNewStaffEmail] = useState('');
   const [newStaffPassword, setNewStaffPassword] = useState('password123');
   const [newStaffPin, setNewStaffPin] = useState('1234');
@@ -63,23 +65,24 @@ export const BranchStaffManagementScreen: React.FC = () => {
   const [editPhone, setEditPhone] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editPassword, setEditPassword] = useState('password123');
+  const [editStatus, setEditStatus] = useState<UserStatus>('active');
 
   const [deleteStaffModal, setDeleteStaffModal] = useState<User | null>(null);
   const [resetPinModal, setResetPinModal] = useState<{ user: User; newPin: string } | null>(null);
   const [copiedPin, setCopiedPin] = useState(false);
 
-  // STRICT REQUIREMENT: Only people who work in this branch UNDER the manager
+  // STRICT REQUIREMENT: Only subordinate staff who work in this branch UNDER the manager
+  // Cannot see/edit other managers, owner, or own account
   const subordinateRoles: Role[] = [
     'cashier',
     'kitchen_staff',
     'floor_staff',
-    'branch_representative',
     'delivery_staff',
   ];
 
   const subordinates = users.filter(
     (u) =>
-      (!u.branchId || u.branchId === currentBranch.id) &&
+      u.branchId === currentBranch.id &&
       subordinateRoles.includes(u.role)
   );
 
@@ -88,7 +91,6 @@ export const BranchStaffManagementScreen: React.FC = () => {
   const cashierCount = subordinates.filter((u) => u.role === 'cashier').length;
   const kitchenCount = subordinates.filter((u) => u.role === 'kitchen_staff').length;
   const floorCount = subordinates.filter((u) => u.role === 'floor_staff').length;
-  const repCount = subordinates.filter((u) => u.role === 'branch_representative').length;
   const deliveryCount = subordinates.filter((u) => u.role === 'delivery_staff').length;
 
   const filteredStaff = subordinates.filter((u) => {
@@ -108,11 +110,14 @@ export const BranchStaffManagementScreen: React.FC = () => {
   });
 
   // Action Handlers
+  const managerBranchSlug = getBranchEmailSlug(currentBranch.id, currentBranch.name, currentBranch.city);
+
   const handleOpenCreateStaff = () => {
     const randCode = Math.floor(1000 + Math.random() * 9000);
     setNewStaffId(`stf-${randCode}`);
     setNewStaffName('');
     setNewStaffPhone('+92 300 ');
+    setNewStaffInitial('');
     setNewStaffEmail('');
     setNewStaffPassword('password123');
     setNewStaffRole('cashier');
@@ -127,12 +132,15 @@ export const BranchStaffManagementScreen: React.FC = () => {
       return;
     }
     const staffId = newStaffId.trim() || `stf-${Date.now().toString().slice(-5)}`;
+    const cleanInitial = newStaffInitial.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '') || newStaffRole;
+    const finalEmail = `${cleanInitial}.${managerBranchSlug}@foodiescafe.pk`;
+
     createUser({
       id: staffId,
       name: newStaffName.trim(),
       role: newStaffRole,
       phone: newStaffPhone.trim() || '+92 300 0000000',
-      email: newStaffEmail.trim() || `${staffId}@foodiescafe.pk`,
+      email: finalEmail,
       password: newStaffPassword.trim() || 'password123',
       pin: newStaffPin.trim() || '1234',
       branchId: currentBranch.id,
@@ -141,7 +149,7 @@ export const BranchStaffManagementScreen: React.FC = () => {
     addToast({
       type: 'success',
       title: 'Staff ID & Account Issued',
-      message: `Staff ID ${staffId} created for ${newStaffName} (${newStaffRole.replace('_', ' ')}).`,
+      message: `Staff ID ${staffId} created for ${newStaffName} (${newStaffRole.replace('_', ' ')}) with reserved email ${finalEmail}.`,
     });
     setCreateStaffModalOpen(false);
   };
@@ -153,6 +161,7 @@ export const BranchStaffManagementScreen: React.FC = () => {
     setEditPhone(user.phone);
     setEditEmail(user.email || '');
     setEditPassword(user.password || 'password123');
+    setEditStatus(user.status || 'active');
   };
 
   const handleSaveEditSubmit = (e: React.FormEvent) => {
@@ -167,12 +176,13 @@ export const BranchStaffManagementScreen: React.FC = () => {
       role: editRole,
       phone: editPhone.trim(),
       email: editEmail.trim(),
+      status: editStatus,
       password: editPassword.trim() || editStaffModal.password || 'password123',
     });
     addToast({
       type: 'success',
       title: 'Staff ID Details Updated',
-      message: `Staff ID ${editStaffModal.id} (${editName}) updated successfully.`,
+      message: `Staff ID ${editStaffModal.id} (${editName}) updated successfully — Status: ${editStatus.toUpperCase()}.`,
     });
     setEditStaffModal(null);
   };
@@ -183,9 +193,8 @@ export const BranchStaffManagementScreen: React.FC = () => {
     addToast({
       type: nextStatus === 'suspended' ? 'warning' : 'success',
       title: nextStatus === 'suspended' ? 'Staff ID Suspended 🚫' : 'Staff ID Reactivated ✓',
-      message: `${user.name}'s account (${user.id}) is now ${nextStatus.toUpperCase()}. ${
-        nextStatus === 'suspended' ? 'Login is now blocked.' : 'Login access restored.'
-      }`,
+      message: `${user.name}'s account (${user.id}) is now ${nextStatus.toUpperCase()}. ${nextStatus === 'suspended' ? 'Login is now blocked.' : 'Login access restored.'
+        }`,
     });
   };
 
@@ -214,7 +223,7 @@ export const BranchStaffManagementScreen: React.FC = () => {
       setCopiedPin(true);
       setTimeout(() => setCopiedPin(false), 2000);
       addToast({ type: 'success', title: 'PIN Copied', message: `Copied PIN ${pin} to clipboard.` });
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const getRoleBadgeStyle = (role: Role) => {
@@ -225,8 +234,6 @@ export const BranchStaffManagementScreen: React.FC = () => {
         return { color: '#EA580C', bg: 'rgba(234, 88, 12, 0.12)', label: 'Kitchen Chef' };
       case 'floor_staff':
         return { color: '#2563EB', bg: '#DBEAFE', label: 'Floor Waiter' };
-      case 'branch_representative':
-        return { color: '#9333EA', bg: '#F3E8FF', label: 'Customer Services' };
       case 'delivery_staff':
         return { color: '#0891B2', bg: '#CFFAFE', label: 'Delivery Rider' };
       default:
@@ -365,7 +372,7 @@ export const BranchStaffManagementScreen: React.FC = () => {
             border: '1px solid var(--border-color)',
             padding: '10px 6px',
             display: 'grid',
-            gridTemplateColumns: 'repeat(5, 1fr)',
+            gridTemplateColumns: 'repeat(4, 1fr)',
             gap: '4px',
             textAlign: 'center',
           }}
@@ -381,10 +388,6 @@ export const BranchStaffManagementScreen: React.FC = () => {
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', minWidth: 0 }}>
             <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>Waiters</span>
             <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-main)' }}>{floorCount}</span>
-          </div>
-          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', minWidth: 0 }}>
-            <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>Support</span>
-            <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-main)' }}>{repCount}</span>
           </div>
           <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '3px', minWidth: 0 }}>
             <span style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', width: '100%' }}>Riders</span>
@@ -581,8 +584,6 @@ export const BranchStaffManagementScreen: React.FC = () => {
             <span>·</span>
             <span>Waiters: <strong>{floorCount}</strong></span>
             <span>·</span>
-            <span>Support: <strong>{repCount}</strong></span>
-            <span>·</span>
             <span>Riders: <strong>{deliveryCount}</strong></span>
           </div>
         </div>
@@ -612,19 +613,17 @@ export const BranchStaffManagementScreen: React.FC = () => {
 
           {/* Role Filters */}
           <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '2px' }}>
-            {(['all', 'cashier', 'kitchen_staff', 'floor_staff', 'branch_representative', 'delivery_staff'] as const).map((r) => {
+            {(['all', 'cashier', 'kitchen_staff', 'floor_staff', 'delivery_staff'] as const).map((r) => {
               const label =
                 r === 'all'
                   ? 'All Roles'
                   : r === 'kitchen_staff'
-                  ? 'Kitchen'
-                  : r === 'floor_staff'
-                  ? 'Waiters'
-                  : r === 'branch_representative'
-                  ? 'Support'
-                  : r === 'delivery_staff'
-                  ? 'Riders'
-                  : 'Cashiers';
+                    ? 'Kitchen'
+                    : r === 'floor_staff'
+                      ? 'Waiters'
+                      : r === 'delivery_staff'
+                        ? 'Riders'
+                        : 'Cashiers';
               const active = staffRoleFilter === r;
               return (
                 <button
@@ -724,7 +723,6 @@ export const BranchStaffManagementScreen: React.FC = () => {
               { id: 'cashier', label: 'Cashiers' },
               { id: 'kitchen_staff', label: 'Kitchen' },
               { id: 'floor_staff', label: 'Waiters' },
-              { id: 'branch_representative', label: 'Support' },
               { id: 'delivery_staff', label: 'Riders' },
             ].map(({ id, label }) => {
               const active = staffRoleFilter === id;
@@ -854,8 +852,8 @@ export const BranchStaffManagementScreen: React.FC = () => {
             No staff IDs found matching your filters for this branch. Click <strong>"+ Create Staff ID / Account"</strong> to issue an employee account.
           </div>
         ) : staffViewMode === 'cards' ? (
-          /* ID CARDS BADGES GRID */
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(290px, 1fr))', gap: '16px' }}>
+          /* ID CARDS BADGES GRID: Static width locked so single cards never blow up across screen */
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 340px))', gap: '16px', justifyContent: 'flex-start' }}>
             {filteredStaff.map((s) => {
               const roleBadge = getRoleBadgeStyle(s.role);
               const isSuspended = s.status === 'suspended';
@@ -875,6 +873,8 @@ export const BranchStaffManagementScreen: React.FC = () => {
                     justifyContent: 'space-between',
                     gap: '14px',
                     position: 'relative',
+                    maxWidth: '340px',
+                    width: '100%',
                     transition: 'all 0.15s ease',
                   }}
                 >
@@ -939,7 +939,7 @@ export const BranchStaffManagementScreen: React.FC = () => {
                       <div style={{ fontSize: '14.5px', fontWeight: 800, color: 'var(--text-main)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                         {s.name}
                       </div>
-                      <div style={{ marginTop: '3px' }}>
+                      <div style={{ marginTop: '3px', display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
                         <span
                           style={{
                             fontSize: '10.5px',
@@ -953,6 +953,33 @@ export const BranchStaffManagementScreen: React.FC = () => {
                         >
                           {roleBadge.label}
                         </span>
+
+                        {s.role === 'delivery_staff' && (
+                          <span
+                            style={{
+                              fontSize: '10px',
+                              fontWeight: 800,
+                              padding: '2px 8px',
+                              borderRadius: 'var(--radius-full)',
+                              backgroundColor: s.riderAvailability === 'offline' ? '#F1F5F9' : '#DCFCE7',
+                              color: s.riderAvailability === 'offline' ? '#475569' : '#15803D',
+                              border: `1px solid ${s.riderAvailability === 'offline' ? '#CBD5E1' : '#86EFAC'}`,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                          >
+                            <span
+                              style={{
+                                width: '6px',
+                                height: '6px',
+                                borderRadius: '50%',
+                                backgroundColor: s.riderAvailability === 'offline' ? '#64748B' : '#16A34A',
+                              }}
+                            />
+                            {s.riderAvailability === 'offline' ? 'Offline' : 'Online (Ready)'}
+                          </span>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1113,19 +1140,47 @@ export const BranchStaffManagementScreen: React.FC = () => {
                         {s.name}
                       </td>
                       <td style={{ padding: '12px 14px' }}>
-                        <span
-                          style={{
-                            fontSize: '11px',
-                            fontWeight: 800,
-                            textTransform: 'uppercase',
-                            padding: '3px 8px',
-                            borderRadius: 'var(--radius-full)',
-                            backgroundColor: roleBadge.bg,
-                            color: roleBadge.color,
-                          }}
-                        >
-                          {roleBadge.label}
-                        </span>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                          <span
+                            style={{
+                              fontSize: '11px',
+                              fontWeight: 800,
+                              textTransform: 'uppercase',
+                              padding: '3px 8px',
+                              borderRadius: 'var(--radius-full)',
+                              backgroundColor: roleBadge.bg,
+                              color: roleBadge.color,
+                            }}
+                          >
+                            {roleBadge.label}
+                          </span>
+                          {s.role === 'delivery_staff' && (
+                            <span
+                              style={{
+                                fontSize: '10px',
+                                fontWeight: 800,
+                                padding: '2px 7px',
+                                borderRadius: 'var(--radius-full)',
+                                backgroundColor: s.riderAvailability === 'offline' ? '#F1F5F9' : '#DCFCE7',
+                                color: s.riderAvailability === 'offline' ? '#475569' : '#15803D',
+                                border: `1px solid ${s.riderAvailability === 'offline' ? '#CBD5E1' : '#86EFAC'}`,
+                                display: 'inline-flex',
+                                alignItems: 'center',
+                                gap: '3px',
+                              }}
+                            >
+                              <span
+                                style={{
+                                  width: '5px',
+                                  height: '5px',
+                                  borderRadius: '50%',
+                                  backgroundColor: s.riderAvailability === 'offline' ? '#64748B' : '#16A34A',
+                                }}
+                              />
+                              {s.riderAvailability === 'offline' ? 'Offline' : 'Online'}
+                            </span>
+                          )}
+                        </div>
                       </td>
                       <td style={{ padding: '12px 14px', color: 'var(--text-secondary)' }}>
                         {s.phone}
@@ -1261,53 +1316,103 @@ export const BranchStaffManagementScreen: React.FC = () => {
             </div>
 
             <form onSubmit={handleCreateStaffSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              {/* Role Selection */}
               <div>
                 <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
-                  Full Name *
+                  Role Selection (Under Manager) *
                 </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="e.g. Tariq Jamil"
-                  value={newStaffName}
-                  onChange={(e) => setNewStaffName(e.target.value)}
+                <select
+                  value={newStaffRole}
+                  onChange={(e) => setNewStaffRole(e.target.value as Role)}
                   style={{
                     width: '100%',
-                    padding: '9px 12px',
+                    padding: '9px 10px',
                     borderRadius: 'var(--radius-md)',
                     border: '1px solid var(--border-color)',
                     backgroundColor: 'var(--bg-input)',
-                    fontSize: '13.5px',
+                    fontSize: '13px',
                     color: 'var(--text-main)',
+                    fontWeight: 650,
+                    boxSizing: 'border-box',
                   }}
-                />
+                >
+                  <option value="cashier">Cashier</option>
+                  <option value="kitchen_staff">Kitchen Chef</option>
+                  <option value="floor_staff">Floor Waiter</option>
+                  <option value="delivery_staff">Delivery Rider</option>
+                </select>
               </div>
+
+              {/* Reserved Branch Email Generation */}
+              {(() => {
+                return (
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
+                      Email *
+                    </label>
+                    <div style={{ display: 'flex', alignItems: 'stretch' }}>
+                      <input
+                        type="text"
+                        value={newStaffInitial}
+                        onChange={(e) => setNewStaffInitial(e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, ''))}
+                        placeholder="Enter email (e.g. asad, chef, cashier)"
+                        required
+                        style={{
+                          flex: 1,
+                          padding: '9px 12px',
+                          borderRadius: 'var(--radius-md) 0 0 var(--radius-md)',
+                          border: '1px solid var(--border-color)',
+                          borderRight: 'none',
+                          backgroundColor: 'var(--bg-input)',
+                          color: 'var(--text-main)',
+                          fontSize: '13px',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: '0 12px',
+                          backgroundColor: 'var(--bg-card-subtle)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '0 var(--radius-md) var(--radius-md) 0',
+                          fontSize: '13px',
+                          fontWeight: 750,
+                          color: 'var(--primary)',
+                          whiteSpace: 'nowrap',
+                          userSelect: 'none',
+                        }}
+                      >
+                        .{managerBranchSlug}@foodiescafe.pk
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
 
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
                 <div>
                   <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
-                    Staff Role (Under Manager) *
+                    Full Name *
                   </label>
-                  <select
-                    value={newStaffRole}
-                    onChange={(e) => setNewStaffRole(e.target.value as Role)}
+                  <input
+                    type="text"
+                    required
+                    placeholder="e.g. Tariq Jamil"
+                    value={newStaffName}
+                    onChange={(e) => setNewStaffName(e.target.value)}
                     style={{
                       width: '100%',
-                      padding: '9px 10px',
+                      padding: '9px 12px',
                       borderRadius: 'var(--radius-md)',
                       border: '1px solid var(--border-color)',
                       backgroundColor: 'var(--bg-input)',
-                      fontSize: '13px',
+                      fontSize: '13.5px',
                       color: 'var(--text-main)',
-                      fontWeight: 650,
+                      boxSizing: 'border-box',
                     }}
-                  >
-                    <option value="cashier">Cashier</option>
-                    <option value="kitchen_staff">Kitchen Chef</option>
-                    <option value="floor_staff">Floor Waiter</option>
-                    <option value="branch_representative">Customer Services</option>
-                    <option value="delivery_staff">Delivery Rider</option>
-                  </select>
+                  />
                 </div>
 
                 <div>
@@ -1329,78 +1434,60 @@ export const BranchStaffManagementScreen: React.FC = () => {
                       fontFamily: 'monospace',
                       fontWeight: 750,
                       color: 'var(--text-main)',
+                      boxSizing: 'border-box',
                     }}
                   />
                 </div>
               </div>
 
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
-                  Mobile Phone Number *
-                </label>
-                <input
-                  type="text"
-                  required
-                  placeholder="+92 300 1234567"
-                  value={newStaffPhone}
-                  onChange={(e) => setNewStaffPhone(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '9px 12px',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'var(--bg-input)',
-                    fontSize: '13.5px',
-                    color: 'var(--text-main)',
-                  }}
-                />
-              </div>
-
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
-                  Email Address (Optional)
-                </label>
-                <input
-                  type="email"
-                  placeholder="e.g. staff@foodiescafe.pk"
-                  value={newStaffEmail}
-                  onChange={(e) => setNewStaffEmail(e.target.value)}
-                  style={{
-                    width: '100%',
-                    padding: '9px 12px',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid var(--border-color)',
-                    backgroundColor: 'var(--bg-input)',
-                    fontSize: '13.5px',
-                    color: 'var(--text-main)',
-                  }}
-                />
-              </div>
-
-              {/* Create Password Option */}
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
-                  Create Password *
-                </label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '0 10px' }}>
-                  <Lock size={15} color="var(--primary)" />
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
+                    Mobile Phone Number *
+                  </label>
                   <input
                     type="text"
                     required
-                    placeholder="Enter login password (e.g. password123)"
-                    value={newStaffPassword}
-                    onChange={(e) => setNewStaffPassword(e.target.value)}
+                    placeholder="+92 300 1234567"
+                    value={newStaffPhone}
+                    onChange={(e) => setNewStaffPhone(e.target.value)}
                     style={{
                       width: '100%',
-                      padding: '9px 0',
-                      border: 'none',
-                      outline: 'none',
-                      backgroundColor: 'transparent',
+                      padding: '9px 12px',
+                      borderRadius: 'var(--radius-md)',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'var(--bg-input)',
                       fontSize: '13.5px',
                       color: 'var(--text-main)',
-                      fontWeight: 650,
+                      boxSizing: 'border-box',
                     }}
                   />
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
+                    Create Password *
+                  </label>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: 'var(--radius-md)', padding: '0 10px' }}>
+                    <Lock size={15} color="var(--primary)" />
+                    <input
+                      type="text"
+                      required
+                      placeholder="e.g. password123"
+                      value={newStaffPassword}
+                      onChange={(e) => setNewStaffPassword(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '9px 0',
+                        border: 'none',
+                        outline: 'none',
+                        backgroundColor: 'transparent',
+                        fontSize: '13px',
+                        color: 'var(--text-main)',
+                        fontWeight: 650,
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1574,7 +1661,6 @@ export const BranchStaffManagementScreen: React.FC = () => {
                   <option value="cashier">Cashier</option>
                   <option value="kitchen_staff">Kitchen Chef</option>
                   <option value="floor_staff">Floor Waiter</option>
-                  <option value="branch_representative">Customer Services</option>
                   <option value="delivery_staff">Delivery Rider</option>
                 </select>
               </div>
@@ -1645,6 +1731,31 @@ export const BranchStaffManagementScreen: React.FC = () => {
                     }}
                   />
                 </div>
+              </div>
+
+              {/* Account Status */}
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
+                  Account Status
+                </label>
+                <select
+                  value={editStatus}
+                  onChange={(e) => setEditStatus(e.target.value as UserStatus)}
+                  style={{
+                    width: '100%',
+                    padding: '9px 10px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-input)',
+                    fontSize: '13px',
+                    color: 'var(--text-main)',
+                    fontWeight: 700,
+                  }}
+                >
+                  <option value="active">Active (Login Allowed)</option>
+                  <option value="suspended">Suspended (Access Temporarily Blocked)</option>
+                  <option value="deactivated">Deactivated (Account Closed)</option>
+                </select>
               </div>
 
               <div style={{ display: 'flex', gap: '10px', marginTop: '12px' }}>

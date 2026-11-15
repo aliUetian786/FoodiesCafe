@@ -4,6 +4,7 @@ import React, { useState, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
 import { MenuItem, HeroBanner, DealCard } from '@/types/cafe';
 import { ModalConfirmation } from '@/components/common/ModalConfirmation';
+import { SheetImportModal } from '@/staff/SheetImportModal';
 import {
   UtensilsCrossed,
   Plus,
@@ -20,6 +21,7 @@ import {
   AlertCircle,
   X,
   FileText,
+  FileSpreadsheet,
   Sparkles,
   Clock,
   Check,
@@ -28,6 +30,8 @@ import {
   Flame,
   Headphones,
   Timer,
+  Upload,
+  Bell,
 } from 'lucide-react';
 
 export const MenuPricesScreen: React.FC = () => {
@@ -41,14 +45,13 @@ export const MenuPricesScreen: React.FC = () => {
     updateMenuItem,
     addMenuItem,
     deleteMenuItem,
-    allowRepresentativeMenuEdit,
-    setAllowRepresentativeMenuEdit,
+    toggleMenuItemBranchAvailability,
+    updateMenuItemPrice,
+    updateMenuItemBranchPrice,
     footerSettings,
     updateFooterSettings,
     heroBanners,
     dealCard,
-    allowRepresentativeDirectPublish,
-    setAllowRepresentativeDirectPublish,
     pendingApprovalRequests,
     updateHeroBanner,
     addHeroBanner,
@@ -57,23 +60,33 @@ export const MenuPricesScreen: React.FC = () => {
     approveRequest,
     rejectRequest,
     currentRole,
+    currentBranch,
     addToast,
   } = useApp();
 
-  const [activeTab, setActiveTab] = useState<'items' | 'categories' | 'banners' | 'footer' | 'permissions'>('items');
+  const isOwner = currentRole === 'platform_owner';
+  const isBranchScoped = currentRole === 'branch_manager' || currentRole === 'cashier';
+  const [selectedBranchScope, setSelectedBranchScope] = useState<string>(isBranchScoped ? currentBranch.id : 'all');
+  const activeBranchId = isBranchScoped ? currentBranch.id : selectedBranchScope;
+  const isGlobalScope = isOwner && selectedBranchScope === 'all';
+
+  useEffect(() => {
+    if (isBranchScoped) {
+      setSelectedBranchScope(currentBranch.id);
+    }
+  }, [isBranchScoped, currentBranch.id]);
+
+  const [activeTab, setActiveTab] = useState<'items' | 'categories' | 'banners' | 'footer'>('items');
   const [selectedCategoryFilter, setSelectedCategoryFilter] = useState<string>('all');
 
-  // Permission check: branch managers, platform owners, and branch representatives (the concerned persons) can edit
-  const canEdit =
-    currentRole === 'branch_manager' ||
-    currentRole === 'platform_owner' ||
-    currentRole === 'branch_representative' ||
-    allowRepresentativeMenuEdit;
+  // Permission check: branch managers, platform owners, and cashiers can edit
+  const canEdit = currentRole === 'branch_manager' || currentRole === 'platform_owner' || currentRole === 'cashier';
 
   // Item Editor State
   const [editingItem, setEditingItem] = useState<MenuItem | null>(null);
   const [isNewItem, setIsNewItem] = useState(false);
   const [deleteItemTarget, setDeleteItemTarget] = useState<MenuItem | null>(null);
+  const [sheetImportOpen, setSheetImportOpen] = useState(false);
 
   // Item Form Fields (All Requirements)
   const [itemName, setItemName] = useState('');
@@ -136,8 +149,113 @@ export const MenuPricesScreen: React.FC = () => {
   const [dealImageUrl, setDealImageUrl] = useState(dealCard.imageUrl);
   const [dealCategory, setDealCategory] = useState(dealCard.categoryLink || categories[0] || 'Biryani & Rice');
 
+  // Local Storage Deal Photos Gallery (User Request: Deals section takes photos from local storage)
+  const [localDealPhotos, setLocalDealPhotos] = useState<string[]>(() => {
+    const defaults = ['/food-biryani.jpg', '/hero-bg.jpg'];
+    if (typeof window === 'undefined') return defaults;
+    try {
+      const raw = localStorage.getItem('foodies_local_deal_photos');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch { }
+    return defaults;
+  });
+
+  // Web Home Notification Banner State (Below Order Row on Web Home)
+  const [homeNotifEnabled, setHomeNotifEnabled] = useState<boolean>(footerSettings.homeNotificationEnabled ?? true);
+  const [homeNotifBadge, setHomeNotifBadge] = useState<string>(footerSettings.homeNotificationBadge || 'LIVE UPDATE');
+  const [homeNotifTitle, setHomeNotifTitle] = useState<string>(footerSettings.homeNotificationTitle || 'Fresh Kitchen Dispatch & Special Deals Active');
+  const [homeNotifMessage, setHomeNotifMessage] = useState<string>(
+    footerSettings.homeNotificationMessage || 'Order Dine-In, Takeaway or Express Delivery directly from your nearest Foodies Cafe branch.'
+  );
+  const [homeNotifType, setHomeNotifType] = useState<'promo' | 'info' | 'warning' | 'success'>(footerSettings.homeNotificationType || 'promo');
+
+  useEffect(() => {
+    setDealTitle(dealCard.title);
+    setDealSubtitle(dealCard.subtitle);
+    setDealPrice(dealCard.price);
+    setDealTag(dealCard.tag);
+    setDealImageUrl(dealCard.imageUrl);
+    setDealCategory(dealCard.categoryLink || categories[0] || 'Biryani & Rice');
+  }, [dealCard, categories]);
+
+  useEffect(() => {
+    setHomeNotifEnabled(footerSettings.homeNotificationEnabled ?? true);
+    setHomeNotifBadge(footerSettings.homeNotificationBadge || 'LIVE UPDATE');
+    setHomeNotifTitle(footerSettings.homeNotificationTitle || 'Fresh Kitchen Dispatch & Special Deals Active');
+    setHomeNotifMessage(
+      footerSettings.homeNotificationMessage || 'Order Dine-In, Takeaway or Express Delivery directly from your nearest Foodies Cafe branch.'
+    );
+    setHomeNotifType(footerSettings.homeNotificationType || 'promo');
+  }, [footerSettings]);
+
+  const savePhotoToLocalGallery = (photoUrl: string) => {
+    if (!photoUrl || typeof window === 'undefined') return;
+    setLocalDealPhotos((prev) => {
+      const next = [photoUrl, ...prev.filter((p) => p !== photoUrl)].slice(0, 12);
+      try {
+        localStorage.setItem('foodies_local_deal_photos', JSON.stringify(next));
+      } catch {
+        addToast({ type: 'warning', title: 'Storage Limit', message: 'Browser local storage is nearly full. Try a smaller image.' });
+      }
+      return next;
+    });
+  };
+
+  const handleLocalStoragePhotoUpload = (file: File, applyUrl: (dataUrl: string) => void) => {
+    if (!file) return;
+    if (file.size > 1.8 * 1024 * 1024) {
+      addToast({ type: 'warning', title: 'Large Image', message: 'Please pick a photo under 1.8MB so it stores cleanly in local storage.' });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const result = reader.result as string;
+      if (result) {
+        savePhotoToLocalGallery(result);
+        applyUrl(result);
+        addToast({ type: 'success', title: 'Saved in Local Storage', message: 'Deal photo loaded and stored locally.' });
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
+  // Dish Photo Upload Ref & State
+  const itemFileInputRef = React.useRef<HTMLInputElement | null>(null);
+  const [uploadedFileName, setUploadedFileName] = useState<string | null>(null);
+
+  const handleImageFileSelect = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 5 * 1024 * 1024) {
+      addToast({
+        type: 'warning',
+        title: 'Image File Too Large',
+        message: 'Please select an image smaller than 5 MB.',
+      });
+      return;
+    }
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      const result = event.target?.result as string;
+      if (result) {
+        setItemImage(result);
+        setUploadedFileName(file.name);
+        addToast({
+          type: 'success',
+          title: 'Photo Uploaded ✓',
+          message: `${file.name} ready for this menu item.`,
+        });
+      }
+    };
+    reader.readAsDataURL(file);
+  };
+
   const openNewItemModal = () => {
     setIsNewItem(true);
+    setUploadedFileName(null);
     setEditingItem({
       id: `m-${Date.now()}`,
       name: '',
@@ -160,12 +278,13 @@ export const MenuPricesScreen: React.FC = () => {
 
   const openEditItemModal = (item: MenuItem) => {
     setIsNewItem(false);
+    setUploadedFileName(null);
     setEditingItem(item);
     setItemName(item.name);
     setItemCategory(item.category);
     setItemPrice(item.basePrice);
     setItemDesc(item.description);
-    setItemImage(item.image || '/food-biryani.jpg');
+    setItemImage(item.image || '');
     setItemAvailable(item.isAvailable);
     setItemBranchAvail(item.branchAvailability || { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true });
     setItemBranchPrices(item.branchPriceOverrides || {});
@@ -180,7 +299,7 @@ export const MenuPricesScreen: React.FC = () => {
       name: itemName.trim(),
       category: itemCategory,
       basePrice: Number(itemPrice) || 0,
-      image: itemImage.trim() || '/food-biryani.jpg',
+      image: itemImage.trim(),
       description: itemDesc.trim(),
       isAvailable: itemAvailable,
       branchAvailability: itemBranchAvail,
@@ -378,57 +497,61 @@ export const MenuPricesScreen: React.FC = () => {
             }}
           >
             <Headphones size={16} />
-            <span>Customer Services</span>
+            <span>Helpline & Order Flow</span>
           </button>
-
-          {(currentRole === 'branch_manager' || currentRole === 'platform_owner') && (
-            <button
-              onClick={() => setActiveTab('permissions')}
-              className="menu-mgmt-tab-btn"
-              style={{
-                padding: '10px 18px',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: activeTab === 'permissions' ? 'var(--primary)' : 'var(--bg-card)',
-                color: activeTab === 'permissions' ? '#FFFFFF' : 'var(--text-main)',
-                border: activeTab === 'permissions' ? '1px solid var(--primary)' : '1px solid var(--border-color)',
-                fontWeight: 700,
-                fontSize: '13.5px',
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-            >
-              <ShieldCheck size={16} />
-              <span>Rep Permissions</span>
-            </button>
-          )}
         </div>
 
-        {/* Create New Item in line with tabs for desktop (single + sign) */}
-        {canEdit && activeTab === 'items' && (
-          <button
-            onClick={openNewItemModal}
-            className="menu-create-btn-desktop"
-            style={{
-              padding: '10px 18px',
-              borderRadius: 'var(--radius-md)',
-              backgroundColor: 'var(--primary)',
-              color: '#FFFFFF',
-              fontWeight: 800,
-              fontSize: '13.5px',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              cursor: 'pointer',
-              boxShadow: '0 4px 14px var(--primary-glow)',
-              border: 'none',
-              marginLeft: 'auto',
-            }}
-          >
-            <Plus size={16} />
-            <span>Create New Menu Item</span>
-          </button>
+        {/* Action Buttons in line with tabs for desktop */}
+        {canEdit && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginLeft: 'auto', flexWrap: 'wrap' }}>
+            {(currentRole === 'branch_manager' || currentRole === 'platform_owner' || canEdit) && (
+              <button
+                type="button"
+                onClick={() => setSheetImportOpen(true)}
+                style={{
+                  padding: '10px 16px',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: '#FFFFFF',
+                  color: 'var(--primary)',
+                  fontWeight: 800,
+                  fontSize: '13px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  cursor: 'pointer',
+                  border: '1.5px solid var(--primary)',
+                  boxShadow: '0 2px 8px rgba(217, 79, 4, 0.08)',
+                }}
+              >
+                <FileSpreadsheet size={16} />
+                <span>Import Excel / Sheet</span>
+              </button>
+            )}
+
+            {activeTab === 'items' && (
+              <button
+                onClick={openNewItemModal}
+                className="menu-create-btn-desktop"
+                style={{
+                  padding: '10px 18px',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: 'var(--primary)',
+                  color: '#FFFFFF',
+                  fontWeight: 800,
+                  fontSize: '13.5px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  cursor: 'pointer',
+                  boxShadow: '0 4px 14px var(--primary-glow)',
+                  border: 'none',
+                }}
+              >
+                <Plus size={16} />
+                <span>Create New Menu Item</span>
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -444,7 +567,92 @@ export const MenuPricesScreen: React.FC = () => {
             overflow: 'hidden',
           }}
         >
-          {/* Row 2: Categories filter bar (3/4 on small screens) + New Item action (1/4 on small screens) */}
+          {/* Branch Scope Selector: Owner can toggle between All Branches and specific branches; Manager/Cashier is locked to their branch */}
+          {isOwner ? (
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                overflowX: 'auto',
+                paddingBottom: '2px',
+                flexShrink: 0,
+              }}
+            >
+              <button
+                type="button"
+                onClick={() => setSelectedBranchScope('all')}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 'var(--radius-full)',
+                  backgroundColor: isGlobalScope ? 'var(--primary)' : 'var(--bg-card)',
+                  color: isGlobalScope ? '#FFFFFF' : 'var(--text-main)',
+                  border: '1.5px solid ' + (isGlobalScope ? 'var(--primary)' : 'var(--border-color)'),
+                  fontSize: '12.5px',
+                  fontWeight: 750,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  whiteSpace: 'nowrap',
+                  boxShadow: isGlobalScope ? '0 2px 8px var(--primary-glow)' : 'none',
+                }}
+              >
+                <span>🌐 All Branches (Master Catalog)</span>
+              </button>
+              {branches.map((b) => {
+                const isSelected = selectedBranchScope === b.id;
+                return (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => setSelectedBranchScope(b.id)}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: 'var(--radius-full)',
+                      backgroundColor: isSelected ? 'var(--primary)' : 'var(--bg-card)',
+                      color: isSelected ? '#FFFFFF' : 'var(--text-main)',
+                      border: '1.5px solid ' + (isSelected ? 'var(--primary)' : 'var(--border-color)'),
+                      fontSize: '12.5px',
+                      fontWeight: 750,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '6px',
+                      whiteSpace: 'nowrap',
+                      boxShadow: isSelected ? '0 2px 8px var(--primary-glow)' : 'none',
+                    }}
+                  >
+                    <MapPin size={13} />
+                    <span>{b.name}</span>
+                  </button>
+                );
+              })}
+            </div>
+          ) : (
+            <div
+              style={{
+                padding: '8px 14px',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'var(--primary-light)',
+                border: '1px solid var(--primary)',
+                color: 'var(--primary)',
+                fontSize: '12.5px',
+                fontWeight: 700,
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                flexShrink: 0,
+              }}
+            >
+              <MapPin size={15} />
+              <span>
+                {currentRole === 'cashier' ? 'Cashier Desk View' : 'Branch Scoped'}: Displaying live stock & pricing exclusively for <strong>{currentBranch.name}</strong>.
+              </span>
+            </div>
+          )}
+
+          {/* Row 2: Categories filter bar + New Item action */}
           <div
             className="menu-second-row"
             style={{
@@ -556,114 +764,161 @@ export const MenuPricesScreen: React.FC = () => {
                 <tr style={{ borderBottom: '1px solid var(--border-color)', color: 'var(--text-muted)', fontSize: '12px', textTransform: 'uppercase' }}>
                   <th className="menu-col-dish" style={{ padding: '12px 18px', backgroundColor: 'var(--bg-card-subtle)' }}>Dish / Product</th>
                   <th className="menu-col-category" style={{ padding: '12px 18px', backgroundColor: 'var(--bg-card-subtle)', width: '130px' }}>Category</th>
-                  <th className="menu-col-price" style={{ padding: '12px 18px', backgroundColor: 'var(--bg-card-subtle)', width: '110px' }}>Price</th>
-                  <th className="menu-col-avail" style={{ padding: '12px 18px', backgroundColor: 'var(--bg-card-subtle)', width: '120px' }}>Availability</th>
+                  <th className="menu-col-price" style={{ padding: '12px 18px', backgroundColor: 'var(--bg-card-subtle)', width: '130px' }}>
+                    {isGlobalScope ? 'Base Price' : 'Branch Price'}
+                  </th>
+                  <th className="menu-col-avail" style={{ padding: '12px 18px', backgroundColor: 'var(--bg-card-subtle)', width: '140px' }}>
+                    {isGlobalScope ? 'Global Stock' : 'Branch Stock'}
+                  </th>
                   <th className="menu-col-actions" style={{ padding: '12px 18px', textAlign: 'right', backgroundColor: 'var(--bg-card-subtle)', width: '140px', minWidth: '130px', whiteSpace: 'nowrap' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
                 {menuItems
                   .filter((item) => selectedCategoryFilter === 'all' || item.category === selectedCategoryFilter)
-                  .map((item) => (
-                  <tr key={item.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
-                    <td className="menu-col-dish" style={{ padding: '14px 18px', overflow: 'hidden' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, width: '100%', overflow: 'hidden' }}>
-                        <img src={item.image} alt={item.name} style={{ width: '42px', height: '42px', borderRadius: '8px', objectFit: 'cover', flexShrink: 0 }} />
-                        <div style={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
-                          <div
-                            title={item.name}
-                            style={{
-                              fontWeight: 700,
-                              color: 'var(--text-main)',
-                              fontSize: '13px',
-                              overflow: 'hidden',
-                              textOverflow: 'ellipsis',
-                              whiteSpace: 'nowrap',
-                              display: 'block',
-                              maxWidth: '100%',
-                            }}
-                          >
-                            {item.name}
+                  .map((item) => {
+                    const branchOverride = item.branchPriceOverrides?.[activeBranchId];
+                    const hasOverride = !isGlobalScope && branchOverride !== undefined && !isNaN(Number(branchOverride)) && Number(branchOverride) > 0;
+                    const effectivePrice = hasOverride ? Number(branchOverride) : item.basePrice;
+
+                    const branchAvail = item.branchAvailability?.[activeBranchId];
+                    const isEffectiveAvailable = isGlobalScope
+                      ? (item.isAvailable ?? true)
+                      : ((branchAvail !== undefined ? Boolean(branchAvail) : true) && (item.isAvailable ?? true));
+
+                    return (
+                      <tr key={item.id} style={{ borderBottom: '1px solid var(--border-color)' }}>
+                        <td className="menu-col-dish" style={{ padding: '14px 18px', overflow: 'hidden' }}>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', minWidth: 0, width: '100%', overflow: 'hidden' }}>
+                            <img src={item.image} alt={item.name} style={{ width: '42px', height: '42px', borderRadius: '8px', objectFit: 'cover', flexShrink: 0 }} />
+                            <div style={{ minWidth: 0, flex: 1, overflow: 'hidden' }}>
+                              <div
+                                title={item.name}
+                                style={{
+                                  fontWeight: 700,
+                                  color: 'var(--text-main)',
+                                  fontSize: '13px',
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                  display: 'block',
+                                  maxWidth: '100%',
+                                }}
+                              >
+                                {item.name}
+                              </div>
+                              <div className="menu-dish-desc" style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                                {item.description}
+                              </div>
+                            </div>
                           </div>
-                          <div className="menu-dish-desc" style={{ fontSize: '12px', color: 'var(--text-muted)', maxWidth: '100%', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-                            {item.description}
-                          </div>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="menu-col-category" style={{ padding: '14px 18px', color: 'var(--text-secondary)', width: '130px' }}>
-                      <span style={{ padding: '3px 8px', borderRadius: '4px', backgroundColor: 'var(--bg-card-subtle)', fontWeight: 600 }}>
-                        {item.category}
-                      </span>
-                    </td>
-                    <td className="menu-col-price" style={{ padding: '14px 18px', fontWeight: 800, color: 'var(--primary)', fontSize: '15px', width: '110px' }}>
-                      Rs. {item.basePrice.toLocaleString()}
-                    </td>
-                    <td className="menu-col-avail" style={{ padding: '14px 18px', width: '120px' }}>
-                      <span
-                        style={{
-                          fontSize: '11px',
-                          fontWeight: 800,
-                          padding: '3px 8px',
-                          borderRadius: 'var(--radius-full)',
-                          backgroundColor: item.isAvailable ? 'var(--status-ready-bg)' : 'var(--status-cancelled-bg)',
-                          color: item.isAvailable ? 'var(--status-ready-text)' : 'var(--status-cancelled-text)',
-                        }}
-                      >
-                        {item.isAvailable ? 'IN STOCK' : 'OUT OF STOCK'}
-                      </span>
-                    </td>
-                    <td className="menu-col-actions" style={{ padding: '14px 18px', textAlign: 'right', width: '140px', minWidth: '130px', whiteSpace: 'nowrap' }}>
-                      {canEdit ? (
-                        <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                        </td>
+                        <td className="menu-col-category" style={{ padding: '14px 18px', color: 'var(--text-secondary)', width: '130px' }}>
+                          <span style={{ padding: '3px 8px', borderRadius: '4px', backgroundColor: 'var(--bg-card-subtle)', fontWeight: 600 }}>
+                            {item.category}
+                          </span>
+                        </td>
+                        <td className="menu-col-price" style={{ padding: '14px 18px', fontWeight: 800, color: 'var(--primary)', fontSize: '15px', width: '130px' }}>
+                          <div>Rs. {effectivePrice.toLocaleString()}</div>
+                          {hasOverride ? (
+                            <span style={{ fontSize: '10px', color: 'var(--primary)', fontWeight: 750, display: 'block' }}>
+                              Branch Override (Base: Rs. {item.basePrice.toLocaleString()})
+                            </span>
+                          ) : isGlobalScope ? (
+                            <span style={{ fontSize: '10px', color: 'var(--text-muted)', display: 'block' }}>
+                              Master Base Price
+                            </span>
+                          ) : (
+                            <span style={{ fontSize: '10px', color: 'var(--text-muted)', display: 'block' }}>
+                              Base: Rs. {item.basePrice.toLocaleString()}
+                            </span>
+                          )}
+                        </td>
+                        <td className="menu-col-avail" style={{ padding: '14px 18px', width: '140px' }}>
                           <button
-                            onClick={() => openEditItemModal(item)}
+                            type="button"
+                            onClick={() => {
+                              if (isGlobalScope) {
+                                updateMenuItem({ ...item, isAvailable: !item.isAvailable });
+                              } else {
+                                toggleMenuItemBranchAvailability(item.id, activeBranchId);
+                              }
+                            }}
+                            title={isGlobalScope ? 'Click to toggle master availability for all branches' : `Click to toggle availability for ${currentBranch.name}`}
                             style={{
-                              padding: '6px 11px',
-                              borderRadius: 'var(--radius-md)',
-                              backgroundColor: 'var(--bg-card-subtle)',
-                              border: '1px solid var(--border-color)',
-                              color: 'var(--text-main)',
-                              fontWeight: 700,
-                              fontSize: '12.5px',
+                              fontSize: '11px',
+                              fontWeight: 800,
+                              padding: '4px 10px',
+                              borderRadius: 'var(--radius-full)',
+                              backgroundColor: isEffectiveAvailable ? 'var(--status-ready-bg)' : 'var(--status-cancelled-bg)',
+                              color: isEffectiveAvailable ? 'var(--status-ready-text)' : 'var(--status-cancelled-text)',
+                              border: '1px solid ' + (isEffectiveAvailable ? '#86EFAC' : '#FCA5A5'),
                               cursor: 'pointer',
                               display: 'inline-flex',
                               alignItems: 'center',
-                              gap: '4px',
-                              whiteSpace: 'nowrap',
-                              flexShrink: 0,
+                              gap: '6px',
+                              transition: 'all 0.15s ease',
                             }}
                           >
-                            <Edit2 size={13} color="var(--primary)" />
-                            <span>Edit</span>
+                            <span style={{ width: '7px', height: '7px', borderRadius: '50%', backgroundColor: isEffectiveAvailable ? '#16A34A' : '#DC2626' }} />
+                            <span>{isEffectiveAvailable ? 'IN STOCK' : 'OUT OF STOCK'}</span>
                           </button>
-                          <button
-                            onClick={() => setDeleteItemTarget(item)}
-                            style={{
-                              padding: '6px 10px',
-                              borderRadius: 'var(--radius-md)',
-                              backgroundColor: 'var(--status-cancelled-bg)',
-                              border: '1px solid var(--border-color)',
-                              color: 'var(--status-cancelled-text)',
-                              fontWeight: 700,
-                              fontSize: '12.5px',
-                              cursor: 'pointer',
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              justifyContent: 'center',
-                              whiteSpace: 'nowrap',
-                              flexShrink: 0,
-                            }}
-                          >
-                            <Trash2 size={13} />
-                          </button>
-                        </div>
-                      ) : (
-                        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Read Only</span>
-                      )}
-                    </td>
-                  </tr>
-                ))}
+                        </td>
+                        <td className="menu-col-actions" style={{ padding: '14px 18px', textAlign: 'right', width: '140px', minWidth: '130px', whiteSpace: 'nowrap' }}>
+                          {canEdit ? (
+                            <div style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'flex-end', gap: '6px', whiteSpace: 'nowrap', flexShrink: 0 }}>
+                              <button
+                                onClick={() => openEditItemModal(item)}
+                                style={{
+                                  padding: '6px 11px',
+                                  borderRadius: 'var(--radius-md)',
+                                  backgroundColor: 'var(--bg-card-subtle)',
+                                  border: '1px solid var(--border-color)',
+                                  color: 'var(--text-main)',
+                                  fontWeight: 700,
+                                  fontSize: '12.5px',
+                                  cursor: 'pointer',
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '4px',
+                                  whiteSpace: 'nowrap',
+                                  flexShrink: 0,
+                                }}
+                              >
+                                <Edit2 size={13} color="var(--primary)" />
+                                <span>Edit</span>
+                              </button>
+                              {isOwner && isGlobalScope && (
+                                <button
+                                  onClick={() => setDeleteItemTarget(item)}
+                                  style={{
+                                    padding: '6px 10px',
+                                    borderRadius: 'var(--radius-md)',
+                                    backgroundColor: 'var(--status-cancelled-bg)',
+                                    border: '1px solid var(--border-color)',
+                                    color: 'var(--status-cancelled-text)',
+                                    fontWeight: 700,
+                                    fontSize: '12.5px',
+                                    cursor: 'pointer',
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    whiteSpace: 'nowrap',
+                                    flexShrink: 0,
+                                  }}
+                                  title="Delete dish from master catalog"
+                                >
+                                  <Trash2 size={13} />
+                                </button>
+                              )}
+                            </div>
+                          ) : (
+                            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Read Only</span>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
               </tbody>
             </table>
           </div>
@@ -888,10 +1143,10 @@ export const MenuPricesScreen: React.FC = () => {
                 </div>
                 <div>
                   <h3 style={{ fontSize: '17px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-                    Customer Order Routing to Customer Services
+                    Customer Order Routing to Cashier Desk
                   </h3>
                   <p style={{ fontSize: '12.5px', color: 'var(--text-secondary)', margin: '2px 0 0' }}>
-                    Control how newly placed customer orders route to Customer Services before reaching the Kitchen
+                    Control how newly placed customer orders route to Cashier Desk before reaching the Kitchen
                   </p>
                 </div>
               </div>
@@ -909,10 +1164,10 @@ export const MenuPricesScreen: React.FC = () => {
                   alignItems: 'center',
                   gap: '6px',
                 }}
-                title={orderRoutingSupportFirst ? 'Orders route to Customer Services first' : 'Orders go straight to kitchen'}
+                title={orderRoutingSupportFirst ? 'Orders route to Cashier Desk first' : 'Orders go straight to kitchen'}
               >
                 <span style={{ fontSize: '12px', fontWeight: 700, color: orderRoutingSupportFirst ? 'var(--primary)' : 'var(--text-muted)' }}>
-                  {orderRoutingSupportFirst ? 'Route to Support: ACTIVE' : 'Direct to Kitchen: ACTIVE'}
+                  {orderRoutingSupportFirst ? 'Route to Cashier Desk: ACTIVE' : 'Direct to Kitchen: ACTIVE'}
                 </span>
                 {orderRoutingSupportFirst ? <ToggleRight size={38} /> : <ToggleLeft size={38} />}
               </button>
@@ -965,7 +1220,7 @@ export const MenuPricesScreen: React.FC = () => {
                     }}
                   >
                     <CheckCircle size={14} />
-                    <span>Manual Support Verification Only</span>
+                    <span>Manual Cashier Verification Only</span>
                   </button>
                 </div>
 
@@ -1035,7 +1290,7 @@ export const MenuPricesScreen: React.FC = () => {
                         lineHeight: 1.4,
                       }}
                     >
-                      ⏱️ <strong>Active Rule:</strong> Customer orders will directly go to Support with a live countdown timer. If the representative has not manually marked it ready within <strong>{autoForwardKitchenMin} minute(s)</strong>, the order will automatically advance directly into the Kitchen Queue. Support can also click "Ready to Go to Kitchen" at any moment.
+                      ⏱️ <strong>Active Rule:</strong> Customer orders will directly go to Cashier Desk with a live countdown timer. If the cashier has not manually marked it ready within <strong>{autoForwardKitchenMin} minute(s)</strong>, the order will automatically advance directly into the Kitchen Queue. Cashier can also click "Ready to Go to Kitchen" at any moment.
                     </div>
                   </div>
                 ) : (
@@ -1050,7 +1305,7 @@ export const MenuPricesScreen: React.FC = () => {
                       fontWeight: 600,
                     }}
                   >
-                    🛡️ <strong>Manual Rule:</strong> Orders remain in Customer Services review until the representative explicitly marks the order "Ready to Go to Kitchen". It will never advance to the kitchen without manual approval.
+                    🛡️ <strong>Manual Rule:</strong> Orders remain in Cashier Desk review until the cashier explicitly marks the order "Ready to Go to Kitchen". It will never advance to the kitchen without manual approval.
                   </div>
                 )}
               </div>
@@ -1066,7 +1321,7 @@ export const MenuPricesScreen: React.FC = () => {
                   fontWeight: 600,
                 }}
               >
-                ⚡ Direct Kitchen Mode: Incoming orders bypass Customer Services verification and appear in the Kitchen Queue immediately.
+                ⚡ Direct Kitchen Mode: Incoming orders bypass Cashier Desk verification and appear in the Kitchen Queue immediately.
               </div>
             )}
           </div>
@@ -1195,87 +1450,10 @@ export const MenuPricesScreen: React.FC = () => {
                 }}
               >
                 <Save size={16} />
-                <span>Save Customer Services Routing & Footer Settings</span>
+                <span>Save Routing & Footer Settings</span>
               </button>
             </form>
           </div>
-        </div>
-      )}
-
-      {/* TAB 4: REPRESENTATIVE PERMISSIONS */}
-      {activeTab === 'permissions' && (
-        <div style={{ flex: 1, minHeight: 0, overflowY: 'auto' }}>
-          <div
-            style={{
-              backgroundColor: 'var(--bg-card)',
-              borderRadius: 'var(--radius-lg)',
-              border: '1px solid var(--border-color)',
-              padding: '24px',
-              maxWidth: '680px',
-              boxShadow: 'var(--shadow-sm)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '16px',
-            }}
-          >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <ShieldCheck size={20} color="var(--primary)" />
-            <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
-              Branch Manager Permission Delegation
-            </h3>
-          </div>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', margin: 0 }}>
-            According to operational policy, Branch Managers can authorize Branch Representatives to edit menu items, prices, and categories.
-          </p>
-
-          <div
-            style={{
-              padding: '16px',
-              borderRadius: 'var(--radius-md)',
-              backgroundColor: 'var(--bg-card-subtle)',
-              border: '1px solid var(--border-color)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-            }}
-          >
-            <div>
-              <div style={{ fontWeight: 800, fontSize: '14px', color: 'var(--text-main)' }}>
-                Allow Branch Representative to Edit Menu & Categories
-              </div>
-              <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
-                When enabled, the Representative can add, edit, and delete items and categories.
-              </div>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => {
-                const nextState = !allowRepresentativeMenuEdit;
-                setAllowRepresentativeMenuEdit(nextState);
-                addToast({
-                  type: 'info',
-                  title: nextState ? 'Permission Granted' : 'Permission Revoked',
-                  message: nextState
-                    ? 'Branch Representative can now edit menu items & categories.'
-                    : 'Branch Representative menu editing disabled.',
-                });
-              }}
-              style={{
-                background: 'none',
-                border: 'none',
-                cursor: 'pointer',
-                color: allowRepresentativeMenuEdit ? 'var(--primary)' : 'var(--text-muted)',
-              }}
-            >
-              {allowRepresentativeMenuEdit ? <ToggleRight size={38} /> : <ToggleLeft size={38} />}
-            </button>
-          </div>
-
-          <div style={{ fontSize: '12.5px', color: 'var(--text-muted)' }}>
-            Status: <strong>{allowRepresentativeMenuEdit ? 'PERMITTED (Active)' : 'DISABLED (Manager Only)'}</strong>
-          </div>
-        </div>
         </div>
       )}
 
@@ -1374,7 +1552,7 @@ export const MenuPricesScreen: React.FC = () => {
                       </div>
 
                       {/* Approval Actions */}
-                      {currentRole === 'branch_manager' || currentRole === 'platform_owner' ? (
+                      {currentRole === 'branch_manager' || currentRole === 'platform_owner' || currentRole === 'cashier' ? (
                         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                           <button
                             onClick={() => approveRequest(req.id)}
@@ -1470,14 +1648,23 @@ export const MenuPricesScreen: React.FC = () => {
             <form
               onSubmit={(e) => {
                 e.preventDefault();
-                updateDealCard({
+                const finalImg = dealImageUrl.trim();
+                const nextDeal = {
                   title: dealTitle.trim() || 'Royal Chicken Dum Biryani',
                   subtitle: '',
                   price: dealPrice.trim() || 'Rs. 650',
                   tag: '',
-                  imageUrl: dealImageUrl.trim() || '/food-biryani.jpg',
+                  imageUrl: finalImg,
                   categoryLink: dealCategory,
-                });
+                };
+                if (finalImg) {
+                  savePhotoToLocalGallery(finalImg);
+                }
+                try {
+                  localStorage.setItem('foodies_local_deal_card_image', finalImg);
+                  localStorage.setItem('foodies_deal_card', JSON.stringify(nextDeal));
+                } catch { }
+                updateDealCard(nextDeal);
               }}
               style={{
                 display: 'grid',
@@ -1533,15 +1720,158 @@ export const MenuPricesScreen: React.FC = () => {
                 </div>
 
                 <div>
-                  <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
-                    Image URL or Preset
-                  </label>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                    <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <ImageIcon size={15} color="var(--primary)" />
+                      <span>Deal Photo (Local Storage / Upload / Preset)</span>
+                    </label>
+                    {dealImageUrl && dealImageUrl.trim() !== '' ? (
+                      <span style={{ fontSize: '11px', color: 'var(--primary)', fontWeight: 750, backgroundColor: 'rgba(235, 20, 20, 0.08)', padding: '2px 8px', borderRadius: '4px' }}>
+                        Photo Selected
+                      </span>
+                    ) : (
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 650, backgroundColor: 'var(--bg-card)', padding: '2px 8px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+                        No Photo
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Thumbnail with Cross Button + Action Buttons */}
+                  <div style={{ display: 'flex', gap: '14px', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap' }}>
+                    <div style={{ position: 'relative', width: '80px', height: '80px', borderRadius: '10px', border: '2px solid var(--border-color)', flexShrink: 0, backgroundColor: '#FFFFFF' }}>
+                      {dealImageUrl && dealImageUrl.trim() !== '' ? (
+                        <>
+                          <div style={{ width: '100%', height: '100%', borderRadius: '8px', overflow: 'hidden' }}>
+                            <img
+                              src={dealImageUrl}
+                              alt="Deal Preview"
+                              style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                              onError={(e) => {
+                                (e.target as HTMLImageElement).src = '/food-biryani.jpg';
+                              }}
+                            />
+                          </div>
+                          {/* Cross Button on Deal Picture */}
+                          <button
+                            type="button"
+                            onClick={() => setDealImageUrl('')}
+                            title="Remove picture (click to change)"
+                            style={{
+                              position: 'absolute',
+                              top: '-7px',
+                              right: '-7px',
+                              width: '22px',
+                              height: '22px',
+                              borderRadius: '50%',
+                              backgroundColor: '#EF4444',
+                              color: '#FFFFFF',
+                              border: '2px solid #FFFFFF',
+                              boxShadow: '0 2px 4px rgba(0,0,0,0.25)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              cursor: 'pointer',
+                              zIndex: 10,
+                              padding: 0,
+                            }}
+                          >
+                            <X size={13} strokeWidth={3} />
+                          </button>
+                        </>
+                      ) : (
+                        <label
+                          htmlFor="deal-file-upload-input"
+                          style={{
+                            width: '100%',
+                            height: '100%',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '2px',
+                            backgroundColor: 'var(--bg-input)',
+                            borderRadius: '8px',
+                            border: '2px dashed var(--border-color)',
+                            cursor: 'pointer',
+                            color: 'var(--text-muted)',
+                          }}
+                          title="Click to select deal picture"
+                        >
+                          <ImageIcon size={20} color="var(--text-muted)" />
+                          <span style={{ fontSize: '9.5px', fontWeight: 750 }}>Add Photo</span>
+                        </label>
+                      )}
+                    </div>
+
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minWidth: '200px' }}>
+                      <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                        <label
+                          htmlFor="deal-file-upload-input"
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '6px',
+                            padding: '8px 14px',
+                            borderRadius: '8px',
+                            backgroundColor: 'var(--primary)',
+                            color: '#FFFFFF',
+                            fontSize: '12.5px',
+                            fontWeight: 750,
+                            cursor: 'pointer',
+                            boxShadow: '0 2px 6px rgba(232,90,42,0.2)',
+                          }}
+                        >
+                          <Upload size={14} />
+                          <span>{dealImageUrl && dealImageUrl.trim() !== '' ? 'Change Picture' : 'Upload Deal Photo'}</span>
+                        </label>
+                        <input
+                          id="deal-file-upload-input"
+                          type="file"
+                          accept="image/*"
+                          style={{ display: 'none' }}
+                          onChange={(e) => {
+                            const file = e.target.files?.[0];
+                            if (file) handleLocalStoragePhotoUpload(file, setDealImageUrl);
+                            e.target.value = '';
+                          }}
+                        />
+
+                        {dealImageUrl && dealImageUrl.trim() !== '' && (
+                          <button
+                            type="button"
+                            onClick={() => setDealImageUrl('')}
+                            style={{
+                              padding: '8px 12px',
+                              borderRadius: '8px',
+                              backgroundColor: '#FEE2E2',
+                              color: '#DC2626',
+                              border: '1px solid #FECACA',
+                              fontSize: '12px',
+                              fontWeight: 750,
+                              cursor: 'pointer',
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                          >
+                            <X size={14} />
+                            <span>Remove Picture</span>
+                          </button>
+                        )}
+                      </div>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                        {dealImageUrl && dealImageUrl.trim() !== ''
+                          ? 'Deal photo is selected. Click cross (✕) or "Change Picture" to replace.'
+                          : 'No deal photo selected. Upload from device or choose from local presets below.'}
+                      </span>
+                    </div>
+                  </div>
+
                   <input
                     type="text"
                     value={dealImageUrl}
                     onChange={(e) => setDealImageUrl(e.target.value)}
-                    placeholder="/food-biryani.jpg or https://..."
-                    required
+                    placeholder="/food-biryani.jpg or data:image/..."
                     style={{
                       width: '100%',
                       padding: '10px 14px',
@@ -1552,37 +1882,37 @@ export const MenuPricesScreen: React.FC = () => {
                       fontSize: '13.5px',
                     }}
                   />
-                  <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-                    <button
-                      type="button"
-                      onClick={() => setDealImageUrl('/food-biryani.jpg')}
-                      style={{
-                        padding: '4px 10px',
-                        borderRadius: '6px',
-                        border: '1px solid var(--border-color)',
-                        backgroundColor: 'var(--bg-card-subtle)',
-                        fontSize: '11px',
-                        color: 'var(--text-secondary)',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Use /food-biryani.jpg
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => setDealImageUrl('/hero-bg.jpg')}
-                      style={{
-                        padding: '4px 10px',
-                        borderRadius: '6px',
-                        border: '1px solid var(--border-color)',
-                        backgroundColor: 'var(--bg-card-subtle)',
-                        fontSize: '11px',
-                        color: 'var(--text-secondary)',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      Use /hero-bg.jpg
-                    </button>
+                  {/* Saved Local Storage Photo Picker */}
+                  <div style={{ marginTop: '8px' }}>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '6px' }}>
+                      Pick from Local Storage Photos:
+                    </div>
+                    <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', alignItems: 'center' }}>
+                      {localDealPhotos.map((photo, idx) => {
+                        const isSelected = dealImageUrl === photo;
+                        return (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => setDealImageUrl(photo)}
+                            title={photo.startsWith('data:') ? `Saved Upload #${idx + 1}` : photo}
+                            style={{
+                              width: '54px',
+                              height: '42px',
+                              padding: 0,
+                              borderRadius: '8px',
+                              overflow: 'hidden',
+                              border: isSelected ? '2.5px solid var(--primary)' : '1px solid var(--border-color)',
+                              cursor: 'pointer',
+                              backgroundColor: '#F8FAFC',
+                              position: 'relative',
+                            }}
+                          >
+                            <img src={photo} alt={`Deal preset ${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 </div>
 
@@ -1631,11 +1961,7 @@ export const MenuPricesScreen: React.FC = () => {
                   }}
                 >
                   <Save size={16} />
-                  <span>
-                    {allowRepresentativeDirectPublish || currentRole !== 'branch_representative'
-                      ? 'Save & Publish Deal Live'
-                      : 'Submit Deal for Manager Approval'}
-                  </span>
+                  <span>Save & Publish Deal Live</span>
                 </button>
               </div>
 
@@ -1669,15 +1995,49 @@ export const MenuPricesScreen: React.FC = () => {
                     flexDirection: 'column',
                   }}
                 >
-                  <div style={{ height: '170px', position: 'relative', overflow: 'hidden' }}>
-                    <img
-                      src={dealImageUrl}
-                      alt={dealTitle}
-                      style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      onError={(e) => {
-                        (e.target as HTMLImageElement).src = '/food-biryani.jpg';
-                      }}
-                    />
+                  <div style={{ height: '170px', position: 'relative', overflow: 'hidden', backgroundColor: '#F1F5F9' }}>
+                    {dealImageUrl && dealImageUrl.trim() !== '' ? (
+                      <>
+                        <img
+                          src={dealImageUrl}
+                          alt={dealTitle}
+                          style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                          onError={(e) => {
+                            (e.target as HTMLImageElement).src = '/food-biryani.jpg';
+                          }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => setDealImageUrl('')}
+                          title="Remove deal picture (click to change)"
+                          style={{
+                            position: 'absolute',
+                            top: '8px',
+                            right: '8px',
+                            width: '26px',
+                            height: '26px',
+                            borderRadius: '50%',
+                            backgroundColor: 'rgba(239, 68, 68, 0.95)',
+                            color: '#FFFFFF',
+                            border: '2px solid #FFFFFF',
+                            boxShadow: '0 2px 6px rgba(0,0,0,0.3)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            zIndex: 10,
+                            padding: 0,
+                          }}
+                        >
+                          <X size={14} strokeWidth={3} />
+                        </button>
+                      </>
+                    ) : (
+                      <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center', color: 'var(--text-muted)', gap: '6px' }}>
+                        <ImageIcon size={32} style={{ opacity: 0.4 }} />
+                        <span style={{ fontSize: '11px', fontWeight: 600 }}>No Picture Selected</span>
+                      </div>
+                    )}
                   </div>
                   <div style={{ padding: '14px' }}>
                     <h4 style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-main)', margin: '0 0 10px' }}>
@@ -1936,6 +2296,168 @@ export const MenuPricesScreen: React.FC = () => {
               ))}
             </div>
           </div>
+
+          {/* Section 3: Web Home Notification Banner (Shown Below Order Row on Web Home) */}
+          <div className="surface-card" style={{ padding: '24px', borderRadius: 'var(--radius-lg)' }}>
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px', flexWrap: 'wrap', gap: '10px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div style={{ padding: '8px', borderRadius: '10px', backgroundColor: 'rgba(232,90,42,0.1)', color: 'var(--primary)' }}>
+                  <Bell size={20} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 700, color: 'var(--text-main)' }}>
+                    Web Home Notification (Below Order Row)
+                  </h3>
+                  <p style={{ margin: '2px 0 0 0', fontSize: '12.5px', color: 'var(--text-muted)' }}>
+                    Displays directly beneath Dine-In / Takeaway / Delivery on the Web Home screen. Editable by Manager & Owner.
+                  </p>
+                </div>
+              </div>
+              <button
+                type="button"
+                onClick={() => setHomeNotifEnabled((v) => !v)}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '6px 12px',
+                  borderRadius: '999px',
+                  border: '1px solid var(--border-color)',
+                  backgroundColor: homeNotifEnabled ? 'rgba(16,185,129,0.12)' : '#F1F5F9',
+                  color: homeNotifEnabled ? '#059669' : '#64748B',
+                  fontSize: '12px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                {homeNotifEnabled ? <ToggleRight size={18} /> : <ToggleLeft size={18} />}
+                <span>{homeNotifEnabled ? 'Visible on Web Home' : 'Hidden'}</span>
+              </button>
+            </div>
+
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                  Style Type
+                </label>
+                <select
+                  value={homeNotifType}
+                  onChange={(e) => setHomeNotifType(e.target.value as 'promo' | 'info' | 'warning' | 'success')}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: 'var(--text-main)',
+                    fontSize: '13px',
+                  }}
+                >
+                  <option value="promo">Promo / Deal Highlight (Orange)</option>
+                  <option value="info">Information / Update (Blue)</option>
+                  <option value="warning">Notice / Timing Alert (Amber)</option>
+                  <option value="success">Active Special / Dispatch (Green)</option>
+                </select>
+              </div>
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                  Badge Tag
+                </label>
+                <input
+                  type="text"
+                  value={homeNotifBadge}
+                  onChange={(e) => setHomeNotifBadge(e.target.value)}
+                  placeholder="LIVE UPDATE"
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: 'var(--text-main)',
+                    fontSize: '13px',
+                  }}
+                />
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                  Notification Title
+                </label>
+                <input
+                  type="text"
+                  value={homeNotifTitle}
+                  onChange={(e) => setHomeNotifTitle(e.target.value)}
+                  placeholder="Fresh Kitchen Dispatch & Special Deals Active"
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: 'var(--text-main)',
+                    fontSize: '13.5px',
+                  }}
+                />
+              </div>
+              <div style={{ gridColumn: '1 / -1' }}>
+                <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                  Notification Message
+                </label>
+                <textarea
+                  rows={2}
+                  value={homeNotifMessage}
+                  onChange={(e) => setHomeNotifMessage(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '10px 12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-input)',
+                    color: 'var(--text-main)',
+                    fontSize: '13px',
+                    resize: 'vertical',
+                  }}
+                />
+              </div>
+            </div>
+
+            <div style={{ marginTop: '14px', display: 'flex', justifyContent: 'flex-end' }}>
+              <button
+                type="button"
+                onClick={() => {
+                  updateFooterSettings({
+                    ...footerSettings,
+                    homeNotificationEnabled: homeNotifEnabled,
+                    homeNotificationType: homeNotifType,
+                    homeNotificationBadge: homeNotifBadge.trim() || 'LIVE UPDATE',
+                    homeNotificationTitle: homeNotifTitle.trim() || 'Fresh Kitchen Dispatch & Special Deals Active',
+                    homeNotificationMessage: homeNotifMessage.trim() || 'Order directly from your nearest Foodies Cafe branch.',
+                  });
+                  addToast({
+                    type: 'success',
+                    title: 'Web Home Notification Saved',
+                    message: 'Home notification below Order Row updated for all visitors.',
+                  });
+                }}
+                style={{
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  padding: '10px 18px',
+                  borderRadius: 'var(--radius-md)',
+                  border: 'none',
+                  backgroundColor: 'var(--primary)',
+                  color: '#FFFFFF',
+                  fontSize: '13px',
+                  fontWeight: 700,
+                  cursor: 'pointer',
+                }}
+              >
+                <Save size={15} />
+                <span>Save Web Home Notification</span>
+              </button>
+            </div>
+          </div>
         </div>
       )}
 
@@ -2029,44 +2551,203 @@ export const MenuPricesScreen: React.FC = () => {
                 </div>
               </div>
 
-              {/* Photo & Image URL */}
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
-                  Dish Photo / Image URL
-                </label>
-                <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-                  <img
-                    src={itemImage}
-                    alt="Preview"
-                    style={{ width: '50px', height: '50px', borderRadius: '8px', objectFit: 'cover', border: '1px solid var(--border-color)' }}
-                    onError={(e) => {
-                      (e.target as HTMLImageElement).src = '/food-biryani.jpg';
-                    }}
-                  />
+              {/* Dish Photo & Image Upload Section */}
+              <div style={{ backgroundColor: 'var(--bg-card-subtle)', border: '1px solid var(--border-color)', borderRadius: '10px', padding: '14px', display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <label style={{ fontSize: '12.5px', fontWeight: 750, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <ImageIcon size={15} color="var(--primary)" />
+                    <span>Dish Photo & Media</span>
+                  </label>
+                  {uploadedFileName ? (
+                    <span style={{ fontSize: '11px', color: '#16A34A', fontWeight: 700, backgroundColor: '#DCFCE7', padding: '2px 8px', borderRadius: '4px' }}>
+                      ✓ {uploadedFileName}
+                    </span>
+                  ) : itemImage && itemImage.trim() !== '' ? (
+                    <span style={{ fontSize: '11px', color: 'var(--primary)', fontWeight: 700, backgroundColor: 'rgba(235, 20, 20, 0.08)', padding: '2px 8px', borderRadius: '4px' }}>
+                      Photo Selected
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 650, backgroundColor: 'var(--bg-card)', padding: '2px 8px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+                      No Photo
+                    </span>
+                  )}
+                </div>
+
+                {/* Upload action button + Hidden input */}
+                <input
+                  type="file"
+                  ref={itemFileInputRef}
+                  accept="image/*"
+                  onChange={handleImageFileSelect}
+                  style={{ display: 'none' }}
+                />
+
+                <div style={{ display: 'flex', gap: '14px', alignItems: 'center', flexWrap: 'wrap' }}>
+                  <div style={{ position: 'relative', width: '76px', height: '76px', borderRadius: '10px', border: '2px solid var(--border-color)', flexShrink: 0, backgroundColor: '#FFFFFF' }}>
+                    {itemImage && itemImage.trim() !== '' ? (
+                      <>
+                        <div style={{ width: '100%', height: '100%', borderRadius: '8px', overflow: 'hidden' }}>
+                          <img
+                            src={itemImage}
+                            alt="Preview"
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = '/food-biryani.jpg';
+                            }}
+                          />
+                        </div>
+                        {/* Red Cross button on the picture */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setItemImage('');
+                            setUploadedFileName(null);
+                          }}
+                          title="Remove picture (click to change)"
+                          style={{
+                            position: 'absolute',
+                            top: '-7px',
+                            right: '-7px',
+                            width: '22px',
+                            height: '22px',
+                            borderRadius: '50%',
+                            backgroundColor: '#EF4444',
+                            color: '#FFFFFF',
+                            border: '2px solid #FFFFFF',
+                            boxShadow: '0 2px 4px rgba(0,0,0,0.25)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            zIndex: 10,
+                            padding: 0,
+                          }}
+                        >
+                          <X size={13} strokeWidth={3} />
+                        </button>
+                      </>
+                    ) : (
+                      <div
+                        onClick={() => itemFileInputRef.current?.click()}
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '2px',
+                          backgroundColor: 'var(--bg-input)',
+                          borderRadius: '8px',
+                          border: '2px dashed var(--border-color)',
+                          cursor: 'pointer',
+                          color: 'var(--text-muted)',
+                        }}
+                        title="Click to select picture"
+                      >
+                        <ImageIcon size={20} color="var(--text-muted)" />
+                        <span style={{ fontSize: '9.5px', fontWeight: 700 }}>Add Photo</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minWidth: '200px' }}>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <button
+                        type="button"
+                        onClick={() => itemFileInputRef.current?.click()}
+                        style={{
+                          padding: '8px 14px',
+                          borderRadius: '8px',
+                          backgroundColor: 'var(--primary)',
+                          color: '#FFFFFF',
+                          border: 'none',
+                          fontSize: '12.5px',
+                          fontWeight: 750,
+                          cursor: 'pointer',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '6px',
+                          boxShadow: 'var(--shadow-xs)',
+                        }}
+                      >
+                        <Upload size={14} />
+                        <span>{itemImage && itemImage.trim() !== '' ? 'Change Picture' : 'Upload Picture'}</span>
+                      </button>
+
+                      {itemImage && itemImage.trim() !== '' && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setItemImage('');
+                            setUploadedFileName(null);
+                          }}
+                          style={{
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            backgroundColor: '#FEE2E2',
+                            color: '#DC2626',
+                            border: '1px solid #FECACA',
+                            fontSize: '12px',
+                            fontWeight: 750,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                          }}
+                        >
+                          <X size={14} />
+                          <span>Remove Picture</span>
+                        </button>
+                      )}
+                    </div>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      {itemImage && itemImage.trim() !== ''
+                        ? 'Picture is selected. Click the cross (✕) or "Change Picture" to replace.'
+                        : 'No picture selected. Upload from device or choose a preset below.'}
+                    </span>
+                  </div>
+                </div>
+
+                {/* Direct Image URL input option */}
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', marginTop: '4px' }}>
+                  <span style={{ fontSize: '11px', fontWeight: 650, color: 'var(--text-secondary)' }}>
+                    Or paste direct image URL / select preset:
+                  </span>
                   <input
                     type="text"
                     value={itemImage}
-                    onChange={(e) => setItemImage(e.target.value)}
-                    placeholder="/food-biryani.jpg or image URL"
+                    onChange={(e) => {
+                      setItemImage(e.target.value);
+                      setUploadedFileName(null);
+                    }}
+                    placeholder="/food-biryani.jpg or https://..."
                     required
-                    style={{ flex: 1, padding: '9px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-input)', color: 'var(--text-main)', fontSize: '13px' }}
+                    style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-input)', color: 'var(--text-main)', fontSize: '12px' }}
                   />
-                </div>
-                <div style={{ display: 'flex', gap: '6px', marginTop: '6px' }}>
-                  <button
-                    type="button"
-                    onClick={() => setItemImage('/food-biryani.jpg')}
-                    style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '4px', backgroundColor: 'var(--bg-card-subtle)', border: '1px solid var(--border-color)', cursor: 'pointer', color: 'var(--text-secondary)' }}
-                  >
-                    Biryani Photo
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setItemImage('/hero-bg.jpg')}
-                    style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '4px', backgroundColor: 'var(--bg-card-subtle)', border: '1px solid var(--border-color)', cursor: 'pointer', color: 'var(--text-secondary)' }}
-                  >
-                    Dining Photo
-                  </button>
+                  <div style={{ display: 'flex', gap: '6px', marginTop: '2px' }}>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setItemImage('/food-biryani.jpg');
+                        setUploadedFileName(null);
+                      }}
+                      style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '4px', backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)', cursor: 'pointer', color: 'var(--text-secondary)' }}
+                    >
+                      Biryani Photo
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setItemImage('/hero-bg.jpg');
+                        setUploadedFileName(null);
+                      }}
+                      style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '4px', backgroundColor: 'var(--bg-card)', border: '1px solid var(--border-color)', cursor: 'pointer', color: 'var(--text-secondary)' }}
+                    >
+                      Dining Photo
+                    </button>
+                  </div>
                 </div>
               </div>
 
@@ -2086,10 +2767,12 @@ export const MenuPricesScreen: React.FC = () => {
               {/* Per-Branch Availability & Price Overrides */}
               <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '12px', borderRadius: '8px', border: '1px solid var(--border-color)' }}>
                 <div style={{ fontSize: '12.5px', fontWeight: 800, color: 'var(--text-main)', marginBottom: '8px' }}>
-                  Branch Availability & Custom Pricing
+                  {currentRole === 'branch_manager' || currentRole === 'cashier'
+                    ? `Branch Stock & Pricing (${currentBranch.name})`
+                    : 'Branch Availability & Custom Pricing'}
                 </div>
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                  {branches.map((b) => (
+                  {((currentRole === 'branch_manager' || currentRole === 'cashier') ? branches.filter((b) => b.id === currentBranch.id) : branches).map((b) => (
                     <div key={b.id} style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '10px' }}>
                       <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '12.5px', cursor: 'pointer', color: 'var(--text-main)', fontWeight: 600 }}>
                         <input
@@ -2245,7 +2928,7 @@ export const MenuPricesScreen: React.FC = () => {
                   title: bannerTitle.trim(),
                   subtitle: bannerSubtitle.trim(),
                   badge: bannerBadge.trim() || '🔥 Special Highlight',
-                  imageUrl: bannerImageUrl.trim() || '/hero-bg.jpg',
+                  imageUrl: bannerImageUrl.trim(),
                   categoryLink: bannerCategory,
                   active: true,
                 };
@@ -2354,14 +3037,156 @@ export const MenuPricesScreen: React.FC = () => {
               </div>
 
               <div>
-                <label style={{ fontSize: '12px', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
-                  Background Image URL
-                </label>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-main)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <ImageIcon size={15} color="var(--primary)" />
+                    <span>Banner Photo (Local Storage / Upload / Preset)</span>
+                  </label>
+                  {bannerImageUrl && bannerImageUrl.trim() !== '' ? (
+                    <span style={{ fontSize: '11px', color: 'var(--primary)', fontWeight: 750, backgroundColor: 'rgba(235, 20, 20, 0.08)', padding: '2px 8px', borderRadius: '4px' }}>
+                      Photo Selected
+                    </span>
+                  ) : (
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 650, backgroundColor: 'var(--bg-card)', padding: '2px 8px', borderRadius: '4px', border: '1px solid var(--border-color)' }}>
+                      No Photo
+                    </span>
+                  )}
+                </div>
+
+                {/* Thumbnail with Cross Button + Action Buttons */}
+                <div style={{ display: 'flex', gap: '14px', alignItems: 'center', marginBottom: '10px', flexWrap: 'wrap' }}>
+                  <div style={{ position: 'relative', width: '80px', height: '60px', borderRadius: '8px', border: '2px solid var(--border-color)', flexShrink: 0, backgroundColor: '#FFFFFF' }}>
+                    {bannerImageUrl && bannerImageUrl.trim() !== '' ? (
+                      <>
+                        <div style={{ width: '100%', height: '100%', borderRadius: '6px', overflow: 'hidden' }}>
+                          <img
+                            src={bannerImageUrl}
+                            alt="Banner Preview"
+                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+                            onError={(e) => {
+                              (e.target as HTMLImageElement).src = '/hero-bg.jpg';
+                            }}
+                          />
+                        </div>
+                        {/* Red Cross button on the banner picture */}
+                        <button
+                          type="button"
+                          onClick={() => setBannerImageUrl('')}
+                          title="Remove picture (click to change)"
+                          style={{
+                            position: 'absolute',
+                            top: '-7px',
+                            right: '-7px',
+                            width: '22px',
+                            height: '22px',
+                            borderRadius: '50%',
+                            backgroundColor: '#EF4444',
+                            color: '#FFFFFF',
+                            border: '2px solid #FFFFFF',
+                            boxShadow: '0 2px 4px rgba(0,0,0,0.25)',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            cursor: 'pointer',
+                            zIndex: 10,
+                            padding: 0,
+                          }}
+                        >
+                          <X size={13} strokeWidth={3} />
+                        </button>
+                      </>
+                    ) : (
+                      <label
+                        htmlFor="banner-file-upload-input"
+                        style={{
+                          width: '100%',
+                          height: '100%',
+                          display: 'flex',
+                          flexDirection: 'column',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '2px',
+                          backgroundColor: 'var(--bg-input)',
+                          borderRadius: '6px',
+                          border: '2px dashed var(--border-color)',
+                          cursor: 'pointer',
+                          color: 'var(--text-muted)',
+                        }}
+                        title="Click to select banner picture"
+                      >
+                        <ImageIcon size={18} color="var(--text-muted)" />
+                        <span style={{ fontSize: '9px', fontWeight: 700 }}>Add Photo</span>
+                      </label>
+                    )}
+                  </div>
+
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1, minWidth: '200px' }}>
+                    <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
+                      <label
+                        htmlFor="banner-file-upload-input"
+                        style={{
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: '6px',
+                          padding: '7px 12px',
+                          borderRadius: 'var(--radius-md)',
+                          backgroundColor: 'var(--primary)',
+                          color: '#FFFFFF',
+                          fontSize: '12px',
+                          fontWeight: 700,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <Upload size={13} />
+                        <span>{bannerImageUrl && bannerImageUrl.trim() !== '' ? 'Change Picture' : 'Upload Photo'}</span>
+                      </label>
+                      <input
+                        id="banner-file-upload-input"
+                        type="file"
+                        accept="image/*"
+                        style={{ display: 'none' }}
+                        onChange={(e) => {
+                          const file = e.target.files?.[0];
+                          if (file) handleLocalStoragePhotoUpload(file, setBannerImageUrl);
+                          e.target.value = '';
+                        }}
+                      />
+
+                      {bannerImageUrl && bannerImageUrl.trim() !== '' && (
+                        <button
+                          type="button"
+                          onClick={() => setBannerImageUrl('')}
+                          style={{
+                            padding: '7px 11px',
+                            borderRadius: 'var(--radius-md)',
+                            backgroundColor: '#FEE2E2',
+                            color: '#DC2626',
+                            border: '1px solid #FECACA',
+                            fontSize: '11.5px',
+                            fontWeight: 750,
+                            cursor: 'pointer',
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '4px',
+                          }}
+                        >
+                          <X size={13} />
+                          <span>Remove Picture</span>
+                        </button>
+                      )}
+                    </div>
+                    <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+                      {bannerImageUrl && bannerImageUrl.trim() !== ''
+                        ? 'Picture is selected. Click cross (✕) or "Change Picture" to replace.'
+                        : 'No picture selected. Upload from device or choose a preset below.'}
+                    </span>
+                  </div>
+                </div>
                 <input
                   type="text"
                   value={bannerImageUrl}
                   onChange={(e) => setBannerImageUrl(e.target.value)}
-                  placeholder="/hero-bg.jpg or https://..."
+                  placeholder="/hero-bg.jpg or data:image/..."
                   required
                   style={{
                     width: '100%',
@@ -2373,37 +3198,25 @@ export const MenuPricesScreen: React.FC = () => {
                     fontSize: '13px',
                   }}
                 />
-                <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
-                  <button
-                    type="button"
-                    onClick={() => setBannerImageUrl('/hero-bg.jpg')}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--border-color)',
-                      backgroundColor: 'var(--bg-card-subtle)',
-                      fontSize: '11px',
-                      color: 'var(--text-secondary)',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Preset /hero-bg.jpg
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setBannerImageUrl('/food-biryani.jpg')}
-                    style={{
-                      padding: '4px 10px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--border-color)',
-                      backgroundColor: 'var(--bg-card-subtle)',
-                      fontSize: '11px',
-                      color: 'var(--text-secondary)',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Preset /food-biryani.jpg
-                  </button>
+                <div style={{ display: 'flex', gap: '8px', marginTop: '8px', flexWrap: 'wrap' }}>
+                  {localDealPhotos.map((photo, idx) => (
+                    <button
+                      key={idx}
+                      type="button"
+                      onClick={() => setBannerImageUrl(photo)}
+                      style={{
+                        width: '48px',
+                        height: '36px',
+                        padding: 0,
+                        borderRadius: '6px',
+                        overflow: 'hidden',
+                        border: bannerImageUrl === photo ? '2px solid var(--primary)' : '1px solid var(--border-color)',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      <img src={photo} alt={`Local banner ${idx + 1}`} style={{ width: '100%', height: '100%', objectFit: 'cover' }} />
+                    </button>
+                  ))}
                 </div>
               </div>
 
@@ -2466,11 +3279,7 @@ export const MenuPricesScreen: React.FC = () => {
                   }}
                 >
                   <Save size={15} />
-                  <span>
-                    {allowRepresentativeDirectPublish || currentRole !== 'branch_representative'
-                      ? 'Save & Publish Banner Live'
-                      : 'Submit Banner for Manager Approval'}
-                  </span>
+                  <span>Save & Publish Banner Live</span>
                 </button>
                 <button
                   type="button"
@@ -2505,16 +3314,18 @@ export const MenuPricesScreen: React.FC = () => {
           }}
           title="Delete Hero Banner Slide?"
           message={`Are you sure you want to remove "${deleteBannerTarget.title}" from the customer home carousel?`}
-          details={
-            allowRepresentativeDirectPublish || currentRole !== 'branch_representative'
-              ? 'This will remove the slide immediately from customer view.'
-              : 'This deletion request will be submitted for Branch Manager approval.'
-          }
+          details="This will remove the slide immediately from customer view."
           confirmText="Yes, delete banner"
           cancelText="No, keep banner"
           isDanger
         />
       )}
+
+      {/* Excel / Spreadsheet Auto-Fetch & Category Import Modal */}
+      <SheetImportModal
+        isOpen={sheetImportOpen}
+        onClose={() => setSheetImportOpen(false)}
+      />
     </div>
   );
 };

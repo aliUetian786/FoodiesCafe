@@ -1,8 +1,8 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useRef, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
-import { Order, OrderItem } from '@/types/cafe';
+import { Order, OrderItem, normalizeBranchId } from '@/types/cafe';
 import {
   UtensilsCrossed,
   Search,
@@ -19,6 +19,7 @@ import {
   RotateCcw,
   ArrowLeft,
   ShoppingCart,
+  Flame,
 } from 'lucide-react';
 
 interface WalkInOrderModalProps {
@@ -49,6 +50,8 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
     recordCashPayment,
     addToast,
     updateTableStatus,
+    addTable,
+    deleteTable,
   } = useApp();
 
   const isFloorStaff = Boolean(isFloorStaffProp ?? (currentRole === 'floor_staff'));
@@ -56,20 +59,101 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
 
   const [walkInStep, setWalkInStep] = useState<'menu' | 'checkout'>('menu');
   const [walkInSearch, setWalkInSearch] = useState('');
-  const [walkInCategory, setWalkInCategory] = useState('All');
+  const [walkInCategory, setWalkInCategory] = useState('Biryani & Rice');
   const [walkInCart, setWalkInCart] = useState<OrderItem[]>([]);
   const [walkInOrderType, setWalkInOrderType] = useState<'dine_in' | 'takeaway' | 'delivery'>('dine_in');
   const [walkInTable, setWalkInTable] = useState<string>(effectiveInitialTable || '1');
+  const [showAddTableForm, setShowAddTableForm] = useState(false);
+  const [newTableNum, setNewTableNum] = useState('');
+  const [newTableCap, setNewTableCap] = useState(4);
+  const [newTableFloor, setNewTableFloor] = useState('Ground Floor');
   const [walkInCustomerName, setWalkInCustomerName] = useState('Walk-in Guest');
   const [walkInCustomerPhone, setWalkInCustomerPhone] = useState('+92 300 0000000');
   const [walkInDeliveryAddress, setWalkInDeliveryAddress] = useState('Gulberg III, Main Market, Lahore');
   const [walkInOrderNotes, setWalkInOrderNotes] = useState('');
   const [walkInPaymentChoice, setWalkInPaymentChoice] = useState<'paid' | 'unpaid'>('paid');
 
+  const categories = useMemo(() => {
+    return [
+      'Biryani & Rice',
+      'Karahi & Handi',
+      'Burgers & Fast Food',
+      'BBQ & Kebabs',
+      'Tandoor & Breads',
+      'Beverages & Desserts',
+    ];
+  }, []);
+
+  const menuScrollContainerRef = useRef<HTMLDivElement>(null);
+  const categoryRowRef = useRef<HTMLDivElement>(null);
+  const categoryBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});
+  const isManualScrollRef = useRef(false);
+
+  const isItemInCategory = (itemCat: string, selectedCat: string) => {
+    if (itemCat === selectedCat) return true;
+    const i = (itemCat || '').toLowerCase();
+    const s = (selectedCat || '').toLowerCase();
+    if (s.includes('biryani') && i.includes('biryani')) return true;
+    if (s.includes('karahi') && (i.includes('karahi') || i.includes('handi') || i.includes('shinwari'))) return true;
+    if (s.includes('burger') && (i.includes('burger') || i.includes('fast food'))) return true;
+    if (s.includes('bbq') && (i.includes('bbq') || i.includes('kebab') || i.includes('tikka') || i.includes('chops'))) return true;
+    if ((s.includes('tandoor') || s.includes('bread')) && (i.includes('bread') || i.includes('naan') || i.includes('tandoor') || i.includes('roti'))) return true;
+    if ((s.includes('beverage') || s.includes('dessert') || s.includes('drink')) && (i.includes('beverage') || i.includes('dessert') || i.includes('drink') || i.includes('chai') || i.includes('kheer') || i.includes('jamun'))) return true;
+    return false;
+  };
+
+  const handleCategoryClick = (cat: string) => {
+    setWalkInCategory(cat);
+    isManualScrollRef.current = true;
+    const targetEl = document.getElementById(`walkin-cat-${encodeURIComponent(cat)}`);
+    if (targetEl) {
+      targetEl.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }
+    setTimeout(() => {
+      isManualScrollRef.current = false;
+    }, 750);
+  };
+
+  // Scrollspy & keep active category button in view
+  useEffect(() => {
+    if (!walkInCategory) return;
+    const btn = categoryBtnRefs.current[walkInCategory];
+    const row = categoryRowRef.current;
+    if (btn && row) {
+      const scrollLeftTarget = btn.offsetLeft - row.offsetWidth / 2 + btn.offsetWidth / 2;
+      row.scrollTo({
+        left: Math.max(0, scrollLeftTarget),
+        behavior: 'smooth',
+      });
+    }
+  }, [walkInCategory]);
+
+  const handleMenuContainerScroll = () => {
+    if (isManualScrollRef.current) return;
+    if (walkInSearch.trim()) return;
+    const container = menuScrollContainerRef.current;
+    if (!container) return;
+    const containerTop = container.getBoundingClientRect().top;
+    let activeCat = categories[0];
+    for (const cat of categories) {
+      const el = document.getElementById(`walkin-cat-${encodeURIComponent(cat)}`);
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        if (rect.top - containerTop <= 160) {
+          activeCat = cat;
+        }
+      }
+    }
+    setWalkInCategory(activeCat);
+  };
+
   // Available tables for Dine-In selection
+  const normBranchId = normalizeBranchId(currentBranch.id);
   const branchTables = useMemo(() => {
-    return tables.filter((t) => !t.branchId || t.branchId === currentBranch.id);
-  }, [tables, currentBranch.id]);
+    return tables.filter(
+      (t) => !t.branchId || t.branchId === currentBranch.id || normalizeBranchId(t.branchId) === normBranchId
+    );
+  }, [tables, currentBranch.id, normBranchId]);
 
   const availableTables = useMemo(() => {
     return branchTables.filter((t) => t.status === 'available' || t.number === initialTableNumber);
@@ -86,6 +170,10 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
 
   // Cart operations
   const handleAddToCart = (item: any) => {
+    const effectivePrice = (currentBranch && item.branchPriceOverrides?.[currentBranch.id] !== undefined && Number(item.branchPriceOverrides[currentBranch.id]) > 0)
+      ? Number(item.branchPriceOverrides[currentBranch.id])
+      : (Number(item.basePrice) || 0);
+
     setWalkInCart((prev) => {
       const existing = prev.find((i) => i.menuItemId === item.id);
       if (existing) {
@@ -99,7 +187,7 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
           id: `walkin-item-${Date.now()}-${item.id}`,
           menuItemId: item.id,
           name: item.name,
-          unitPrice: Number(item.basePrice) || 0,
+          unitPrice: effectivePrice,
           quantity: 1,
           selectedAddOns: [],
           notes: '',
@@ -130,26 +218,17 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
     return walkInCart.reduce((sum, i) => sum + i.quantity, 0);
   }, [walkInCart]);
 
-  // Filtered menu items
-  const filteredMenuItems = useMemo(() => {
+  // Filtered search results when searching
+  const filteredSearchResults = useMemo(() => {
+    if (!walkInSearch.trim()) return [];
+    const q = walkInSearch.toLowerCase().trim();
     return menuItems.filter((item) => {
-      if (walkInCategory !== 'All' && item.category !== walkInCategory) return false;
-      if (walkInSearch.trim()) {
-        const q = walkInSearch.toLowerCase().trim();
-        const matchName = item.name.toLowerCase().includes(q);
-        const matchDesc = item.description.toLowerCase().includes(q);
-        const matchCat = item.category.toLowerCase().includes(q);
-        if (!matchName && !matchDesc && !matchCat) return false;
-      }
-      return true;
+      const matchName = item.name.toLowerCase().includes(q);
+      const matchDesc = item.description?.toLowerCase().includes(q);
+      const matchCat = item.category?.toLowerCase().includes(q);
+      return matchName || matchDesc || matchCat;
     });
-  }, [menuItems, walkInCategory, walkInSearch]);
-
-  const categories = useMemo(() => {
-    const set = new Set<string>();
-    menuItems.forEach((i) => set.add(i.category));
-    return ['All', ...Array.from(set)];
-  }, [menuItems]);
+  }, [menuItems, walkInSearch]);
 
   // Dispatch walk-in order directly to kitchen
   const handleCreateWalkIn = () => {
@@ -168,6 +247,14 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
 
     const actualOrderType = isFloorStaff ? 'dine_in' : walkInOrderType;
 
+    const targetTableObj = branchTables.find((t) => t.number === walkInTable);
+    const walkInWaiterId = isFloorStaff
+      ? currentUser.id
+      : (targetTableObj?.assignedWaiterId || (currentRole === 'floor_staff' ? currentUser.id : undefined));
+    const walkInWaiterName = isFloorStaff
+      ? currentUser.name
+      : (targetTableObj?.assignedWaiterName || (currentRole === 'floor_staff' ? currentUser.name : undefined));
+
     const placed = placeOrder(
       actualOrderType,
       actualOrderType === 'dine_in' ? walkInTable : undefined,
@@ -183,11 +270,10 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
         cashierName: currentUser.name || 'Floor Staff Operative',
         isWalkIn: true,
         notes: walkInOrderNotes || `Walk-in order created by ${currentUser.name || 'Staff'}`,
+        assignedWaiterId: walkInWaiterId,
+        assignedWaiterName: walkInWaiterName,
       }
     );
-
-    // DIRECT KITCHEN DISPATCH (No hold timer)
-    sendOrderToKitchen(placed.id);
 
     // If paid now at till
     if (walkInPaymentChoice === 'paid') {
@@ -212,6 +298,184 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
     onClose();
     setWalkInStep('menu');
     setWalkInCart([]);
+  };
+
+  const renderItemCard = (item: any) => {
+    const inCart = walkInCart.find((i) => i.menuItemId === item.id);
+    const qty = inCart ? inCart.quantity : 0;
+    const isAvailAtBranch = (item.branchAvailability?.[currentBranch.id] !== false && item.isAvailable !== false);
+    const effectivePrice = (currentBranch && item.branchPriceOverrides?.[currentBranch.id] !== undefined && Number(item.branchPriceOverrides[currentBranch.id]) > 0)
+      ? Number(item.branchPriceOverrides[currentBranch.id])
+      : (Number(item.basePrice) || 0);
+
+    return (
+      <div
+        key={item.id}
+        onClick={isAvailAtBranch ? () => handleAddToCart(item) : undefined}
+        style={{
+          backgroundColor: 'var(--bg-card)',
+          borderRadius: 'var(--radius-lg)',
+          border: qty > 0 ? '2px solid var(--primary)' : '1px solid var(--border-color)',
+          overflow: 'hidden',
+          display: 'flex',
+          flexDirection: 'column',
+          boxShadow: 'var(--shadow-sm)',
+          cursor: isAvailAtBranch ? 'pointer' : 'default',
+          opacity: isAvailAtBranch ? 1 : 0.6,
+          filter: isAvailAtBranch ? 'none' : 'grayscale(60%)',
+          transition: 'transform 0.12s ease',
+        }}
+      >
+        <div style={{ height: '130px', backgroundColor: 'var(--bg-card-subtle)', position: 'relative', overflow: 'hidden' }}>
+          <img
+            src={item.image || '/hero-bg.jpg'}
+            alt={item.name}
+            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+          />
+          <span
+            style={{
+              position: 'absolute',
+              top: '8px',
+              left: '8px',
+              backgroundColor: 'rgba(0,0,0,0.65)',
+              backdropFilter: 'blur(4px)',
+              color: '#FFFFFF',
+              padding: '2px 8px',
+              borderRadius: '4px',
+              fontSize: '11px',
+              fontWeight: 750,
+            }}
+          >
+            {item.category}
+          </span>
+          {!isAvailAtBranch && (
+            <span
+              style={{
+                position: 'absolute',
+                top: '8px',
+                right: '8px',
+                backgroundColor: 'rgba(220, 38, 38, 0.85)',
+                color: '#FFFFFF',
+                padding: '2px 8px',
+                borderRadius: '4px',
+                fontSize: '10px',
+                fontWeight: 800,
+              }}
+            >
+              OUT OF STOCK
+            </span>
+          )}
+        </div>
+
+        <div style={{ padding: '12px 14px', display: 'flex', flexDirection: 'column', flex: 1, justifyContent: 'space-between', gap: '8px' }}>
+          <div>
+            <div style={{ fontWeight: 800, fontSize: '15px', color: 'var(--text-main)', lineHeight: 1.3, fontFamily: "'Outfit', sans-serif" }}>
+              {item.name}
+            </div>
+            {item.description && (
+              <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', marginTop: '4px', lineHeight: 1.35, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
+                {item.description}
+              </div>
+            )}
+          </div>
+
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', gap: '8px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '15px', fontWeight: 900, color: 'var(--primary)' }}>
+              Rs. {effectivePrice.toLocaleString()}
+            </span>
+
+            {!isAvailAtBranch ? (
+              <span style={{ fontSize: '11px', fontWeight: 750, color: '#DC2626' }}>
+                Unavailable
+              </span>
+            ) : qty > 0 ? (
+              <div
+                onClick={(e) => e.stopPropagation()}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px',
+                  backgroundColor: 'var(--bg-card-subtle)',
+                  padding: '2px 6px',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1.5px solid var(--primary)',
+                }}
+              >
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleUpdateQty(item.id, -1);
+                  }}
+                  style={{
+                    width: '24px',
+                    height: '24px',
+                    borderRadius: '4px',
+                    border: 'none',
+                    backgroundColor: 'var(--primary)',
+                    color: '#FFFFFF',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Minus size={11} />
+                </button>
+                <span style={{ fontWeight: 850, fontSize: '12.5px', minWidth: '18px', textAlign: 'center', color: 'var(--primary)' }}>
+                  {qty}
+                </span>
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation();
+                    handleUpdateQty(item.id, 1);
+                  }}
+                  style={{
+                    width: '24px',
+                    height: '24px',
+                    borderRadius: '4px',
+                    border: 'none',
+                    backgroundColor: 'var(--primary)',
+                    color: '#FFFFFF',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                  }}
+                >
+                  <Plus size={11} />
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleAddToCart(item);
+                }}
+                style={{
+                  padding: '6px 14px',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: 'var(--primary)',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  fontSize: '12px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '4px',
+                  boxShadow: '0 2px 8px var(--primary-glow)',
+                  whiteSpace: 'nowrap',
+                  transition: 'all 0.15s ease',
+                }}
+              >
+                <Plus size={13} strokeWidth={2.4} />
+                <span>Add</span>
+              </button>
+            )}
+          </div>
+        </div>
+      </div>
+    );
   };
 
   if (!isOpen) return null;
@@ -359,6 +623,7 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
               </div>
 
               <div
+                ref={categoryRowRef}
                 style={{
                   display: 'flex',
                   gap: '8px',
@@ -370,7 +635,10 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
                 {categories.map((cat) => (
                   <button
                     key={cat}
-                    onClick={() => setWalkInCategory(cat)}
+                    ref={(el) => {
+                      categoryBtnRefs.current[cat] = el;
+                    }}
+                    onClick={() => handleCategoryClick(cat)}
                     style={{
                       padding: '6px 14px',
                       borderRadius: 'var(--radius-full)',
@@ -390,166 +658,116 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
               </div>
             </div>
 
-            {/* Dishes Grid */}
+            {/* Dishes Container: Continuous Category Scroll Matching Customer Menu */}
             <div
+              ref={menuScrollContainerRef}
+              onScroll={handleMenuContainerScroll}
               style={{
                 flex: 1,
                 minHeight: 0,
                 overflowY: 'auto',
-                padding: '16px 16px 95px',
-                display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))',
-                gap: '16px',
-                alignContent: 'start',
+                padding: '16px 20px 95px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '28px',
               }}
             >
-              {filteredMenuItems.map((item) => {
-                const inCart = walkInCart.find((i) => i.menuItemId === item.id);
-                const qty = inCart ? inCart.quantity : 0;
+              {walkInSearch.trim() ? (
+                <div>
+                  <div style={{ marginBottom: '14px', fontSize: '13.5px', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                    Search Results for &ldquo;{walkInSearch}&rdquo; ({filteredSearchResults.length} {filteredSearchResults.length === 1 ? 'dish' : 'dishes'} found)
+                  </div>
+                  {filteredSearchResults.length === 0 ? (
+                    <div style={{ padding: '40px 16px', textAlign: 'center', color: 'var(--text-muted)', fontSize: '13.5px' }}>
+                      No dishes found matching &ldquo;{walkInSearch}&rdquo;.
+                    </div>
+                  ) : (
+                    <div
+                      style={{
+                        display: 'grid',
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))',
+                        gap: '16px',
+                        alignContent: 'start',
+                      }}
+                    >
+                      {filteredSearchResults.map((item) => renderItemCard(item))}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                categories.map((cat) => {
+                  const catItems = menuItems.filter((item) => isItemInCategory(item.category, cat));
+                  if (catItems.length === 0) return null;
 
-                return (
-                  <div
-                    key={item.id}
-                    onClick={() => handleAddToCart(item)}
-                    style={{
-                      backgroundColor: 'var(--bg-card)',
-                      borderRadius: 'var(--radius-lg)',
-                      border: qty > 0 ? '2px solid var(--primary)' : '1px solid var(--border-color)',
-                      overflow: 'hidden',
-                      display: 'flex',
-                      flexDirection: 'column',
-                      boxShadow: 'var(--shadow-sm)',
-                      cursor: 'pointer',
-                      transition: 'transform 0.12s ease',
-                    }}
-                  >
-                    <div style={{ height: '110px', backgroundColor: 'var(--bg-card-subtle)', position: 'relative', overflow: 'hidden' }}>
-                      <img
-                        src={item.image || '/hero-bg.jpg'}
-                        alt={item.name}
-                        style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                      />
-                      <span
+                  return (
+                    <section
+                      key={cat}
+                      id={`walkin-cat-${encodeURIComponent(cat)}`}
+                      style={{
+                        scrollMarginTop: '12px',
+                      }}
+                    >
+                      {/* Category Header */}
+                      <div
                         style={{
-                          position: 'absolute',
-                          top: '8px',
-                          left: '8px',
-                          backgroundColor: 'rgba(0,0,0,0.65)',
-                          color: '#FFFFFF',
-                          padding: '2px 8px',
-                          borderRadius: '4px',
-                          fontSize: '11px',
-                          fontWeight: 700,
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          paddingBottom: '10px',
+                          marginBottom: '16px',
+                          borderBottom: '2px solid var(--border-color)',
                         }}
                       >
-                        {item.category}
-                      </span>
-                    </div>
-
-                    <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', flex: 1, justifyContent: 'space-between', gap: '8px' }}>
-                      <div>
-                        <div style={{ fontWeight: 800, fontSize: '14.5px', color: 'var(--text-main)', lineHeight: 1.25 }}>
-                          {item.name}
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                          <span
+                            style={{
+                              width: '30px',
+                              height: '30px',
+                              borderRadius: '8px',
+                              backgroundColor: 'var(--primary-glow)',
+                              color: 'var(--primary)',
+                              display: 'flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                            }}
+                          >
+                            <Flame size={17} />
+                          </span>
+                          <h3 style={{ fontSize: '18px', fontWeight: 800, color: 'var(--text-main)', margin: 0 }}>
+                            {cat}
+                          </h3>
                         </div>
-                        <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)', marginTop: '4px', lineHeight: 1.3 }}>
-                          {item.description.slice(0, 65)}...
-                        </div>
-                      </div>
 
-                      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '6px', gap: '8px', flexWrap: 'wrap' }}>
-                        <span style={{ fontSize: '15px', fontWeight: 850, color: 'var(--primary)' }}>
-                          Rs. {Number(item.basePrice).toLocaleString()}
+                        <span
+                          style={{
+                            fontSize: '12px',
+                            fontWeight: 700,
+                            color: 'var(--text-muted)',
+                            backgroundColor: 'var(--bg-card-subtle)',
+                            padding: '3px 10px',
+                            borderRadius: 'var(--radius-full)',
+                            border: '1px solid var(--border-color)',
+                          }}
+                        >
+                          {catItems.length} {catItems.length === 1 ? 'Dish' : 'Dishes'}
                         </span>
-
-                        {qty > 0 ? (
-                          <div
-                            onClick={(e) => e.stopPropagation()}
-                            style={{
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '6px',
-                              backgroundColor: 'var(--bg-card-subtle)',
-                              padding: '3px 8px',
-                              borderRadius: 'var(--radius-md)',
-                              border: '1.5px solid var(--primary)',
-                            }}
-                          >
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleUpdateQty(item.id, -1);
-                              }}
-                              style={{
-                                width: '26px',
-                                height: '26px',
-                                borderRadius: '4px',
-                                border: 'none',
-                                backgroundColor: 'var(--primary)',
-                                color: '#FFFFFF',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                              }}
-                            >
-                              <Minus size={12} />
-                            </button>
-                            <span style={{ fontWeight: 850, fontSize: '13px', minWidth: '22px', textAlign: 'center', color: 'var(--primary)' }}>
-                              {qty}
-                            </span>
-                            <button
-                              onClick={(e) => {
-                                e.stopPropagation();
-                                handleUpdateQty(item.id, 1);
-                              }}
-                              style={{
-                                width: '26px',
-                                height: '26px',
-                                borderRadius: '4px',
-                                border: 'none',
-                                backgroundColor: 'var(--primary)',
-                                color: '#FFFFFF',
-                                cursor: 'pointer',
-                                display: 'flex',
-                                alignItems: 'center',
-                                justifyContent: 'center',
-                              }}
-                            >
-                              <Plus size={12} />
-                            </button>
-                          </div>
-                        ) : (
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              handleAddToCart(item);
-                            }}
-                            style={{
-                              padding: '7px 16px',
-                              borderRadius: 'var(--radius-md)',
-                              backgroundColor: 'var(--primary)',
-                              color: '#FFFFFF',
-                              border: 'none',
-                              fontSize: '12.5px',
-                              fontWeight: 800,
-                              cursor: 'pointer',
-                              display: 'flex',
-                              alignItems: 'center',
-                              gap: '5px',
-                              boxShadow: '0 2px 8px var(--primary-glow)',
-                              whiteSpace: 'nowrap',
-                              transition: 'all 0.15s ease',
-                            }}
-                          >
-                            <Plus size={14} strokeWidth={2.4} />
-                            <span>+ Add</span>
-                          </button>
-                        )}
                       </div>
-                    </div>
-                  </div>
-                );
-              })}
+
+                      {/* Grid of Dishes for this Category */}
+                      <div
+                        style={{
+                          display: 'grid',
+                          gridTemplateColumns: 'repeat(auto-fill, minmax(230px, 1fr))',
+                          gap: '16px',
+                          alignContent: 'start',
+                        }}
+                      >
+                        {catItems.map((item) => renderItemCard(item))}
+                      </div>
+                    </section>
+                  );
+                })
+              )}
             </div>
 
             {/* Bottom floating cart bar */}
@@ -725,9 +943,56 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
                 <label style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-main)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   🍽️ Select Dine-In Table for Guest:
                 </label>
-                <span style={{ fontSize: '11px', color: 'var(--primary)', fontWeight: 750, backgroundColor: 'var(--primary-light)', padding: '2px 8px', borderRadius: '10px' }}>
-                  Dine-In Seating
-                </span>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddTableForm(!showAddTableForm)}
+                    style={{
+                      padding: '3px 8px',
+                      borderRadius: '4px',
+                      border: '1px solid var(--primary)',
+                      backgroundColor: showAddTableForm ? 'var(--primary)' : 'rgba(234, 88, 12, 0.08)',
+                      color: showAddTableForm ? '#FFFFFF' : 'var(--primary)',
+                      fontSize: '11px',
+                      fontWeight: 750,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {showAddTableForm ? 'Close' : '+ Add Table'}
+                  </button>
+                  {branchTables.length > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        const target = branchTables.find((t) => t.number === walkInTable);
+                        if (!target) return;
+                        if (confirm(`Delete Table #${target.number}? This will permanently remove it from floor layout.`)) {
+                          deleteTable(target.id);
+                          const remaining = branchTables.filter((t) => t.id !== target.id);
+                          if (remaining.length > 0) {
+                            setWalkInTable(remaining[0].number);
+                          }
+                        }
+                      }}
+                      style={{
+                        padding: '3px 8px',
+                        borderRadius: '4px',
+                        border: '1px solid #EF4444',
+                        backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                        color: '#DC2626',
+                        fontSize: '11px',
+                        fontWeight: 750,
+                        cursor: 'pointer',
+                      }}
+                      title="Permanently delete this table"
+                    >
+                      🗑️ Delete Table
+                    </button>
+                  )}
+                  <span style={{ fontSize: '11px', color: 'var(--primary)', fontWeight: 750, backgroundColor: 'var(--primary-light)', padding: '2px 8px', borderRadius: '10px' }}>
+                    Dine-In Seating
+                  </span>
+                </div>
               </div>
               <select
                 value={walkInTable}
@@ -749,6 +1014,70 @@ export const WalkInOrderModal: React.FC<WalkInOrderModalProps> = ({
                   </option>
                 ))}
               </select>
+
+              {showAddTableForm && (
+                <div style={{ marginTop: '10px', padding: '10px', backgroundColor: 'var(--bg-card)', borderRadius: '6px', border: '1px solid var(--border-color)', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr) auto', gap: '8px', alignItems: 'end' }}>
+                  <div>
+                    <label style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Table #</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 15"
+                      value={newTableNum}
+                      onChange={(e) => setNewTableNum(e.target.value)}
+                      style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', fontSize: '12px' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Chairs</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={30}
+                      value={newTableCap}
+                      onChange={(e) => setNewTableCap(Number(e.target.value) || 4)}
+                      style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', fontSize: '12px' }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '10.5px', fontWeight: 700, color: 'var(--text-secondary)', display: 'block', marginBottom: '2px' }}>Floor</label>
+                    <input
+                      type="text"
+                      value={newTableFloor}
+                      onChange={(e) => setNewTableFloor(e.target.value)}
+                      style={{ width: '100%', padding: '6px 8px', borderRadius: '4px', border: '1px solid var(--border-color)', fontSize: '12px' }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!newTableNum.trim()) return;
+                      addTable({
+                        number: newTableNum.trim(),
+                        branchId: currentBranch.id,
+                        floor: newTableFloor.trim() || 'Ground Floor',
+                        capacity: Number(newTableCap) || 4,
+                        chairs: Number(newTableCap) || 4,
+                        status: 'available',
+                      });
+                      setWalkInTable(newTableNum.trim());
+                      setNewTableNum('');
+                      setShowAddTableForm(false);
+                    }}
+                    style={{
+                      padding: '6px 12px',
+                      borderRadius: '4px',
+                      backgroundColor: 'var(--primary)',
+                      color: '#FFFFFF',
+                      border: 'none',
+                      fontWeight: 750,
+                      fontSize: '12px',
+                      cursor: 'pointer',
+                    }}
+                  >
+                    Save Table
+                  </button>
+                </div>
+              )}
             </div>
 
 

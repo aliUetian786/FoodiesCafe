@@ -7,6 +7,10 @@
     "build": "npm --prefix app run build",
     "start": "npm --prefix app run start",
     "lint": "npm --prefix app run lint",
-    "db:init": "npm --prefix app run db:init"
+    "db:init": "npm --prefix app run db:init",
+    "mobile": "npm --prefix mobile run start",
+    "mobile:web": "npm --prefix mobile run web",
+    "mobile:android": "npm --prefix mobile run android",
+    "mobile:ios": "npm --prefix mobile run ios"
   }
 }

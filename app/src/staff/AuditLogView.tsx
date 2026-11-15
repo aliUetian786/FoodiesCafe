@@ -2,6 +2,7 @@
 
 import React, { useState } from 'react';
 import { useApp } from '@/context/AppContext';
+import { HistoricalLoadingModal } from '@/components/common/HistoricalLoadingModal';
 import {
   FileClock,
   Search,
@@ -154,6 +155,7 @@ export const AuditLogScreen: React.FC = () => {
         paddingRight: '4px',
       }}
     >
+      <HistoricalLoadingModal visible={isRefreshing} />
       {/* Top Banner Card */}
       <div
         style={{

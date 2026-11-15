@@ -1,7 +1,9 @@
 'use client';
 
-import React, { useMemo } from 'react';
+import React, { useMemo, useState } from 'react';
 import { useApp } from '@/context/AppContext';
+import { StoreMapModal } from '../customer/StoreMapModal';
+import { normalizeBranchId } from '@/types/cafe';
 import {
   TrendingUp,
   Building2,
@@ -16,6 +18,11 @@ import {
   XCircle,
   Lock,
   RotateCcw,
+  Bike,
+  Utensils,
+  Store,
+  Bell,
+  MapPin,
 } from 'lucide-react';
 
 export const OwnerOverviewScreen: React.FC<{ onNavigate: (v: string) => void }> = ({ onNavigate }) => {
@@ -23,21 +30,33 @@ export const OwnerOverviewScreen: React.FC<{ onNavigate: (v: string) => void }> 
     branches,
     orders,
     shifts,
-    complaints,
     refundRequests,
     setCurrentBranchId,
     setCurrentRole,
     managerAccessRequests,
     requestManagerAccess,
     revokeManagerAccess,
+    updateBranchSettings,
+    toggleBranchStatus,
     addToast,
+    openNotificationModal,
   } = useApp();
+
+  const [editingBranchId, setEditingBranchId] = useState<string | null>(null);
 
   // Helper to test if a timestamp/date string represents today
   const isToday = (dateStr?: string) => {
-    if (!dateStr) return false;
+    if (!dateStr) return true;
+    if (typeof dateStr === 'string' && (
+      dateStr.toLowerCase().includes('today') ||
+      dateStr.toLowerCase().includes('just now') ||
+      dateStr.toLowerCase().includes('ago') ||
+      dateStr.toLowerCase().includes('min')
+    )) {
+      return true;
+    }
     const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return false;
+    if (isNaN(d.getTime())) return true;
     const now = new Date();
     return (
       d.getDate() === now.getDate() &&
@@ -46,45 +65,70 @@ export const OwnerOverviewScreen: React.FC<{ onNavigate: (v: string) => void }> 
     );
   };
 
+  const isOrderPaid = (o: any) => {
+    if (!o || o.status === 'cancelled') return false;
+    if (o.paymentStatus === 'paid') return true;
+    if (o.paymentCollected === true) return true;
+    if (o.status === 'completed' || o.status === 'delivered') return true;
+    const method = String(o.paymentMethod || '').toLowerCase();
+    if (o.paymentStatus !== 'unpaid' && (
+      method.includes('wallet') ||
+      method.includes('card') ||
+      method.includes('bank') ||
+      method.includes('jazz') ||
+      method.includes('easy') ||
+      method.includes('raast') ||
+      method.includes('installment')
+    )) {
+      return true;
+    }
+    return false;
+  };
+
   // 1. ROW 1: TRUE ACTUAL DATA COMPUTED FROM DATABASE (Memoized for Redux performance)
-  const { todayOrders, totalSalesToday, totalOrdersTodayCount, totalCashCollectedToday, openComplaintsCount } = useMemo(() => {
+  const { todayOrders, paidOrdersTodayCount, totalSalesToday, totalOrdersTodayCount, totalCashCollectedToday, totalInProgressOrdersCount } = useMemo(() => {
     const tOrders = orders.filter(
       (o) => isToday(o.createdAt) || (o.status !== 'completed' && o.status !== 'cancelled')
     );
-    const sales = tOrders.reduce(
-      (sum, o) => sum + (o.paymentStatus === 'paid' ? Number(o.total || 0) : 0),
+    const paidTodayOrders = tOrders.filter(isOrderPaid);
+    const sales = paidTodayOrders.reduce(
+      (sum, o) => sum + Number(o.total || 0),
       0
     );
+    const inProgress = tOrders.filter(
+      (o) =>
+        o.status === 'placed' ||
+        o.status === 'accepted' ||
+        o.status === 'preparing' ||
+        o.status === 'ready' ||
+        o.status === 'out_for_delivery'
+    ).length;
     const cash = shifts
       .filter((s) => isToday(s.openedAt) || s.status === 'open')
       .reduce((sum, s) => sum + Number(s.cashCollected || 0), 0);
-    const complaintsCount = complaints.filter(
-      (c) => c.status !== 'closed' && c.status !== 'resolved'
-    ).length;
 
     return {
       todayOrders: tOrders,
+      paidOrdersTodayCount: paidTodayOrders.length,
       totalSalesToday: sales,
       totalOrdersTodayCount: tOrders.length,
       totalCashCollectedToday: cash,
-      openComplaintsCount: complaintsCount,
+      totalInProgressOrdersCount: inProgress,
     };
-  }, [orders, shifts, complaints]);
+  }, [orders, shifts]);
 
   // 2. ROW 2: TRUE ACTUAL MANAGEMENT AUDIT & ANOMALY ALERTS FROM DATABASE
-  const { pendingRefunds, shiftVariances, busyBranches, unassignedComplaints, totalAnomaliesCount } = useMemo(() => {
+  const { pendingRefunds, shiftVariances, busyBranches, totalAnomaliesCount } = useMemo(() => {
     const refunds = refundRequests.filter((r) => r.status === 'requested');
     const variances = shifts.filter((s) => typeof s.difference === 'number' && s.difference !== 0);
     const busy = branches.filter((b) => b.isBusy);
-    const unassigned = complaints.filter((c) => c.status === 'new');
     return {
       pendingRefunds: refunds,
       shiftVariances: variances,
       busyBranches: busy,
-      unassignedComplaints: unassigned,
-      totalAnomaliesCount: refunds.length + variances.length + busy.length + unassigned.length,
+      totalAnomaliesCount: refunds.length + variances.length + busy.length,
     };
-  }, [refundRequests, shifts, branches, complaints]);
+  }, [refundRequests, shifts, branches]);
 
   return (
     <div
@@ -97,15 +141,16 @@ export const OwnerOverviewScreen: React.FC<{ onNavigate: (v: string) => void }> 
         paddingRight: '6px',
       }}
     >
-      {/* Page Title: Removed "Overview / Role: platform_owner · Central multi-branch visibility, cash health & anomaly alerts" */}
-      <div>
+      {/* Page Title */}
+      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '12px' }}>
         <h1 style={{ fontSize: '26px', fontWeight: 800, margin: 0, color: 'var(--text-main)', letterSpacing: '-0.02em' }}>
           Platform Owner Console
         </h1>
       </div>
 
-      {/* ROW 1: 100% TRUE DATA FROM DATABASE (No dummy offsets) */}
+      {/* ROW 1: 4 TOP CARDS (Strictly Counting for Today) */}
       <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '16px' }}>
+        {/* Card 1: Paid Sales Today */}
         <div
           style={{
             backgroundColor: 'var(--bg-card)',
@@ -118,34 +163,89 @@ export const OwnerOverviewScreen: React.FC<{ onNavigate: (v: string) => void }> 
           <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
             All-Branches Sales Today
           </span>
-          <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--primary)', marginTop: '4px', letterSpacing: '-0.02em' }}>
+          <div style={{ fontSize: '28px', fontWeight: 800, color: totalSalesToday > 0 ? '#16A34A' : 'var(--primary)', marginTop: '4px', letterSpacing: '-0.02em' }}>
             Rs. {totalSalesToday.toLocaleString()}
           </div>
           <span style={{ fontSize: '12px', color: totalSalesToday > 0 ? '#16A34A' : 'var(--text-muted)', fontWeight: 600 }}>
-            {totalSalesToday > 0 ? '✓ Live Verified Paid Revenue' : 'Awaiting today first orders'}
+            {paidOrdersTodayCount > 0 ? `✓ ${paidOrdersTodayCount} Live Verified Paid Order${paidOrdersTodayCount === 1 ? '' : 's'}` : 'Awaiting today first paid orders'}
           </span>
         </div>
 
+        {/* Card 2: Total Orders Today (Clickable - Navigates to Orders History) */}
         <div
+          onClick={() => onNavigate('mgmt-customers')}
           style={{
             backgroundColor: 'var(--bg-card)',
             borderRadius: 'var(--radius-lg)',
             border: '1px solid var(--border-color)',
             padding: '20px',
             boxShadow: 'var(--shadow-sm)',
+            cursor: 'pointer',
+            transition: 'all 0.18s ease',
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLElement).style.borderColor = 'var(--primary)';
+            (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)';
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-color)';
+            (e.currentTarget as HTMLElement).style.transform = 'translateY(0)';
           }}
         >
-          <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-            Total Network Orders Today
-          </span>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Total Network Orders Today
+            </span>
+            <span style={{ fontSize: '11px', fontWeight: 800, color: 'var(--primary)', backgroundColor: 'var(--primary-light)', padding: '2px 8px', borderRadius: '6px' }}>
+              View ➔
+            </span>
+          </div>
           <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--text-main)', marginTop: '4px', letterSpacing: '-0.02em' }}>
             {totalOrdersTodayCount}
           </div>
           <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-            Across all 3 active cafe branches
+            Across all 3 active branches • Click to view
           </span>
         </div>
 
+        {/* Card 3: Pending Orders (Today) (Clickable - Replaces Avg Paid Order) */}
+        <div
+          onClick={() => onNavigate('mgmt-customers-pending')}
+          style={{
+            backgroundColor: 'var(--bg-card)',
+            borderRadius: 'var(--radius-lg)',
+            border: '1px solid var(--border-color)',
+            padding: '20px',
+            boxShadow: 'var(--shadow-sm)',
+            cursor: 'pointer',
+            transition: 'all 0.18s ease',
+          }}
+          onMouseEnter={(e) => {
+            (e.currentTarget as HTMLElement).style.borderColor = '#EA580C';
+            (e.currentTarget as HTMLElement).style.transform = 'translateY(-2px)';
+          }}
+          onMouseLeave={(e) => {
+            (e.currentTarget as HTMLElement).style.borderColor = 'var(--border-color)';
+            (e.currentTarget as HTMLElement).style.transform = 'translateY(0)';
+          }}
+        >
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+              Pending Orders (Today)
+            </span>
+            <span style={{ fontSize: '11px', fontWeight: 800, color: '#D97706', backgroundColor: '#FEF3C7', padding: '2px 8px', borderRadius: '6px' }}>
+              View ➔
+            </span>
+          </div>
+          <div style={{ fontSize: '28px', fontWeight: 800, color: totalInProgressOrdersCount > 0 ? '#EA580C' : 'var(--text-main)', marginTop: '4px', letterSpacing: '-0.02em' }}>
+            {totalInProgressOrdersCount}
+          </div>
+          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
+            Active in kitchen / delivery • Click to view
+          </span>
+        </div>
+
+        {/* Card 4: Active Open Branches */}
         <div
           style={{
             backgroundColor: 'var(--bg-card)',
@@ -156,181 +256,18 @@ export const OwnerOverviewScreen: React.FC<{ onNavigate: (v: string) => void }> 
           }}
         >
           <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-            Cash Collected in Tills
+            Active Open Branches
           </span>
-          <div style={{ fontSize: '28px', fontWeight: 800, color: '#16A34A', marginTop: '4px', letterSpacing: '-0.02em' }}>
-            Rs. {totalCashCollectedToday.toLocaleString()}
+          <div style={{ fontSize: '28px', fontWeight: 800, color: 'var(--text-main)', marginTop: '4px', letterSpacing: '-0.02em' }}>
+            {branches.filter((b) => b.isOpen).length} / {branches.length}
           </div>
           <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-            Physical active drawer shifts
-          </span>
-        </div>
-
-        <div
-          style={{
-            backgroundColor: 'var(--bg-card)',
-            borderRadius: 'var(--radius-lg)',
-            border: '1px solid var(--border-color)',
-            padding: '20px',
-            boxShadow: 'var(--shadow-sm)',
-          }}
-        >
-          <span style={{ fontSize: '11.5px', color: 'var(--text-muted)', fontWeight: 800, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-            Active Open Complaints
-          </span>
-          <div
-            style={{
-              fontSize: '28px',
-              fontWeight: 800,
-              color: openComplaintsCount > 0 ? '#EA580C' : '#16A34A',
-              marginTop: '4px',
-              letterSpacing: '-0.02em',
-            }}
-          >
-            {openComplaintsCount}
-          </div>
-          <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-            {openComplaintsCount === 0 ? '✓ All customer tickets resolved' : 'Requires representative review'}
+            All 3 city branches connected live
           </span>
         </div>
       </div>
 
-      {/* ROW 2: 100% TRUE MANAGEMENT AUDIT & ANOMALY ALERTS FROM DATABASE */}
-      <div
-        style={{
-          backgroundColor: totalAnomaliesCount > 0 ? 'var(--status-preparing-bg)' : 'rgba(22, 163, 74, 0.08)',
-          borderRadius: 'var(--radius-lg)',
-          border: `1px solid ${totalAnomaliesCount > 0 ? 'var(--status-preparing-text)' : '#16A34A'}`,
-          padding: '18px 22px',
-          display: 'flex',
-          flexDirection: 'column',
-          gap: '12px',
-        }}
-      >
-        <div
-          style={{
-            display: 'flex',
-            alignItems: 'center',
-            gap: '8px',
-            color: totalAnomaliesCount > 0 ? 'var(--status-preparing-text)' : '#16A34A',
-            fontWeight: 800,
-            fontSize: '14.5px',
-          }}
-        >
-          {totalAnomaliesCount > 0 ? <AlertOctagon size={18} /> : <CheckCircle2 size={18} />}
-          <span>
-            {totalAnomaliesCount > 0
-              ? `LIVE AUDIT & ANOMALY ALERTS (${totalAnomaliesCount} Active)`
-              : 'SYSTEM HEALTH CHECK: ALL BRANCHES OPERATING NORMALLY'}
-          </span>
-        </div>
-
-        {totalAnomaliesCount > 0 ? (
-          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '12px' }}>
-            {/* Real Pending Refund Requests */}
-            {pendingRefunds.map((ref) => {
-              const bName = branches.find((b) => b.id === ref.branchId)?.name || 'Branch';
-              return (
-                <div
-                  key={ref.id}
-                  style={{
-                    backgroundColor: 'var(--bg-card)',
-                    padding: '12px 16px',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid #DC2626',
-                    boxShadow: '0 2px 6px rgba(220, 38, 38, 0.08)',
-                  }}
-                >
-                  <div style={{ fontSize: '13px', fontWeight: 800, color: '#DC2626', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span>⚠️ Pending Cash Refund Request</span>
-                  </div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px', lineHeight: 1.45 }}>
-                    <strong>{bName}</strong>: Rs. {Number(ref.amount).toLocaleString()} requested on Order #{ref.orderNumber}.
-                    <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '2px' }}>
-                      Reason: "{ref.reason}"
-                    </div>
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* Real Cash Shift Discrepancies */}
-            {shiftVariances.map((s) => {
-              const bName = branches.find((b) => b.id === s.branchId)?.name || s.branchId;
-              return (
-                <div
-                  key={s.id}
-                  style={{
-                    backgroundColor: 'var(--bg-card)',
-                    padding: '12px 16px',
-                    borderRadius: 'var(--radius-md)',
-                    border: '1px solid #D97706',
-                    boxShadow: '0 2px 6px rgba(217, 119, 6, 0.08)',
-                  }}
-                >
-                  <div style={{ fontSize: '13px', fontWeight: 800, color: '#D97706', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                    <span>⚠️ Shift Reconciliation Variance</span>
-                  </div>
-                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px', lineHeight: 1.45 }}>
-                    <strong>{bName}</strong> ({s.cashierName}): Counted Rs. {Number(s.countedCash || 0).toLocaleString()} vs expected Rs. {Number(s.expectedCash || 0).toLocaleString()} (Difference: Rs. {s.difference}).
-                    {s.differenceReason && (
-                      <div style={{ color: 'var(--text-muted)', fontSize: '11px', marginTop: '2px' }}>
-                        Note: "{s.differenceReason}"
-                      </div>
-                    )}
-                  </div>
-                </div>
-              );
-            })}
-
-            {/* Real Busy Mode Active */}
-            {busyBranches.map((b) => (
-              <div
-                key={b.id}
-                style={{
-                  backgroundColor: 'var(--bg-card)',
-                  padding: '12px 16px',
-                  borderRadius: 'var(--radius-md)',
-                  border: '1px solid var(--primary)',
-                }}
-              >
-                <div style={{ fontSize: '13px', fontWeight: 800, color: 'var(--primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span>ℹ️ Busy Mode Active</span>
-                </div>
-                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                  <strong>{b.name}</strong> is operating in Busy Mode. Kitchen prep time extended to {b.prepTimeEstimateMin}m.
-                </div>
-              </div>
-            ))}
-
-            {/* Real New Complaints */}
-            {unassignedComplaints.map((c) => (
-              <div
-                key={c.id}
-                style={{
-                  backgroundColor: 'var(--bg-card)',
-                  padding: '12px 16px',
-                  borderRadius: 'var(--radius-md)',
-                  border: '1px solid #2563EB',
-                }}
-              >
-                <div style={{ fontSize: '13px', fontWeight: 800, color: '#2563EB', display: 'flex', alignItems: 'center', gap: '6px' }}>
-                  <span>💬 New Customer Complaint Ticket</span>
-                </div>
-                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                  Ticket #{c.ticketNumber} ({c.customerName}): "{c.subject}". Requires support representative reply.
-                </div>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <div style={{ fontSize: '13px', color: '#15803D', fontWeight: 600 }}>
-            Zero cash drawer variances, zero unauthorized refunds, and no unhandled customer escalations recorded across the network.
-          </div>
-        )}
-      </div>
-
-      {/* PER-BRANCH COMPARISON & MUTUAL MANAGER AGREEMENT SWITCH CARDS */}
+      {/* PER-BRANCH COMPARISON & MUTUAL MANAGER AGREEMENT SWITCH CARDS (STRICTLY TODAY'S METRICS) */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         <div>
           <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
@@ -347,6 +284,26 @@ export const OwnerOverviewScreen: React.FC<{ onNavigate: (v: string) => void }> 
             const isApproved = req?.status === 'approved';
             const isPending = req?.status === 'pending';
             const isRejected = req?.status === 'rejected';
+
+            const normBId = normalizeBranchId(b.id);
+            const bOrders = orders.filter(
+              (o) => !o.branchId || o.branchId === b.id || normalizeBranchId(o.branchId) === normBId
+            );
+            const bOrdersToday = bOrders.filter((o) => isToday(o.createdAt));
+            const bPaidOrdersList = bOrdersToday.filter(isOrderPaid);
+            const bSalesToday = bPaidOrdersList.reduce(
+              (sum, o) => sum + Number(o.total || 0),
+              0
+            );
+            const bInProgress = bOrdersToday.filter(
+              (o) =>
+                o.status === 'placed' ||
+                o.status === 'accepted' ||
+                o.status === 'preparing' ||
+                o.status === 'ready' ||
+                o.status === 'out_for_delivery'
+            ).length;
+            const bPaidOrders = bPaidOrdersList.length;
 
             return (
               <div
@@ -367,7 +324,30 @@ export const OwnerOverviewScreen: React.FC<{ onNavigate: (v: string) => void }> 
                     <h4 style={{ fontSize: '17px', fontWeight: 800, color: 'var(--text-main)', margin: 0 }}>
                       {b.name}
                     </h4>
-                    <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>{b.city}</span>
+                    <button
+                      type="button"
+                      onClick={() => setEditingBranchId(b.id)}
+                      title="Click to view and edit branch location & OpenStreetMap pin"
+                      style={{
+                        background: 'none',
+                        border: '1px solid rgba(234, 88, 12, 0.25)',
+                        padding: '2px 7px',
+                        marginTop: '4px',
+                        borderRadius: '6px',
+                        backgroundColor: 'rgba(234, 88, 12, 0.08)',
+                        color: '#C2410C',
+                        fontSize: '11.5px',
+                        fontWeight: 650,
+                        cursor: 'pointer',
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                        textAlign: 'left',
+                      }}
+                    >
+                      <MapPin size={12} color="#EA580C" />
+                      <span>{b.city} • {b.address} (Edit Location 📍)</span>
+                    </button>
                   </div>
                   <span
                     style={{
@@ -383,21 +363,136 @@ export const OwnerOverviewScreen: React.FC<{ onNavigate: (v: string) => void }> 
                   </span>
                 </div>
 
+                {/* Real-Time Live Branch Metrics Grid */}
+                <div
+                  style={{
+                    display: 'grid',
+                    gridTemplateColumns: 'repeat(3, 1fr)',
+                    gap: '8px',
+                    backgroundColor: 'var(--bg-card-subtle)',
+                    padding: '12px',
+                    borderRadius: 'var(--radius-md)',
+                    border: '1px solid var(--border-color)',
+                  }}
+                >
+                  <div>
+                    <span style={{ fontSize: '10.5px', color: 'var(--text-muted)', fontWeight: 750, textTransform: 'uppercase', display: 'block' }}>Sales Today</span>
+                    <strong style={{ fontSize: '14px', color: '#16A34A' }}>Rs. {bSalesToday.toLocaleString()}</strong>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '10.5px', color: 'var(--text-muted)', fontWeight: 750, textTransform: 'uppercase', display: 'block' }}>Orders Today</span>
+                    <strong style={{ fontSize: '14px', color: 'var(--text-main)' }}>{bOrdersToday.length} <span style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-muted)' }}>({bPaidOrders} Paid)</span></strong>
+                  </div>
+                  <div>
+                    <span style={{ fontSize: '10.5px', color: 'var(--text-muted)', fontWeight: 750, textTransform: 'uppercase', display: 'block' }}>In Progress</span>
+                    <strong style={{ fontSize: '14px', color: '#EA580C' }}>{bInProgress} Orders</strong>
+                  </div>
+                </div>
+
+                {/* Operational Details */}
                 <div
                   style={{
                     display: 'grid',
                     gridTemplateColumns: 'repeat(2, 1fr)',
-                    gap: '10px',
-                    fontSize: '12.5px',
+                    gap: '8px',
+                    fontSize: '12px',
                     backgroundColor: 'var(--bg-card-subtle)',
-                    padding: '12px',
+                    padding: '10px 12px',
                     borderRadius: 'var(--radius-md)',
                   }}
                 >
                   <div>⏱️ Prep: <strong>{b.prepTimeEstimateMin}m</strong></div>
                   <div>⚡ Edit Win: <strong>{b.fullEditWindowMin}m</strong></div>
-                  <div>🔒 Cutoff: <strong>{b.stopAddOnsMinBeforeReady}m</strong></div>
-                  <div>{b.isBusy ? '⚠️ Status: Busy' : '✓ Status: Normal'}</div>
+                  <div>🛵 Delivery: <strong>{b.deliveryEnabled !== false ? 'Enabled' : 'Paused'} ({b.maxOrderDistanceKm || 50}km)</strong></div>
+                  <div>📍 Table QR: <strong>{b.tableQrMaxDistanceMeters || 300}m</strong></div>
+                </div>
+
+                {/* Platform Owner Quick Operational Overrides */}
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {/* Storefront Open/Closed Toggle */}
+                  <button
+                    onClick={() => toggleBranchStatus(b.id)}
+                    style={{
+                      flex: 1,
+                      padding: '7px 10px',
+                      borderRadius: '6px',
+                      border: `1.5px solid ${b.isOpen ? '#16A34A' : '#DC2626'}`,
+                      backgroundColor: b.isOpen ? 'rgba(22, 163, 74, 0.08)' : 'rgba(220, 38, 38, 0.08)',
+                      color: b.isOpen ? '#15803D' : '#DC2626',
+                      fontWeight: 800,
+                      fontSize: '11.5px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '5px',
+                    }}
+                  >
+                    {b.isOpen ? <CheckCircle size={13} /> : <XCircle size={13} />}
+                    <span>{b.isOpen ? 'Store: OPEN' : 'Store: CLOSED'}</span>
+                  </button>
+
+                  {/* Rush Hour Toggle */}
+                  <button
+                    onClick={() => {
+                      const nextBusy = !b.isBusy;
+                      updateBranchSettings(b.id, { isBusy: nextBusy });
+                      addToast({
+                        type: 'info',
+                        title: nextBusy ? 'Busy Mode On' : 'Busy Mode Off',
+                        message: `${b.name} rush hour mode set to ${nextBusy ? 'Active (+15m)' : 'Normal'}.`,
+                      });
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '7px 10px',
+                      borderRadius: '6px',
+                      border: `1.5px solid ${b.isBusy ? '#EA580C' : 'var(--border-color)'}`,
+                      backgroundColor: b.isBusy ? 'rgba(234, 88, 12, 0.1)' : 'var(--bg-card-subtle)',
+                      color: b.isBusy ? '#EA580C' : 'var(--text-muted)',
+                      fontWeight: 750,
+                      fontSize: '11.5px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '5px',
+                    }}
+                  >
+                    <AlertOctagon size={13} />
+                    <span>{b.isBusy ? 'Rush Active' : 'Rush Mode'}</span>
+                  </button>
+
+                  {/* Delivery Toggle */}
+                  <button
+                    onClick={() => {
+                      const nextDelivery = b.deliveryEnabled === false;
+                      updateBranchSettings(b.id, { deliveryEnabled: nextDelivery });
+                      addToast({
+                        type: nextDelivery ? 'success' : 'warning',
+                        title: nextDelivery ? 'Delivery Active' : 'Delivery Paused',
+                        message: `${b.name} doorstep delivery ${nextDelivery ? 'enabled' : 'paused'}.`,
+                      });
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '7px 10px',
+                      borderRadius: '6px',
+                      border: `1.5px solid ${b.deliveryEnabled !== false ? '#2563EB' : 'var(--border-color)'}`,
+                      backgroundColor: b.deliveryEnabled !== false ? 'rgba(37, 99, 235, 0.08)' : 'var(--bg-card-subtle)',
+                      color: b.deliveryEnabled !== false ? '#2563EB' : 'var(--text-muted)',
+                      fontWeight: 750,
+                      fontSize: '11.5px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '5px',
+                    }}
+                  >
+                    <Bike size={13} />
+                    <span>{b.deliveryEnabled !== false ? 'Delivery: ON' : 'Delivery: OFF'}</span>
+                  </button>
                 </div>
 
                 {/* MUTUAL AGREEMENT SWITCH TO MANAGER MODE WORKFLOW */}
@@ -572,6 +667,16 @@ export const OwnerOverviewScreen: React.FC<{ onNavigate: (v: string) => void }> 
           })}
         </div>
       </div>
+
+      {/* Branch Location & OpenStreetMap Editor Modal */}
+      {editingBranchId && (
+        <StoreMapModal
+          isOpen={true}
+          onClose={() => setEditingBranchId(null)}
+          startInEditMode={true}
+          initialEditingBranchId={editingBranchId}
+        />
+      )}
     </div>
   );
 };

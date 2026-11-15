@@ -2,7 +2,7 @@
 
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '@/context/AppContext';
-import { Table, TableStatus, OrderItem, MenuItem, Order, OrderStatus } from '@/types/cafe';
+import { Table, TableStatus, OrderItem, MenuItem, Order, OrderStatus, normalizeBranchId } from '@/types/cafe';
 import {
   QrCode,
   CheckCircle,
@@ -76,7 +76,10 @@ export const TableSelectionScreen: React.FC<TableSelectionScreenProps> = ({ onNa
   } = useApp();
 
   const branchTables = useMemo(() => {
-    return tables.filter((t) => !t.branchId || t.branchId === currentBranchId);
+    const normId = normalizeBranchId(currentBranchId);
+    return tables.filter(
+      (t) => !t.branchId || t.branchId === currentBranchId || normalizeBranchId(t.branchId) === normId
+    );
   }, [tables, currentBranchId]);
 
   // Read URL query params on mount for direct table QR link
@@ -534,34 +537,21 @@ export const TableSelectionScreen: React.FC<TableSelectionScreenProps> = ({ onNa
     }
 
     // Place new Dine-In order
-    const orderData: Partial<Order> = {
-      orderNumber: `FC-${Math.floor(1000 + Math.random() * 9000)}`,
-      branchId: currentBranch.id,
-      customerId: currentUser?.id || `cust-${Date.now()}`,
-      customerName: customerName || `Table ${currentTable.number} Guest`,
-      customerPhone: customerPhone.startsWith('+92') ? customerPhone : `+92 ${cleanPhone.slice(-10)}`,
-      type: 'dine_in',
-      tableNumber: currentTable.number,
-      tablePin: currentTable.pin || '4921',
-      status: 'placed',
-      paymentStatus: 'unpaid',
-      paymentMethod: 'Cash',
-      items: tableCart,
-      originalSubtotal: tableSubtotal,
-      addOnSubtotal: 0,
-      tax: taxAmount,
-      total: tableTotal,
-      notes: orderNotes ? `Table QR Order: ${orderNotes}` : 'Table QR Order',
-      sentToKitchen: true,
-      sentToKitchenAt: new Date().toISOString(),
-      isWalkIn: false,
-      isTableQr: true,
-      assignedWaiterId: assignedWaiter.id,
-      assignedWaiterName: assignedWaiter.name,
-      waiterNotified: true,
-    };
-
-    const placed = await placeOrder(orderData as any);
+    const placed = placeOrder(
+      'dine_in',
+      currentTable.number,
+      currentTable.pin || '4921',
+      undefined,
+      undefined,
+      'Cash',
+      tableCart,
+      {
+        customerId: currentUser?.id || `cust-${Date.now()}`,
+        customerName: customerName || `Table ${currentTable.number} Guest`,
+        customerPhone: customerPhone.startsWith('+92') ? customerPhone : `+92 ${cleanPhone.slice(-10)}`,
+        notes: orderNotes ? `Table QR Order: ${orderNotes}` : 'Table QR Order',
+      }
+    );
 
     // Save active table session
     setActiveTableSession({
@@ -2399,24 +2389,46 @@ export const TableSelectionScreen: React.FC<TableSelectionScreenProps> = ({ onNa
               </p>
             </div>
 
-            <button
-              onClick={() => {
-                const firstAvail = branchTables.find((t) => t.status === 'available');
-                if (firstAvail) setSelectedTableId(firstAvail.id);
-              }}
-              style={{
-                padding: '12px 24px',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: 'var(--primary)',
-                color: '#FFFFFF',
-                fontWeight: 800,
-                fontSize: '14px',
-                cursor: 'pointer',
-                border: 'none',
-              }}
-            >
-              Select Another Available Table
-            </button>
+            <div style={{ display: 'flex', gap: '10px', width: '100%', maxWidth: '420px', marginTop: '6px' }}>
+              <button
+                type="button"
+                onClick={handleStartOrdering}
+                style={{
+                  flex: 1,
+                  padding: '12px 14px',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: 'var(--primary)',
+                  color: '#FFFFFF',
+                  fontWeight: 800,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                  border: 'none',
+                  boxShadow: '0 4px 14px var(--primary-glow)',
+                }}
+              >
+                I'm Seated Here (Order Now)
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const firstAvail = branchTables.find((t) => t.status === 'available');
+                  if (firstAvail) setSelectedTableId(firstAvail.id);
+                }}
+                style={{
+                  flex: 1,
+                  padding: '12px 14px',
+                  borderRadius: 'var(--radius-md)',
+                  backgroundColor: 'var(--bg-card-subtle)',
+                  border: '1px solid var(--border-color)',
+                  color: 'var(--text-main)',
+                  fontWeight: 800,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                }}
+              >
+                Pick Another Table
+              </button>
+            </div>
           </div>
         )}
       </div>

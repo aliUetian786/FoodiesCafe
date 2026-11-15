@@ -1,9 +1,10 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
-import { Table, TableStatus } from '@/types/cafe';
+import { Table, TableStatus, normalizeBranchId } from '@/types/cafe';
 import { ModalConfirmation } from '@/components/common/ModalConfirmation';
+import { HistoricalLoadingModal } from '@/components/common/HistoricalLoadingModal';
 import {
   LayoutGrid,
   Users,
@@ -23,8 +24,34 @@ import {
   ShieldCheck,
   DollarSign,
   Plus,
+  Banknote,
+  CreditCard,
+  ShoppingBag,
+  Key,
+  ChevronLeft,
+  ChevronRight,
+  X,
+  ChefHat,
 } from 'lucide-react';
 import { WalkInOrderModal } from '@/staff/WalkInOrderModal';
+
+const formatDateYYYYMMDD = (d: Date): string => {
+  const y = d.getFullYear();
+  const m = String(d.getMonth() + 1).padStart(2, '0');
+  const day = String(d.getDate()).padStart(2, '0');
+  return `${y}-${m}-${day}`;
+};
+
+const formatDisplayDate = (dateStr: string): string => {
+  const [y, m, d] = dateStr.split('-').map(Number);
+  const dateObj = new Date(y, m - 1, d);
+  return dateObj.toLocaleDateString('en-US', {
+    weekday: 'short',
+    day: 'numeric',
+    month: 'short',
+    year: 'numeric',
+  });
+};
 
 interface FloorTablesScreenProps {
   initialView?: 'tables' | 'server_orders';
@@ -36,28 +63,260 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
     currentBranchId,
     currentBranch,
     updateTableStatus,
+    updateTable,
+    generateTableQr,
     updateOrderStatus,
+    markOrderDeliveredToTable,
+    markOrderDoneAndCollected,
     orders,
     addToast,
     currentRole,
     tableSessions,
     users,
+    currentUser,
+    fetchOlderOrders,
+    isFetchingOlderOrders,
+    filterOrdersToToday,
+    addTable,
+    deleteTable,
   } = useApp();
 
   const isManager = currentRole === 'branch_manager';
+  const isFloorStaff = currentRole === 'floor_staff';
 
   const [viewMode, setViewMode] = useState<'tables' | 'server_orders'>(initialView);
   const [activeTab, setActiveTab] = useState<'grid' | 'reservations'>('grid');
+  const [selectedFloor, setSelectedFloor] = useState<string>('All Floors');
+  const [tableScope, setTableScope] = useState<'assigned' | 'all'>('all');
   const [managerTab, setManagerTab] = useState<'sessions' | 'waiters' | 'layout'>('sessions');
   const [sessionSearch, setSessionSearch] = useState('');
   const [sessionDateFilter, setSessionDateFilter] = useState<'today' | 'all'>('today');
   const [selectedTable, setSelectedTable] = useState<Table | null>(null);
   const [confirmFreeTableId, setConfirmFreeTableId] = useState<string | null>(null);
+  const [showFloorAddTable, setShowFloorAddTable] = useState(false);
+  const [newFloorTableNum, setNewFloorTableNum] = useState('');
+  const [newFloorTableCap, setNewFloorTableCap] = useState(4);
+  const [newFloorTableFloor, setNewFloorTableFloor] = useState('Ground Floor');
   const [walkInModalOpen, setWalkInModalOpen] = useState(false);
   const [walkInTableDefault, setWalkInTableDefault] = useState<string | undefined>(undefined);
 
-  const branchTables = useMemo(() => tables.filter((t) => t.branchId === currentBranchId), [tables, currentBranchId]);
-  const dineInOrders = useMemo(() => orders.filter((o) => o.type === 'dine_in' && o.status !== 'completed' && o.status !== 'cancelled'), [orders]);
+  // Waiter Money Records & Server Orders Filter State
+  const todayStr = useMemo(() => formatDateYYYYMMDD(new Date()), []);
+  const yesterdayStr = useMemo(() => {
+    const yest = new Date();
+    yest.setDate(yest.getDate() - 1);
+    return formatDateYYYYMMDD(yest);
+  }, []);
+  const [dateScope, setDateScope] = useState<'today' | 'yesterday' | 'week' | 'date' | 'all'>('today');
+  const [selectedDate, setSelectedDate] = useState<string>(todayStr);
+  const [isDatePickerModalOpen, setIsDatePickerModalOpen] = useState(false);
+  const [queueScope, setQueueScope] = useState<'station' | 'all'>('all');
+  const [stageFilter, setStageFilter] = useState<'all' | 'ready' | 'cooking' | 'served'>('all');
+
+  // On-demand database loading when querying older days
+  useEffect(() => {
+    if (viewMode === 'server_orders') {
+      if (dateScope === 'today') {
+        filterOrdersToToday();
+      } else {
+        fetchOlderOrders(
+          currentBranch.id,
+          dateScope === 'date' ? undefined : dateScope,
+          dateScope === 'date' ? selectedDate : undefined,
+          dateScope === 'date' ? selectedDate : undefined
+        );
+      }
+    }
+  }, [viewMode, dateScope, selectedDate, currentBranch.id]);
+
+  const normCurrentBranchId = normalizeBranchId(currentBranchId);
+  const branchTables = useMemo(
+    () => tables.filter((t) => !t.branchId || t.branchId === currentBranchId || normalizeBranchId(t.branchId) === normCurrentBranchId),
+    [tables, currentBranchId, normCurrentBranchId]
+  );
+  const myAssignedTableNums = useMemo(() => currentUser?.assignedTableNumbers || [], [currentUser?.assignedTableNumbers]);
+  
+  // Tables assigned to this floor staff member (via assignedTableNumbers, assignedWaiterId, or assignedWaiterName)
+  const myAssignedTables = useMemo(() => {
+    return branchTables.filter(
+      (t) =>
+        (myAssignedTableNums.length > 0 && myAssignedTableNums.includes(t.number)) ||
+        (currentUser?.id && t.assignedWaiterId === currentUser.id) ||
+        (currentUser?.name && t.assignedWaiterName === currentUser.name)
+    );
+  }, [branchTables, myAssignedTableNums, currentUser?.id, currentUser?.name]);
+
+  const hasAssignedStation = myAssignedTables.length > 0;
+
+  // Available Waiters / Floor Staff for table assignment
+  const availableWaiters = useMemo(() => {
+    const bId = normalizeBranchId(currentBranchId);
+    const list = (users || []).filter((u) => {
+      const isRole = u.role === 'floor_staff' || (u.role as string) === 'waiter';
+      if (!isRole) return false;
+      if (!bId || bId === 'all') return true;
+      return !u.branchId || normalizeBranchId(u.branchId) === bId;
+    });
+    if (list.length === 0) {
+      return (users || []).filter((u) => u.role === 'floor_staff' || (u.role as string) === 'waiter');
+    }
+    return list;
+  }, [users, currentBranchId]);
+
+  const displayedBranchTables = useMemo(() => {
+    let list = branchTables;
+    if (selectedFloor !== 'All Floors') {
+      list = list.filter((t) => (t.floor || 'Ground Floor') === selectedFloor);
+    }
+    if (isFloorStaff && tableScope === 'assigned') {
+      return list.filter(
+        (t) =>
+          (myAssignedTableNums.length > 0 && myAssignedTableNums.includes(t.number)) ||
+          (currentUser?.id && t.assignedWaiterId === currentUser.id) ||
+          (currentUser?.name && t.assignedWaiterName === currentUser.name)
+      );
+    }
+    return list;
+  }, [branchTables, selectedFloor, isFloorStaff, tableScope, myAssignedTableNums, currentUser?.id, currentUser?.name]);
+
+  const branchDineInOrders = useMemo(
+    () =>
+      orders.filter(
+        (o) =>
+          o.type === 'dine_in' &&
+          (!o.branchId || o.branchId === currentBranchId || normalizeBranchId(o.branchId) === normCurrentBranchId)
+      ),
+    [orders, currentBranchId, normCurrentBranchId]
+  );
+
+  const dineInOrders = useMemo(
+    () => branchDineInOrders.filter((o) => o.status !== 'completed' && o.status !== 'cancelled'),
+    [branchDineInOrders]
+  );
+
+  const servedDineInOrders = useMemo(
+    () => branchDineInOrders.filter((o) => o.status === 'served' || o.status === 'completed' || o.status === 'taken'),
+    [branchDineInOrders]
+  );
+
+  const getOrderDateStr = (o: any): string => {
+    const ts = o.completedAt || o.deliveredAt || o.createdAt;
+    if (!ts) return todayStr;
+    const d = new Date(ts);
+    if (isNaN(d.getTime())) return todayStr;
+    return formatDateYYYYMMDD(d);
+  };
+
+  const filteredServedOrders = useMemo(() => {
+    const now = new Date();
+    const weekAgoMs = now.getTime() - 7 * 24 * 60 * 60 * 1000;
+    return servedDineInOrders.filter((o) => {
+      const orderDateStr = getOrderDateStr(o);
+      const parsedTime = new Date(o.completedAt || o.deliveredAt || o.createdAt).getTime();
+      const orderTimeMs = isNaN(parsedTime) ? now.getTime() : parsedTime;
+      if (dateScope === 'today') return orderDateStr === todayStr;
+      if (dateScope === 'yesterday') return orderDateStr === yesterdayStr;
+      if (dateScope === 'date') return orderDateStr === selectedDate;
+      if (dateScope === 'week') return orderTimeMs >= weekAgoMs;
+      return true;
+    });
+  }, [servedDineInOrders, dateScope, selectedDate, todayStr, yesterdayStr]);
+
+  const totalOrdersCount = filteredServedOrders.length;
+  const totalCashCollected = useMemo(
+    () =>
+      filteredServedOrders
+        .filter((o) => (o.paymentMethod || '').includes('Cash') || (o.paymentMethod || '').includes('COD'))
+        .reduce((sum, o) => sum + (Number(o.total) || 0), 0),
+    [filteredServedOrders]
+  );
+  const totalOnlinePaid = useMemo(
+    () =>
+      filteredServedOrders
+        .filter((o) => !(o.paymentMethod || '').includes('Cash') && !(o.paymentMethod || '').includes('COD'))
+        .reduce((sum, o) => sum + (Number(o.total) || 0), 0),
+    [filteredServedOrders]
+  );
+  const totalSettledValue = useMemo(
+    () => filteredServedOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0),
+    [filteredServedOrders]
+  );
+
+  const recentDays = useMemo(() => {
+    const days: { dateStr: string; label: string; weekday: string }[] = [];
+    for (let i = 0; i < 7; i++) {
+      const d = new Date();
+      d.setDate(d.getDate() - i);
+      const str = formatDateYYYYMMDD(d);
+      let label = `${d.getDate()} ${d.toLocaleDateString('en-US', { month: 'short' })}`;
+      if (i === 0) label = 'Today';
+      else if (i === 1) label = 'Yesterday';
+      days.push({
+        dateStr: str,
+        label,
+        weekday: d.toLocaleDateString('en-US', { weekday: 'short' }),
+      });
+    }
+    return days;
+  }, []);
+
+  const activeScopeLabel = useMemo(() => {
+    if (dateScope === 'today') return `Today (${formatDisplayDate(todayStr)})`;
+    if (dateScope === 'yesterday') return `Yesterday (${formatDisplayDate(yesterdayStr)})`;
+    if (dateScope === 'date') return `${formatDisplayDate(selectedDate)}`;
+    if (dateScope === 'week') return 'Past 7 Days';
+    return 'All Time History';
+  }, [dateScope, selectedDate, todayStr, yesterdayStr]);
+
+  const handleStepDay = (delta: number) => {
+    const [y, m, d] = selectedDate.split('-').map(Number);
+    const curr = new Date(y, m - 1, d);
+    curr.setDate(curr.getDate() + delta);
+    if (curr > new Date()) {
+      addToast({ type: 'warning', title: 'Future Date', message: 'Cannot select future dates.' });
+      return;
+    }
+    const nextStr = formatDateYYYYMMDD(curr);
+    setSelectedDate(nextStr);
+    setDateScope('date');
+  };
+
+  const stationActiveOrders = useMemo(() => {
+    if (!hasAssignedStation) return dineInOrders;
+    return dineInOrders.filter(
+      (o) =>
+        (o.tableNumber && myAssignedTableNums.includes(o.tableNumber)) ||
+        (currentUser?.id && o.assignedWaiterId === currentUser.id) ||
+        (currentUser?.name && o.assignedWaiterName === currentUser.name) ||
+        myAssignedTables.some((t) => String(t.number) === String(o.tableNumber))
+    );
+  }, [dineInOrders, hasAssignedStation, myAssignedTableNums, currentUser?.id, currentUser?.name, myAssignedTables]);
+
+  const baseServerOrders = queueScope === 'station' ? stationActiveOrders : dineInOrders;
+  const readyCount = useMemo(() => baseServerOrders.filter((o) => o.status === 'ready').length, [baseServerOrders]);
+  const cookingCount = useMemo(
+    () => baseServerOrders.filter((o) => o.status === 'preparing' || o.status === 'accepted' || o.status === 'placed').length,
+    [baseServerOrders]
+  );
+  const servedCount = useMemo(() => baseServerOrders.filter((o) => o.status === 'served').length, [baseServerOrders]);
+
+  const displayedServerOrders = useMemo(() => {
+    return baseServerOrders.filter((o) => {
+      if (stageFilter === 'ready') return o.status === 'ready';
+      if (stageFilter === 'cooking') return o.status === 'preparing' || o.status === 'accepted' || o.status === 'placed';
+      if (stageFilter === 'served') return o.status === 'served';
+      return true;
+    });
+  }, [baseServerOrders, stageFilter]);
+
+  const activeOrderForSelectedTable = useMemo(() => {
+    if (!selectedTable) return null;
+    return dineInOrders.find(
+      (o) =>
+        String(o.tableNumber) === String(selectedTable.number) ||
+        String(o.tableNumber) === String(selectedTable.id)
+    );
+  }, [dineInOrders, selectedTable]);
   const branchSessions = (tableSessions || []).filter((s) => !s.branchId || s.branchId === currentBranchId);
 
   const isDateToday = (dateStr?: string) => {
@@ -116,19 +375,82 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
   };
 
   if (isManager) {
-    const waiterStats = [
-      { id: 'w1', name: 'Bilal Raza', role: 'Floor Captain & Waiter', baseOrders: 6, baseSales: 11450 },
-      { id: 'w2', name: 'Usman Qureshi', role: 'Senior Floor Waiter', baseOrders: 4, baseSales: 7800 },
-    ].map((w) => {
+    // 1. Gather floor staff: registered branch floor staff users + fallback
+    const registeredFloorUsers = users.filter(
+      (u) => u.role === 'floor_staff' && (!u.branchId || u.branchId === currentBranch.id)
+    );
+
+    const floorStaffList = [
+      ...registeredFloorUsers.map((u) => ({
+        id: u.id,
+        name: u.name,
+        role: 'Floor Staff & Waiter',
+        baseOrders: 0,
+        baseSales: 0,
+      })),
+    ];
+
+    if (floorStaffList.length === 0) {
+      floorStaffList.push(
+        { id: 'user-floor', name: 'Bilal Raza', role: 'Floor Captain & Waiter', baseOrders: 6, baseSales: 11450 },
+        { id: 'w2', name: 'Usman Qureshi', role: 'Senior Floor Waiter', baseOrders: 4, baseSales: 7800 }
+      );
+    }
+
+    const waiterStats = floorStaffList.map((w) => {
+      // Find dine-in orders attributed to this waiter
+      const waiterOrders = branchDineInOrders.filter((o) => {
+        const matchId = o.assignedWaiterId === w.id;
+        const matchName = Boolean(
+          o.assignedWaiterName &&
+          w.name &&
+          o.assignedWaiterName.toLowerCase().includes(w.name.toLowerCase())
+        );
+        return matchId || matchName;
+      });
+
+      // Orders served today
+      const servedOrdersToday = waiterOrders.filter(
+        (o) =>
+          isDateToday(o.deliveredAt || o.completedAt || o.createdAt) &&
+          (o.status === 'served' || o.status === 'completed' || o.paymentCollected || o.paymentStatus === 'paid')
+      );
+
+      // Orders where payment was collected / received
+      const paidOrdersToday = waiterOrders.filter(
+        (o) =>
+          (o.paymentCollected === true || o.paymentStatus === 'paid' || o.status === 'completed') &&
+          isDateToday(o.completedAt || o.deliveredAt || o.createdAt)
+      );
+
+      const dynamicSales = paidOrdersToday.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+      const cashReceived = paidOrdersToday
+        .filter((o) => !o.paymentMethod || o.paymentMethod.toLowerCase().includes('cash') || o.paymentMethod.toLowerCase().includes('cod'))
+        .reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+      const digitalReceived = Math.max(0, dynamicSales - cashReceived);
+
       const liveSessions = branchSessions.filter((s) => s.waiterName === w.name);
-      const activeTbls = liveSessions.filter((s) => s.status === 'occupied').map((s) => s.tableNumber);
-      const todayCount = liveSessions.filter((s) => isDateToday(s.startedAt)).length + w.baseOrders;
-      const todaySales = liveSessions.reduce((acc, s) => acc + (Number(s.totalAmount) || 0), 0) + w.baseSales;
+      const activeTblsFromSessions = liveSessions.filter((s) => s.status === 'occupied').map((s) => s.tableNumber);
+      const activeTblsFromTables = branchTables
+        .filter(
+          (t) =>
+            t.status === 'occupied' &&
+            (t.assignedWaiterId === w.id || (w.name && t.assignedWaiterName?.toLowerCase().includes(w.name.toLowerCase())))
+        )
+        .map((t) => t.number);
+      const activeTbls = Array.from(new Set([...activeTblsFromSessions, ...activeTblsFromTables]));
+
+      const todayCount = servedOrdersToday.length + (w.baseOrders || 0);
+      const todaySales = dynamicSales + (w.baseSales || 0);
+
       return {
         ...w,
         totalOrdersServed: todayCount,
         activeTables: activeTbls,
         totalSales: todaySales,
+        cashReceived,
+        digitalReceived,
+        paidOrdersCount: paidOrdersToday.length,
       };
     });
 
@@ -503,9 +825,12 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
                       </div>
                     </div>
                     <div>
-                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700 }}>SALES BILLED</div>
+                      <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700 }}>PAYMENT RECEIVED</div>
                       <div style={{ fontSize: '16px', fontWeight: 900, color: '#16A34A', marginTop: '2px' }}>
                         Rs. {w.totalSales.toLocaleString()}
+                      </div>
+                      <div style={{ fontSize: '10px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                        {w.paidOrdersCount || 0} Paid Orders
                       </div>
                     </div>
                   </div>
@@ -761,7 +1086,7 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
             <div>
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <h1 style={{ fontSize: '16px', fontWeight: 850, margin: 0, color: 'var(--text-main)', lineHeight: 1 }}>
-                  Orders for Server / Waiter
+                  Order
                 </h1>
                 <span
                   style={{
@@ -773,16 +1098,13 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
                     borderRadius: '10px',
                   }}
                 >
-                  {dineInOrders.length} Pending
+                  {displayedServerOrders.length} Pending
                 </span>
               </div>
-              <p style={{ margin: '3px 0 0', fontSize: '12px', color: 'var(--text-muted)' }}>
-                Active dine-in food trays and beverage orders awaiting table dispatch
-              </p>
             </div>
           </div>
 
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             <button
               onClick={() => {
                 setWalkInTableDefault(undefined);
@@ -806,7 +1128,28 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
               }}
             >
               <Plus size={14} strokeWidth={2.4} color="#FFFFFF" />
-              <span>Walk-in Order</span>
+              <span>+ Walk-in Order</span>
+            </button>
+            <button
+              onClick={() => setViewMode('tables')}
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '8px 14px',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'var(--bg-card)',
+                color: 'var(--primary)',
+                border: '1px solid var(--primary)',
+                fontWeight: 750,
+                fontSize: '12.5px',
+                cursor: 'pointer',
+                whiteSpace: 'nowrap',
+                lineHeight: 1,
+              }}
+            >
+              <LayoutGrid size={14} color="var(--primary)" />
+              <span>Floor Tables Grid</span>
             </button>
           </div>
         </div>
@@ -823,149 +1166,556 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
             border: '1px solid var(--border-color)',
             boxShadow: 'var(--shadow-sm)',
             boxSizing: 'border-box',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: '16px',
           }}
         >
-          {dineInOrders.length === 0 ? (
+          {/* WAITER MONEY RECORDS SECTION */}
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap', alignItems: 'center' }}>
+              {(
+                [
+                  { id: 'today', label: 'Today' },
+                  { id: 'yesterday', label: 'Yesterday' },
+                  { id: 'week', label: 'Past 7 Days' },
+                  { id: 'date', label: 'Pick Date 📅' },
+                  { id: 'all', label: 'All Time' },
+                ] as const
+              ).map((sc) => {
+                const isActive = dateScope === sc.id;
+                return (
+                  <button
+                    key={sc.id}
+                    onClick={() => {
+                      if (sc.id === 'date') {
+                        setIsDatePickerModalOpen(true);
+                      } else {
+                        setDateScope(sc.id);
+                        if (sc.id === 'today') setSelectedDate(todayStr);
+                        if (sc.id === 'yesterday') setSelectedDate(yesterdayStr);
+                      }
+                    }}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: '10px',
+                      backgroundColor: isActive ? 'var(--primary)' : 'var(--bg-card-subtle)',
+                      border: isActive ? '1px solid var(--primary)' : '1px solid var(--border-color)',
+                      color: isActive ? '#FFFFFF' : 'var(--text-secondary)',
+                      fontSize: '12px',
+                      fontWeight: 750,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    {sc.id === 'date' && dateScope === 'date' ? formatDisplayDate(selectedDate) : sc.label}
+                  </button>
+                );
+              })}
+
+              <div
+                style={{
+                  marginLeft: 'auto',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  backgroundColor: 'var(--bg-card-subtle)',
+                  padding: '6px 12px',
+                  borderRadius: '8px',
+                  border: '1px solid var(--border-color)',
+                  fontSize: '11.5px',
+                }}
+              >
+                <span style={{ fontWeight: 800, color: 'var(--text-muted)' }}>RECORD PERIOD:</span>
+                <span style={{ fontWeight: 850, color: 'var(--primary)' }}>{activeScopeLabel}</span>
+              </div>
+            </div>
+
+            <HistoricalLoadingModal visible={isFetchingOlderOrders} />
+
+            {/* 4 Metric KPI Cards for Waiter Money Records */}
+            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(190px, 1fr))', gap: '12px' }}>
+              <div style={{ backgroundColor: 'var(--bg-card-subtle)', borderRadius: '14px', padding: '14px', border: '1.5px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                  <div style={{ width: '28px', height: '28px', borderRadius: '8px', backgroundColor: '#E0F2FE', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <CheckCircle size={15} color="#0284C7" />
+                  </div>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700 }}>Orders Served</span>
+                </div>
+                <div style={{ fontSize: '20px', fontWeight: 900, color: 'var(--text-main)' }}>{totalOrdersCount}</div>
+              </div>
+
+              <div style={{ backgroundColor: 'var(--bg-card-subtle)', borderRadius: '14px', padding: '14px', border: '1.5px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                  <div style={{ width: '28px', height: '28px', borderRadius: '8px', backgroundColor: '#FEF3C7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <Banknote size={15} color="#D97706" />
+                  </div>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700 }}>Cash in Hand (Table Cash)</span>
+                </div>
+                <div style={{ fontSize: '20px', fontWeight: 900, color: '#D97706' }}>Rs. {totalCashCollected.toLocaleString()}</div>
+              </div>
+
+              <div style={{ backgroundColor: 'var(--bg-card-subtle)', borderRadius: '14px', padding: '14px', border: '1.5px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                  <div style={{ width: '28px', height: '28px', borderRadius: '8px', backgroundColor: '#DCFCE7', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <CreditCard size={15} color="#16A34A" />
+                  </div>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700 }}>Prepaid / Online</span>
+                </div>
+                <div style={{ fontSize: '20px', fontWeight: 900, color: '#16A34A' }}>Rs. {totalOnlinePaid.toLocaleString()}</div>
+              </div>
+
+              <div style={{ backgroundColor: 'var(--bg-card-subtle)', borderRadius: '14px', padding: '14px', border: '1.5px solid var(--border-color)' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '6px' }}>
+                  <div style={{ width: '28px', height: '28px', borderRadius: '8px', backgroundColor: 'var(--primary-light)', display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <DollarSign size={15} color="var(--primary)" />
+                  </div>
+                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700 }}>Total Settled Value</span>
+                </div>
+                <div style={{ fontSize: '20px', fontWeight: 900, color: 'var(--primary)' }}>Rs. {totalSettledValue.toLocaleString()}</div>
+              </div>
+            </div>
+          </div>
+
+          {/* INCOMING ACTIVE DINE-IN ORDERS QUEUE */}
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '10px', borderTop: '1px solid var(--border-color)', paddingTop: '12px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '11px', fontWeight: 800, backgroundColor: 'var(--primary-light)', color: 'var(--primary)', padding: '3px 9px', borderRadius: '8px' }}>
+                {displayedServerOrders.length} Pending
+              </span>
+            </div>
+
+            {/* Stage Filter Row */}
+            <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+              <button
+                onClick={() => setStageFilter('all')}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '16px',
+                  backgroundColor: stageFilter === 'all' ? 'var(--primary)' : 'var(--bg-card-subtle)',
+                  border: stageFilter === 'all' ? '1px solid var(--primary)' : '1px solid var(--border-color)',
+                  color: stageFilter === 'all' ? '#FFFFFF' : 'var(--text-secondary)',
+                  fontSize: '11.5px',
+                  fontWeight: 750,
+                  cursor: 'pointer',
+                }}
+              >
+                All Active ({baseServerOrders.length})
+              </button>
+              <button
+                onClick={() => setStageFilter('ready')}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '16px',
+                  backgroundColor: stageFilter === 'ready' ? '#DCFCE7' : 'var(--bg-card-subtle)',
+                  border: stageFilter === 'ready' ? '1px solid #16A34A' : '1px solid var(--border-color)',
+                  color: stageFilter === 'ready' ? '#15803D' : 'var(--text-secondary)',
+                  fontSize: '11.5px',
+                  fontWeight: stageFilter === 'ready' ? 850 : 750,
+                  cursor: 'pointer',
+                }}
+              >
+                🔥 Hot Food Ready ({readyCount})
+              </button>
+              <button
+                onClick={() => setStageFilter('cooking')}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '16px',
+                  backgroundColor: stageFilter === 'cooking' ? '#FEF3C7' : 'var(--bg-card-subtle)',
+                  border: stageFilter === 'cooking' ? '1px solid #D97706' : '1px solid var(--border-color)',
+                  color: stageFilter === 'cooking' ? '#B45309' : 'var(--text-secondary)',
+                  fontSize: '11.5px',
+                  fontWeight: stageFilter === 'cooking' ? 850 : 750,
+                  cursor: 'pointer',
+                }}
+              >
+                🍳 Cooking ({cookingCount})
+              </button>
+              <button
+                onClick={() => setStageFilter('served')}
+                style={{
+                  padding: '6px 12px',
+                  borderRadius: '16px',
+                  backgroundColor: stageFilter === 'served' ? '#EDE9FE' : 'var(--bg-card-subtle)',
+                  border: stageFilter === 'served' ? '1px solid #7C3AED' : '1px solid var(--border-color)',
+                  color: stageFilter === 'served' ? '#6D28D9' : 'var(--text-secondary)',
+                  fontSize: '11.5px',
+                  fontWeight: stageFilter === 'served' ? 850 : 750,
+                  cursor: 'pointer',
+                }}
+              >
+                🍽️ Seated & Dining ({servedCount})
+              </button>
+            </div>
+          </div>
+
+          {displayedServerOrders.length === 0 ? (
             <div
               style={{
                 display: 'flex',
                 flexDirection: 'column',
                 alignItems: 'center',
                 justifyContent: 'center',
-                padding: '60px 20px',
+                padding: '48px 20px',
                 textAlign: 'center',
-                gap: '12px',
+                gap: '10px',
                 color: 'var(--text-muted)',
+                backgroundColor: 'var(--bg-card-subtle)',
+                borderRadius: 'var(--radius-lg)',
+                border: '1px solid var(--border-color)',
               }}
             >
-              <div
-                style={{
-                  width: '56px',
-                  height: '56px',
-                  borderRadius: '50%',
-                  backgroundColor: 'var(--bg-card-subtle)',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  color: 'var(--text-muted)',
-                }}
-              >
-                <Bell size={26} />
-              </div>
+              <ChefHat size={38} color="var(--text-muted)" />
               <div style={{ fontSize: '16px', fontWeight: 850, color: 'var(--text-main)' }}>
-                No Pending Server Orders
+                No Orders Pending Delivery
               </div>
-              <div style={{ fontSize: '13px', maxWidth: '360px', lineHeight: 1.4 }}>
-                All dine-in tables are served. New orders sent from kitchen or cashier will appear here immediately.
+              <div style={{ fontSize: '13px', maxWidth: '420px', lineHeight: 1.4 }}>
+                {queueScope === 'station' && hasAssignedStation
+                  ? `No active cooking or ready orders for your assigned station (${myAssignedTableNums.join(', ')}). Switch to "All Dine-In Orders" to inspect cafe-wide orders.`
+                  : 'Hot food ready from kitchen line will appear here for serving to seated guests.'}
               </div>
             </div>
           ) : (
             <div
               style={{
                 display: 'grid',
-                gridTemplateColumns: 'repeat(auto-fill, minmax(320px, 1fr))',
+                gridTemplateColumns: 'repeat(auto-fill, minmax(330px, 1fr))',
                 gap: '16px',
               }}
             >
-              {dineInOrders.map((ord) => {
-                const isReadyOrServed = ord.status === 'served' || ord.status === 'ready';
+              {displayedServerOrders.map((ord) => {
+                const isKitchenReady = ord.status === 'ready';
+                const isFoodServed = ord.status === 'served';
+                const isAssignedToMe =
+                  (ord.tableNumber && myAssignedTableNums.includes(ord.tableNumber)) ||
+                  ord.assignedWaiterId === currentUser?.id;
 
                 return (
                   <div
                     key={ord.id}
                     style={{
-                      padding: '18px',
+                      padding: '16px',
                       borderRadius: 'var(--radius-lg)',
-                      backgroundColor: isReadyOrServed ? 'rgba(139, 92, 246, 0.06)' : 'var(--bg-card-subtle)',
-                      border: isReadyOrServed ? '2px solid #8B5CF6' : '1px solid var(--border-color)',
+                      backgroundColor: isKitchenReady ? '#FAFAF9' : isFoodServed ? '#FAF5FF' : 'var(--bg-card-subtle)',
+                      border: isKitchenReady
+                        ? '2px solid #16A34A'
+                        : isFoodServed
+                        ? '2px solid #8B5CF6'
+                        : '1.5px solid var(--border-color)',
+                      borderLeft: isAssignedToMe ? '4px solid var(--primary)' : undefined,
                       display: 'flex',
                       flexDirection: 'column',
-                      gap: '12px',
+                      gap: '10px',
                       boxShadow: 'var(--shadow-sm)',
                     }}
                   >
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                      <span style={{ fontWeight: 850, fontSize: '17px', color: 'var(--text-main)' }}>
-                        Table {ord.tableNumber || '?'}
-                      </span>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                        <span
+                          style={{
+                            display: 'inline-flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                            backgroundColor: 'var(--primary)',
+                            color: '#FFFFFF',
+                            padding: '5px 10px',
+                            borderRadius: '8px',
+                            fontWeight: 850,
+                            fontSize: '13px',
+                          }}
+                        >
+                          <Utensils size={13} />
+                          <span>Table {ord.tableNumber || 'Seated'}</span>
+                        </span>
+                        {isAssignedToMe && (
+                          <span
+                            style={{
+                              fontSize: '10px',
+                              fontWeight: 800,
+                              backgroundColor: 'var(--primary-light)',
+                              color: 'var(--primary)',
+                              padding: '3px 7px',
+                              borderRadius: '6px',
+                            }}
+                          >
+                            ★ Your Station
+                          </span>
+                        )}
+                      </div>
+
                       <span
                         style={{
-                          fontSize: '11px',
-                          fontWeight: 800,
-                          backgroundColor: ord.status === 'served' ? '#8B5CF6' : ord.status === 'ready' ? '#16A34A' : 'var(--status-preparing-bg)',
-                          color: '#FFFFFF',
-                          padding: '4px 10px',
+                          fontSize: '10.5px',
+                          fontWeight: 850,
+                          backgroundColor: isKitchenReady ? '#DCFCE7' : isFoodServed ? '#EDE9FE' : '#FEF3C7',
+                          color: isKitchenReady ? '#15803D' : isFoodServed ? '#6D28D9' : '#B45309',
+                          padding: '4px 9px',
                           borderRadius: '6px',
                           textTransform: 'uppercase',
                         }}
                       >
-                        {ord.status === 'served' ? 'KITCHEN READY (SERVE)' : ord.status.toUpperCase()}
+                        {isKitchenReady ? 'HOT FOOD READY' : isFoodServed ? 'SEATED & DINING' : 'COOKING IN KITCHEN'}
                       </span>
                     </div>
 
-                    <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-                      Order #{ord.orderNumber} ({ord.items.length} items) · Total: Rs. {ord.total.toLocaleString()}
+                    <div>
+                      <div style={{ fontWeight: 900, fontSize: '15px', color: 'var(--text-main)' }}>
+                        Order #{ord.orderNumber}
+                      </div>
+                      <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                        Guest: {ord.customerName} • {ord.paymentMethod} •{' '}
+                        <strong style={{ color: ord.paymentStatus === 'paid' ? '#16A34A' : '#D97706' }}>
+                          {ord.paymentStatus === 'paid' ? 'PAID' : 'UNPAID'}
+                        </strong>
+                      </div>
                     </div>
 
                     <div
                       style={{
                         fontSize: '12px',
-                        color: 'var(--text-muted)',
-                        borderTop: '1px dashed var(--border-color)',
-                        paddingTop: '8px',
+                        color: 'var(--text-main)',
+                        backgroundColor: 'var(--bg-card)',
+                        borderRadius: '8px',
+                        padding: '10px',
+                        border: '1px solid var(--border-color)',
                         display: 'flex',
                         flexDirection: 'column',
                         gap: '4px',
                       }}
                     >
                       {ord.items.map((i, idx) => (
-                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between' }}>
-                          <span><strong>{i.quantity}x</strong> {i.name}</span>
+                        <div key={idx} style={{ display: 'flex', justifyContent: 'space-between', fontWeight: 600 }}>
+                          <span>• {i.quantity}x {i.name} {i.size ? `(${i.size})` : ''}</span>
                           <span>Rs. {(i.unitPrice * i.quantity).toLocaleString()}</span>
                         </div>
                       ))}
+                      {ord.notes && (
+                        <div style={{ fontSize: '11px', color: '#D97706', fontStyle: 'italic', marginTop: '4px' }}>
+                          Note: {ord.notes}
+                        </div>
+                      )}
                     </div>
 
-                    {ord.notes && (
-                      <div style={{ fontSize: '12px', color: 'var(--primary)', backgroundColor: 'var(--primary-light)', padding: '6px 10px', borderRadius: '6px' }}>
-                        Note: {ord.notes}
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px', gap: '8px', flexWrap: 'wrap' }}>
+                      <div>
+                        <div style={{ fontSize: '16px', fontWeight: 900, color: 'var(--primary)' }}>
+                          Rs. {Number(ord.total).toLocaleString()}
+                        </div>
+                        <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', fontWeight: 700 }}>
+                          {ord.paymentMethod}
+                        </div>
                       </div>
-                    )}
 
-                    <button
-                      onClick={() => {
-                        updateOrderStatus(ord.id, 'completed', undefined, {
-                          type: 'success',
-                          title: 'Order Served to Table ✓',
-                          message: `Order #${ord.orderNumber} served to Table ${ord.tableNumber || 'counter'}.`,
-                        });
-                      }}
-                      style={{
-                        marginTop: '4px',
-                        padding: '10px 14px',
-                        borderRadius: 'var(--radius-md)',
-                        backgroundColor: isReadyOrServed ? '#16A34A' : 'var(--bg-card)',
-                        color: isReadyOrServed ? '#FFFFFF' : 'var(--text-main)',
-                        border: isReadyOrServed ? 'none' : '1px solid var(--border-color)',
-                        fontSize: '13px',
-                        fontWeight: 800,
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '8px',
-                        boxShadow: isReadyOrServed ? '0 2px 8px rgba(22, 163, 74, 0.3)' : 'none',
-                      }}
-                    >
-                      <CheckCircle size={16} />
-                      <span>Mark Delivered & Served ✓</span>
-                    </button>
+                      {isKitchenReady ? (
+                        <div style={{ display: 'flex', gap: '6px', flexWrap: 'wrap' }}>
+                          <button
+                            onClick={() => markOrderDeliveredToTable(ord.id)}
+                            style={{
+                              padding: '8px 12px',
+                              borderRadius: '8px',
+                              backgroundColor: '#0284C7',
+                              color: '#FFFFFF',
+                              border: 'none',
+                              fontSize: '12px',
+                              fontWeight: 800,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                            }}
+                          >
+                            <CheckCircle size={14} />
+                            <span>Deliver 🍽️</span>
+                          </button>
+                          <button
+                            onClick={() => markOrderDoneAndCollected(ord.id, true)}
+                            style={{
+                              padding: '8px 12px',
+                              borderRadius: '8px',
+                              backgroundColor: '#16A34A',
+                              color: '#FFFFFF',
+                              border: 'none',
+                              fontSize: '12px',
+                              fontWeight: 800,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '5px',
+                            }}
+                          >
+                            <CheckCircle size={14} />
+                            <span>Payment Received ✓</span>
+                          </button>
+                        </div>
+                      ) : isFoodServed ? (
+                        <button
+                          onClick={() => markOrderDoneAndCollected(ord.id, true)}
+                          style={{
+                            padding: '8px 12px',
+                            borderRadius: '8px',
+                            backgroundColor: '#16A34A',
+                            color: '#FFFFFF',
+                            border: 'none',
+                            fontSize: '12px',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            gap: '5px',
+                          }}
+                        >
+                          <CheckCircle size={14} />
+                          <span>Payment Received & Free Table ✓</span>
+                        </button>
+                      ) : (
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', fontSize: '11.5px', fontWeight: 750, color: '#D97706' }}>
+                            <Clock size={13} />
+                            <span>Cooking</span>
+                          </span>
+                          <button
+                            onClick={() => markOrderDoneAndCollected(ord.id, true)}
+                            style={{
+                              padding: '7px 11px',
+                              borderRadius: '8px',
+                              backgroundColor: '#16A34A',
+                              color: '#FFFFFF',
+                              border: 'none',
+                              fontSize: '11.5px',
+                              fontWeight: 800,
+                              cursor: 'pointer',
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '4px',
+                            }}
+                          >
+                            <CheckCircle size={13} />
+                            <span>Done & Collected ✓</span>
+                          </button>
+                        </div>
+                      )}
+                    </div>
                   </div>
                 );
               })}
             </div>
           )}
         </div>
+
+        {/* Date Picker Modal */}
+        {isDatePickerModalOpen && (
+          <div
+            onClick={() => setIsDatePickerModalOpen(false)}
+            style={{
+              position: 'fixed',
+              inset: 0,
+              backgroundColor: 'rgba(0,0,0,0.55)',
+              zIndex: 9999,
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              padding: '20px',
+            }}
+          >
+            <div
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                backgroundColor: 'var(--bg-card)',
+                borderRadius: '20px',
+                padding: '20px',
+                width: '100%',
+                maxWidth: '420px',
+                border: '1px solid var(--border-color)',
+                boxShadow: 'var(--shadow-xl)',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '16px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Calendar size={18} color="var(--primary)" />
+                  <h3 style={{ margin: 0, fontSize: '16px', fontWeight: 850 }}>Pick Record Date</h3>
+                </div>
+                <button
+                  onClick={() => setIsDatePickerModalOpen(false)}
+                  style={{ border: 'none', background: 'var(--bg-card-subtle)', width: '30px', height: '30px', borderRadius: '50%', cursor: 'pointer', display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                >
+                  <X size={16} />
+                </button>
+              </div>
+
+              <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '14px' }}>
+                <button
+                  onClick={() => handleStepDay(-1)}
+                  style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card-subtle)', fontWeight: 700, fontSize: '12px', cursor: 'pointer' }}
+                >
+                  <ChevronLeft size={15} />
+                  <span>Prev Day</span>
+                </button>
+                <span style={{ fontWeight: 850, fontSize: '13px' }}>{formatDisplayDate(selectedDate)}</span>
+                <button
+                  onClick={() => handleStepDay(1)}
+                  disabled={selectedDate === todayStr}
+                  style={{ display: 'flex', alignItems: 'center', gap: '4px', padding: '6px 10px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-card-subtle)', fontWeight: 700, fontSize: '12px', cursor: selectedDate === todayStr ? 'not-allowed' : 'pointer', opacity: selectedDate === todayStr ? 0.4 : 1 }}
+                >
+                  <span>Next Day</span>
+                  <ChevronRight size={15} />
+                </button>
+              </div>
+
+              <div style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--text-muted)', marginBottom: '8px' }}>
+                Recent Days Quick Pick:
+              </div>
+              <div style={{ display: 'flex', gap: '6px', overflowX: 'auto', paddingBottom: '6px' }}>
+                {recentDays.map((d) => {
+                  const isSel = selectedDate === d.dateStr;
+                  return (
+                    <button
+                      key={d.dateStr}
+                      onClick={() => {
+                        setSelectedDate(d.dateStr);
+                        if (d.dateStr === todayStr) setDateScope('today');
+                        else if (d.dateStr === yesterdayStr) setDateScope('yesterday');
+                        else setDateScope('date');
+                      }}
+                      style={{
+                        padding: '6px 10px',
+                        borderRadius: '10px',
+                        backgroundColor: isSel ? 'var(--primary-light)' : 'var(--bg-card-subtle)',
+                        border: isSel ? '1px solid var(--primary)' : '1px solid var(--border-color)',
+                        cursor: 'pointer',
+                        minWidth: '58px',
+                        textAlign: 'center',
+                      }}
+                    >
+                      <div style={{ fontSize: '9px', fontWeight: 700, color: isSel ? 'var(--primary)' : 'var(--text-muted)', textTransform: 'uppercase' }}>{d.weekday}</div>
+                      <div style={{ fontSize: '11px', fontWeight: 800, color: isSel ? 'var(--primary)' : 'var(--text-main)' }}>{d.label}</div>
+                    </button>
+                  );
+                })}
+              </div>
+
+              <button
+                onClick={() => {
+                  setDateScope('date');
+                  setIsDatePickerModalOpen(false);
+                }}
+                style={{
+                  width: '100%',
+                  marginTop: '14px',
+                  padding: '11px',
+                  borderRadius: '10px',
+                  backgroundColor: 'var(--primary)',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  fontWeight: 800,
+                  fontSize: '13px',
+                  cursor: 'pointer',
+                }}
+              >
+                Apply & View Records ({formatDisplayDate(selectedDate)})
+              </button>
+            </div>
+          </div>
+        )}
 
         {/* Walk-in Order Modal */}
         {walkInModalOpen && (
@@ -993,86 +1743,27 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
         backgroundColor: 'var(--bg-main)',
       }}
     >
-      {/* ========================================================================= */}
-      {/* STATIC TOP CONTROL BAR: FLOOR STAFF + WALK-IN ORDER + TABS (MATCHES ORDER HUB) */}
-      {/* ========================================================================= */}
       <div
         style={{
-          flexShrink: 0,
           backgroundColor: 'var(--bg-card)',
-          border: '1px solid var(--border-color)',
           borderRadius: 'var(--radius-lg)',
-          padding: '10px 16px',
+          border: '1px solid var(--border-color)',
+          padding: '20px',
           boxShadow: 'var(--shadow-sm)',
-          marginBottom: '10px',
           display: 'flex',
-          alignItems: 'center',
-          gap: '12px',
-          flexWrap: 'wrap',
-          justifyContent: 'space-between',
-          minHeight: '52px',
+          flexDirection: 'column',
+          gap: '16px',
+          flex: 1,
+          minHeight: 0,
           boxSizing: 'border-box',
+          overflowY: 'auto',
+          overscrollBehavior: 'contain',
         }}
       >
-        {/* Left Side: Floor Staff Title */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <h1 style={{ fontSize: '15px', fontWeight: 850, margin: 0, color: 'var(--text-main)', letterSpacing: '-0.01em', lineHeight: 1 }}>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0, flexWrap: 'wrap', gap: '8px' }}>
+          <h3 style={{ fontSize: '17px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
             Floor Staff
-          </h1>
-        </div>
-
-        {/* Right Side: Tab Switch + Walk-in Order Button */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginLeft: 'auto', flexWrap: 'wrap' }}>
-          {/* Tab switch: Live Table Grid vs Reservations List (v1.1) */}
-          <div
-            style={{
-              display: 'flex',
-              backgroundColor: 'var(--bg-card-subtle)',
-              padding: '2px',
-              borderRadius: 'var(--radius-md)',
-              border: '1px solid var(--border-color)',
-              gap: '2px',
-              alignItems: 'center',
-              boxSizing: 'border-box',
-            }}
-          >
-            <button
-              onClick={() => setActiveTab('grid')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '12px',
-                fontWeight: 700,
-                backgroundColor: activeTab === 'grid' ? 'var(--primary)' : 'transparent',
-                color: activeTab === 'grid' ? '#FFFFFF' : 'var(--text-secondary)',
-                cursor: 'pointer',
-                border: 'none',
-                lineHeight: 1,
-                transition: 'all 0.15s ease',
-              }}
-            >
-              Live Table Grid
-            </button>
-            <button
-              onClick={() => setActiveTab('reservations')}
-              style={{
-                padding: '6px 12px',
-                borderRadius: '6px',
-                fontSize: '12px',
-                fontWeight: 700,
-                backgroundColor: activeTab === 'reservations' ? 'var(--primary)' : 'transparent',
-                color: activeTab === 'reservations' ? '#FFFFFF' : 'var(--text-secondary)',
-                cursor: 'pointer',
-                border: 'none',
-                lineHeight: 1,
-                transition: 'all 0.15s ease',
-              }}
-            >
-              Reservations List (v1.1)
-            </button>
-          </div>
-
-          {/* Walk-in Order Button */}
+          </h3>
           <button
             onClick={() => {
               setWalkInTableDefault(undefined);
@@ -1100,38 +1791,16 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
             <span style={{ fontWeight: 750, color: '#FFFFFF', letterSpacing: '0.01em', lineHeight: 1 }}>Walk-in Order</span>
           </button>
         </div>
-      </div>
 
-      {activeTab === 'grid' ? (
-        <div
-          style={{
-            backgroundColor: 'var(--bg-card)',
-            borderRadius: 'var(--radius-lg)',
-            border: '1px solid var(--border-color)',
-            padding: '20px',
-            boxShadow: 'var(--shadow-sm)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '16px',
-            flex: 1,
-            minHeight: 0,
-            boxSizing: 'border-box',
-            overflowY: 'auto',
-            overscrollBehavior: 'contain',
-          }}
-        >
-          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexShrink: 0 }}>
-            <h3 style={{ fontSize: '17px', fontWeight: 800, margin: 0 }}>
-              Dining Room Layout ({branchTables.length} Tables)
-            </h3>
-            <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>Tap table to open quick actions</span>
-          </div>
-
-          {/* Table Chart Grid */}
+        {/* Table Chart Grid */}
             <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(130px, 1fr))', gap: '14px' }}>
-              {branchTables.map((tbl) => {
+              {displayedBranchTables.map((tbl) => {
                 const style = getStatusStyle(tbl.status);
                 const isSelected = selectedTable?.id === tbl.id;
+                const isAssignedToMe =
+                  myAssignedTableNums.includes(tbl.number) ||
+                  (currentUser?.id && tbl.assignedWaiterId === currentUser.id) ||
+                  (currentUser?.name && tbl.assignedWaiterName === currentUser.name);
 
                 return (
                   <div
@@ -1140,7 +1809,7 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
                     style={{
                       backgroundColor: 'var(--bg-card-subtle)',
                       borderRadius: 'var(--radius-md)',
-                      border: isSelected ? '2px solid var(--primary)' : '1px solid var(--border-color)',
+                      border: isSelected ? '2px solid var(--primary)' : isAssignedToMe ? '1.5px solid var(--primary)' : '1px solid var(--border-color)',
                       padding: '16px 12px',
                       display: 'flex',
                       flexDirection: 'column',
@@ -1150,8 +1819,41 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
                       boxShadow: isSelected ? '0 4px 14px var(--primary-glow)' : 'none',
                       transition: 'transform 0.15s ease',
                       transform: isSelected ? 'scale(1.03)' : 'none',
+                      position: 'relative',
                     }}
                   >
+                    {isAssignedToMe ? (
+                      <div
+                        style={{
+                          fontSize: '9.5px',
+                          fontWeight: 800,
+                          color: '#15803D',
+                          backgroundColor: '#DCFCE7',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                        }}
+                      >
+                        ★ Assigned to You
+                      </div>
+                    ) : tbl.assignedWaiterName ? (
+                      <div
+                        style={{
+                          fontSize: '9.5px',
+                          fontWeight: 700,
+                          color: '#2563EB',
+                          backgroundColor: '#EFF6FF',
+                          padding: '2px 6px',
+                          borderRadius: '4px',
+                          maxWidth: '100%',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        👤 {tbl.assignedWaiterName.split(' ')[0]}
+                      </div>
+                    ) : null}
+
                     <div style={{ fontWeight: 800, fontSize: '18px', color: 'var(--text-main)' }}>
                       {tbl.number}
                     </div>
@@ -1182,88 +1884,8 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
               })}
             </div>
           </div>
-      ) : (
-        /* RESERVATIONS LIST TAB (v1.1 PRD Requirement) */
-        <div
-          style={{
-            backgroundColor: 'var(--bg-card)',
-            borderRadius: 'var(--radius-lg)',
-            border: '1px solid var(--border-color)',
-            padding: '24px',
-            boxShadow: 'var(--shadow-sm)',
-            display: 'flex',
-            flexDirection: 'column',
-            gap: '16px',
-            flex: 1,
-            minHeight: 0,
-            overflowY: 'auto',
-            overscrollBehavior: 'contain',
-          }}
-        >
-          <h3 style={{ fontSize: '18px', fontWeight: 800, margin: 0 }}>
-            Time-Slot Table Bookings
-          </h3>
 
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
-            {[
-              { id: 'res-1', guest: 'Mrs. Fatima Malik', table: 'T-02', time: '8:30 PM Tonight', party: '4 Guests', status: 'confirmed' },
-              { id: 'res-2', guest: 'Dr. Arshad Beg', table: 'T-06', time: '9:00 PM Tonight', party: '8 Guests', status: 'requested' },
-            ].map((res) => (
-              <div
-                key={res.id}
-                style={{
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  padding: '14px 16px',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'var(--bg-card-subtle)',
-                  border: '1px solid var(--border-color)',
-                }}
-              >
-                <div>
-                  <div style={{ fontWeight: 800, fontSize: '15px' }}>{res.guest}</div>
-                  <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-                    Table {res.table} · {res.time} · {res.party}
-                  </div>
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                  <span
-                    style={{
-                      fontSize: '11px',
-                      fontWeight: 800,
-                      backgroundColor: 'var(--table-reserved-bg)',
-                      color: 'var(--table-reserved-text)',
-                      padding: '4px 10px',
-                      borderRadius: 'var(--radius-full)',
-                      textTransform: 'uppercase',
-                    }}
-                  >
-                    {res.status}
-                  </span>
-                  <button
-                    style={{
-                      padding: '6px 12px',
-                      borderRadius: 'var(--radius-md)',
-                      backgroundColor: 'var(--primary)',
-                      color: '#FFFFFF',
-                      fontSize: '12px',
-                      fontWeight: 700,
-                      cursor: 'pointer',
-                      border: 'none',
-                    }}
-                  >
-                    Seat Guests
-                  </button>
-                </div>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* WhatsApp Reactions-Style Pop-up Screen on Table Click */}
+      {/* Unified Table Detail & Quick Actions Modal on Table Click */}
       {selectedTable && (
         <div
           onClick={() => setSelectedTable(null)}
@@ -1271,7 +1893,7 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
             position: 'fixed',
             inset: 0,
             zIndex: 9999,
-            backgroundColor: 'rgba(0,0,0,0.36)',
+            backgroundColor: 'rgba(0,0,0,0.45)',
             backdropFilter: 'blur(3px)',
             display: 'flex',
             alignItems: 'center',
@@ -1283,174 +1905,30 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
             onClick={(e) => e.stopPropagation()}
             style={{
               backgroundColor: 'var(--bg-card)',
-              borderRadius: '28px',
+              borderRadius: '22px',
               border: '1.5px solid var(--border-color)',
-              padding: '12px 18px',
+              padding: '20px',
               boxShadow: '0 20px 48px rgba(0,0,0,0.22), 0 4px 14px rgba(0,0,0,0.08)',
               display: 'flex',
-              alignItems: 'center',
-              gap: '10px',
-              flexWrap: 'wrap',
-              maxWidth: '94vw',
+              flexDirection: 'column',
+              gap: '14px',
+              width: '100%',
+              maxWidth: '540px',
+              maxHeight: '90vh',
+              overflowY: 'auto',
               animation: 'scaleUp 0.15s ease',
             }}
           >
-            {/* Table Badge */}
-            <div
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                padding: '6px 14px',
-                borderRadius: '20px',
-                backgroundColor: 'var(--bg-card-subtle)',
-                border: '1px solid var(--border-color)',
-                fontSize: '13.5px',
-                fontWeight: 850,
-                color: 'var(--text-main)',
-              }}
-            >
-              <span>Table {selectedTable.number}</span>
-              <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 650 }}>
-                ({selectedTable.capacity}p · {selectedTable.status.toUpperCase()})
-              </span>
-            </div>
-
-            {/* Simple Row of Action Options (Like WhatsApp Reactions) */}
-            <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-              {/* Option 1: Mark Table Free */}
-              <button
-                onClick={() => {
-                  updateTableStatus(selectedTable.id, 'available');
-                  setSelectedTable(null);
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '8px 14px',
-                  borderRadius: '20px',
-                  backgroundColor: 'var(--table-available-bg)',
-                  color: 'var(--table-available-text)',
-                  border: '1.5px solid #16A34A',
-                  fontSize: '12.5px',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  transition: 'all 0.12s ease',
-                }}
-                title="Mark Free / Available"
-              >
-                <span>🟢</span>
-                <span>Mark Free</span>
-              </button>
-
-              {/* Option 2: Mark Seated */}
-              <button
-                onClick={() => {
-                  updateTableStatus(selectedTable.id, 'occupied');
-                  setSelectedTable(null);
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '8px 14px',
-                  borderRadius: '20px',
-                  backgroundColor: 'var(--table-occupied-bg)',
-                  color: 'var(--table-occupied-text)',
-                  border: '1.5px solid #EA580C',
-                  fontSize: '12.5px',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  transition: 'all 0.12s ease',
-                }}
-                title="Mark Seated / Occupied"
-              >
-                <span>🔴</span>
-                <span>Seated</span>
-              </button>
-
-              {/* Option 3: Mark Cleaning */}
-              <button
-                onClick={() => {
-                  updateTableStatus(selectedTable.id, 'cleaning');
-                  setSelectedTable(null);
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '8px 14px',
-                  borderRadius: '20px',
-                  backgroundColor: 'var(--table-cleaning-bg)',
-                  color: 'var(--table-cleaning-text)',
-                  border: '1.5px solid #CA8A04',
-                  fontSize: '12.5px',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  transition: 'all 0.12s ease',
-                }}
-                title="Mark Cleaning"
-              >
-                <span>🧹</span>
-                <span>Cleaning</span>
-              </button>
-
-              {/* Option 4: Mark Reserved */}
-              <button
-                onClick={() => {
-                  updateTableStatus(selectedTable.id, 'reserved');
-                  setSelectedTable(null);
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '8px 14px',
-                  borderRadius: '20px',
-                  backgroundColor: 'var(--table-reserved-bg)',
-                  color: 'var(--table-reserved-text)',
-                  border: '1.5px solid #9333EA',
-                  fontSize: '12.5px',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  transition: 'all 0.12s ease',
-                }}
-                title="Mark Reserved"
-              >
-                <span>🟣</span>
-                <span>Reserved</span>
-              </button>
-
-              {/* Option 5: Take Walk-in Order */}
-              <button
-                onClick={() => {
-                  setWalkInTableDefault(selectedTable.number);
-                  setWalkInModalOpen(true);
-                  setSelectedTable(null);
-                }}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '8px 16px',
-                  borderRadius: '20px',
-                  backgroundColor: 'var(--primary)',
-                  color: '#FFFFFF',
-                  border: 'none',
-                  fontSize: '12.5px',
-                  fontWeight: 800,
-                  cursor: 'pointer',
-                  boxShadow: '0 2px 8px var(--primary-glow)',
-                  transition: 'all 0.12s ease',
-                }}
-                title="Take Order for this Table"
-              >
-                <Plus size={14} strokeWidth={2.4} />
-                <span>+ Order</span>
-              </button>
-
-              {/* Close Button */}
+            {/* Modal Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderBottom: '1px solid var(--border-color)', paddingBottom: '10px' }}>
+              <div>
+                <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 900, color: 'var(--text-main)' }}>
+                  Table {selectedTable.number}
+                </h3>
+                <div style={{ fontSize: '12px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                  {selectedTable.floor || 'Ground Floor'} • {selectedTable.capacity} Chairs • {selectedTable.status.toUpperCase()}
+                </div>
+              </div>
               <button
                 onClick={() => setSelectedTable(null)}
                 style={{
@@ -1471,6 +1949,503 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
                 title="Close"
               >
                 ✕
+              </button>
+            </div>
+
+            {/* Waiter Station Info + Assignment */}
+            <div
+              style={{
+                display: 'flex',
+                flexDirection: 'column',
+                backgroundColor: 'var(--bg-card-subtle)',
+                border: '1px solid var(--border-color)',
+                borderRadius: '12px',
+                padding: '12px 14px',
+                gap: '8px',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <div>
+                  <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', fontWeight: 650 }}>
+                    Assigned Floor Staff / Waiter:
+                  </div>
+                  <div style={{ fontSize: '13px', fontWeight: 800, color: selectedTable.assignedWaiterName ? '#15803D' : 'var(--text-main)', marginTop: '2px' }}>
+                    {selectedTable.assignedWaiterName ? `👤 ${selectedTable.assignedWaiterName}` : 'Unassigned'}
+                  </div>
+                </div>
+
+                {isFloorStaff && selectedTable.assignedWaiterId !== currentUser?.id && (
+                  <button
+                    onClick={() => {
+                      if (!currentUser) return;
+                      updateTable(selectedTable.id, {
+                        assignedWaiterId: currentUser.id,
+                        assignedWaiterName: currentUser.name,
+                      });
+                      setSelectedTable((prev) =>
+                        prev
+                          ? {
+                              ...prev,
+                              assignedWaiterId: currentUser.id,
+                              assignedWaiterName: currentUser.name,
+                            }
+                          : null
+                      );
+                      addToast({
+                        type: 'success',
+                        title: 'Table Claimed ✓',
+                        message: `Table ${selectedTable.number} assigned to ${currentUser.name}.`,
+                      });
+                    }}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      padding: '6px 12px',
+                      borderRadius: '8px',
+                      backgroundColor: 'var(--primary)',
+                      color: '#FFFFFF',
+                      border: 'none',
+                      fontSize: '11.5px',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                    }}
+                  >
+                    <UserCheck size={13} />
+                    <span>Claim Table</span>
+                  </button>
+                )}
+              </div>
+
+              {/* Waiter selector dropdown for Cashier, Manager, Floor Staff */}
+              <div>
+                <select
+                  value={selectedTable.assignedWaiterId || ''}
+                  onChange={(e) => {
+                    const targetId = e.target.value;
+                    if (!targetId) {
+                      updateTable(selectedTable.id, {
+                        assignedWaiterId: '',
+                        assignedWaiterName: '',
+                      });
+                      setSelectedTable((prev) =>
+                        prev ? { ...prev, assignedWaiterId: undefined, assignedWaiterName: undefined } : null
+                      );
+                      addToast({
+                        type: 'info',
+                        title: 'Table Unassigned',
+                        message: `Table #${selectedTable.number} is now unassigned.`,
+                      });
+                    } else {
+                      const targetW = availableWaiters.find((w) => w.id === targetId) || users.find((u) => u.id === targetId);
+                      const wName = targetW ? targetW.name : targetId;
+                      updateTable(selectedTable.id, {
+                        assignedWaiterId: targetId,
+                        assignedWaiterName: wName,
+                      });
+                      setSelectedTable((prev) =>
+                        prev ? { ...prev, assignedWaiterId: targetId, assignedWaiterName: wName } : null
+                      );
+                      addToast({
+                        type: 'success',
+                        title: 'Staff Assigned ✓',
+                        message: `Table #${selectedTable.number} assigned to ${wName}.`,
+                      });
+                    }
+                  }}
+                  style={{
+                    padding: '6px 10px',
+                    borderRadius: '6px',
+                    border: selectedTable.assignedWaiterId ? '1.5px solid #2563EB' : '1px solid var(--border-color)',
+                    backgroundColor: selectedTable.assignedWaiterId ? '#EFF6FF' : 'var(--bg-input)',
+                    color: selectedTable.assignedWaiterId ? '#1E40AF' : 'var(--text-main)',
+                    fontSize: '12px',
+                    fontWeight: 700,
+                    width: '100%',
+                    cursor: 'pointer',
+                    outline: 'none',
+                  }}
+                >
+                  <option value="">-- Assign Service Waiter --</option>
+                  {availableWaiters.map((w) => (
+                    <option key={w.id} value={w.id}>
+                      {w.name} ({(w.role as string) === 'waiter' ? 'Waiter' : 'Floor Staff'})
+                    </option>
+                  ))}
+                  {selectedTable.assignedWaiterId && !availableWaiters.some((w) => w.id === selectedTable.assignedWaiterId) && (
+                    <option value={selectedTable.assignedWaiterId}>
+                      {selectedTable.assignedWaiterName || selectedTable.assignedWaiterId}
+                    </option>
+                  )}
+                  {!selectedTable.assignedWaiterId && selectedTable.assignedWaiterName && (
+                    <option value={selectedTable.assignedWaiterName}>{selectedTable.assignedWaiterName}</option>
+                  )}
+                </select>
+              </div>
+            </div>
+
+            {/* Active 4-Digit QR PIN Box */}
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                backgroundColor: 'var(--primary-light)',
+                border: '1px solid var(--primary)',
+                borderRadius: '12px',
+                padding: '10px 14px',
+                gap: '10px',
+              }}
+            >
+              <div>
+                <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 650 }}>
+                  Active Table 4-Digit QR PIN:
+                </div>
+                <div style={{ fontSize: '18px', fontWeight: 900, color: 'var(--primary)', letterSpacing: '2px', marginTop: '2px' }}>
+                  {selectedTable.pin || 'Not Set'}
+                </div>
+              </div>
+              <button
+                onClick={async () => {
+                  const pin = Math.floor(1000 + Math.random() * 9000).toString();
+                  updateTable(selectedTable.id, { pin });
+                  setSelectedTable((prev) => (prev ? { ...prev, pin } : null));
+                  generateTableQr(selectedTable.id, 120).catch(() => {});
+                  addToast({
+                    type: 'success',
+                    title: 'Table PIN Generated 🔑',
+                    message: `Table ${selectedTable.number} QR PIN is now ${pin}.`,
+                  });
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '5px',
+                  padding: '7px 12px',
+                  borderRadius: '8px',
+                  backgroundColor: 'var(--bg-card)',
+                  color: 'var(--primary)',
+                  border: '1px solid var(--primary)',
+                  fontSize: '11.5px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                <RefreshCw size={13} />
+                <span>Generate PIN</span>
+              </button>
+            </div>
+
+            {/* Active Dine-In Order Box (if table has an active order) */}
+            {activeOrderForSelectedTable && (
+              <div
+                style={{
+                  backgroundColor: 'var(--bg-card-subtle)',
+                  borderRadius: '14px',
+                  padding: '14px',
+                  border: '1.5px solid var(--border-color)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px',
+                }}
+              >
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <div>
+                    <div style={{ fontSize: '14px', fontWeight: 900, color: 'var(--text-main)' }}>
+                      Order #{activeOrderForSelectedTable.orderNumber}
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: 'var(--text-secondary)' }}>
+                      Guest: {activeOrderForSelectedTable.customerName} • {activeOrderForSelectedTable.paymentMethod}
+                    </div>
+                  </div>
+                  <span
+                    style={{
+                      fontSize: '10px',
+                      fontWeight: 850,
+                      padding: '3px 8px',
+                      borderRadius: '6px',
+                      backgroundColor:
+                        activeOrderForSelectedTable.status === 'ready'
+                          ? '#DCFCE7'
+                          : activeOrderForSelectedTable.status === 'served'
+                          ? '#EDE9FE'
+                          : '#FEF3C7',
+                      color:
+                        activeOrderForSelectedTable.status === 'ready'
+                          ? '#15803D'
+                          : activeOrderForSelectedTable.status === 'served'
+                          ? '#6D28D9'
+                          : '#B45309',
+                    }}
+                  >
+                    {activeOrderForSelectedTable.status === 'ready'
+                      ? 'FOOD READY'
+                      : activeOrderForSelectedTable.status === 'served'
+                      ? 'GUESTS DINING'
+                      : 'COOKING'}
+                  </span>
+                </div>
+
+                <div style={{ backgroundColor: 'var(--bg-card)', borderRadius: '8px', padding: '8px 10px', border: '1px solid var(--border-color)', fontSize: '12px' }}>
+                  {activeOrderForSelectedTable.items.map((it, idx) => (
+                    <div key={idx} style={{ fontWeight: 600, color: 'var(--text-main)' }}>
+                      • {it.quantity}x {it.name}
+                    </div>
+                  ))}
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '14px', fontWeight: 900, color: 'var(--primary)' }}>
+                    Total: Rs. {Number(activeOrderForSelectedTable.total).toLocaleString()}
+                  </span>
+                  <span
+                    style={{
+                      fontSize: '11px',
+                      fontWeight: 850,
+                      color: activeOrderForSelectedTable.paymentStatus === 'paid' ? '#16A34A' : '#D97706',
+                    }}
+                  >
+                    {activeOrderForSelectedTable.paymentStatus === 'paid' ? 'PAID' : 'UNPAID'}
+                  </span>
+                </div>
+
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap' }}>
+                  {activeOrderForSelectedTable.status === 'ready' && (
+                    <button
+                      onClick={() => markOrderDeliveredToTable(activeOrderForSelectedTable.id)}
+                      style={{
+                        flex: 1,
+                        padding: '9px 12px',
+                        borderRadius: '10px',
+                        backgroundColor: '#0284C7',
+                        color: '#FFFFFF',
+                        border: 'none',
+                        fontSize: '12px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        gap: '6px',
+                      }}
+                    >
+                      <CheckCircle size={14} />
+                      <span>Deliver Food 🍽️</span>
+                    </button>
+                  )}
+                  <button
+                    onClick={() => {
+                      markOrderDoneAndCollected(activeOrderForSelectedTable.id, true);
+                      setSelectedTable(null);
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '9px 12px',
+                      borderRadius: '10px',
+                      backgroundColor: '#16A34A',
+                      color: '#FFFFFF',
+                      border: 'none',
+                      fontSize: '12px',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '6px',
+                    }}
+                  >
+                    <CheckCircle size={14} />
+                    <span>Done & Collected (Free Table) ✓</span>
+                  </button>
+                </div>
+              </div>
+            )}
+
+            {/* Status Change Buttons */}
+            <div>
+              <div style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-main)', marginBottom: '8px' }}>
+                Change Table Status:
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                <button
+                  onClick={() => {
+                    updateTableStatus(selectedTable.id, 'available');
+                    setSelectedTable(null);
+                  }}
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    padding: '8px 12px',
+                    borderRadius: '10px',
+                    backgroundColor: 'var(--table-available-bg)',
+                    color: 'var(--table-available-text)',
+                    border: '1.5px solid #16A34A',
+                    fontSize: '12px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span>🟢</span>
+                  <span>Mark Free</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    updateTableStatus(selectedTable.id, 'occupied');
+                    setSelectedTable(null);
+                  }}
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    padding: '8px 12px',
+                    borderRadius: '10px',
+                    backgroundColor: 'var(--table-occupied-bg)',
+                    color: 'var(--table-occupied-text)',
+                    border: '1.5px solid #EA580C',
+                    fontSize: '12px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span>🔴</span>
+                  <span>Seated</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    updateTableStatus(selectedTable.id, 'cleaning');
+                    setSelectedTable(null);
+                  }}
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    padding: '8px 12px',
+                    borderRadius: '10px',
+                    backgroundColor: 'var(--table-cleaning-bg)',
+                    color: 'var(--table-cleaning-text)',
+                    border: '1.5px solid #CA8A04',
+                    fontSize: '12px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span>🧹</span>
+                  <span>Cleaning</span>
+                </button>
+
+                <button
+                  onClick={() => {
+                    updateTableStatus(selectedTable.id, 'reserved');
+                    setSelectedTable(null);
+                  }}
+                  style={{
+                    flex: 1,
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    padding: '8px 12px',
+                    borderRadius: '10px',
+                    backgroundColor: 'var(--table-reserved-bg)',
+                    color: 'var(--table-reserved-text)',
+                    border: '1.5px solid #9333EA',
+                    fontSize: '12px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  <span>🟣</span>
+                  <span>Reserved</span>
+                </button>
+              </div>
+            </div>
+
+            {/* Bottom Actions: Walk-in Order & Go to Waiter Orders */}
+            <div style={{ display: 'flex', flexDirection: 'column', gap: '8px', marginTop: '4px' }}>
+              <button
+                onClick={() => {
+                  setWalkInTableDefault(selectedTable.number);
+                  setWalkInModalOpen(true);
+                  setSelectedTable(null);
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  padding: '11px 16px',
+                  borderRadius: '12px',
+                  backgroundColor: 'var(--primary)',
+                  color: '#FFFFFF',
+                  border: 'none',
+                  fontSize: '13px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                  boxShadow: '0 2px 8px var(--primary-glow)',
+                }}
+              >
+                <Utensils size={15} />
+                <span>+ New Walk-in Order (Table {selectedTable.number})</span>
+              </button>
+
+              <button
+                type="button"
+                onClick={() => {
+                  if (confirm(`Are you sure you want to delete Table #${selectedTable.number}? This will permanently remove it from the floor plan.`)) {
+                    deleteTable(selectedTable.id);
+                    setSelectedTable(null);
+                  }
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  padding: '8px 14px',
+                  borderRadius: '10px',
+                  backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                  color: '#DC2626',
+                  border: '1px solid #EF4444',
+                  fontSize: '12px',
+                  fontWeight: 750,
+                  cursor: 'pointer',
+                }}
+              >
+                <span>🗑️</span>
+                <span>Delete Table #{selectedTable.number}</span>
+              </button>
+
+              <button
+                onClick={() => {
+                  setSelectedTable(null);
+                  setViewMode('server_orders');
+                }}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: '6px',
+                  padding: '10px 16px',
+                  borderRadius: '12px',
+                  backgroundColor: 'var(--bg-card-subtle)',
+                  color: 'var(--primary)',
+                  border: '1px solid var(--border-color)',
+                  fontSize: '12.5px',
+                  fontWeight: 800,
+                  cursor: 'pointer',
+                }}
+              >
+                <LayoutGrid size={14} />
+                <span>Go to Waiter Orders Queue</span>
               </button>
             </div>
           </div>

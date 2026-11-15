@@ -3,6 +3,9 @@
 import React, { useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { Role } from '@/types/cafe';
+import { store } from '@/redux/store';
+import { setCurrentRole as setReduxRole, setCurrentUser as setReduxUser } from '@/redux/slices/uiSlice';
+import { HistoricalLoadingModal } from '@/components/common/HistoricalLoadingModal';
 import {
   Lock,
   ArrowRight,
@@ -28,6 +31,8 @@ export const StaffAuth: React.FC<StaffAuthProps> = ({ onSuccess }) => {
   const [identifier, setIdentifier] = useState('manager.gulberg@foodiescafe.pk');
   const [password, setPassword] = useState('password123');
   const [selectedRole, setSelectedRole] = useState<Role>('branch_manager');
+  const [loading, setLoading] = useState(false);
+
   const staffPresets: {
     role: Role;
     label: string;
@@ -74,24 +79,6 @@ export const StaffAuth: React.FC<StaffAuthProps> = ({ onSuccess }) => {
       icon: LayoutGrid,
     },
     {
-      role: 'branch_representative',
-      label: 'Customer Services',
-      name: 'Zara Noor',
-      email: 'rep.gulberg@foodiescafe.pk',
-      phone: '03004445566',
-      password: 'password123',
-      icon: Headphones,
-    },
-    {
-      role: 'delivery_staff',
-      label: 'Rider',
-      name: 'Tariq Mehmood',
-      email: 'rider1.gulberg@foodiescafe.pk',
-      phone: '03019991122',
-      password: 'password123',
-      icon: Bike,
-    },
-    {
       role: 'platform_owner',
       label: 'Owner',
       name: 'Malik Jahangir',
@@ -103,12 +90,24 @@ export const StaffAuth: React.FC<StaffAuthProps> = ({ onSuccess }) => {
   ];
 
   const handleSelectPreset = (preset: (typeof staffPresets)[0]) => {
+    const liveMatch = users.find(
+      (u) =>
+        (u.email && u.email.toLowerCase() === preset.email.toLowerCase()) ||
+        (u.role === preset.role && (!u.branchId || u.branchId === currentBranch.id))
+    );
     setSelectedRole(preset.role);
-    setIdentifier(preset.email);
-    setPassword(preset.password);
+    setIdentifier(liveMatch?.email || liveMatch?.phone || preset.email);
+    setPassword(liveMatch?.password || preset.password);
+    if (liveMatch && liveMatch.status !== 'active') {
+      addToast({
+        type: 'warning',
+        title: 'Account Inactive 🚫',
+        message: `Account for ${liveMatch.name} is ${liveMatch.status.toUpperCase()}. Sign in is disabled.`,
+      });
+    }
   };
 
-  const handleLogin = (e: React.FormEvent) => {
+  const handleLogin = async (e: React.FormEvent) => {
     e.preventDefault();
 
     if (!identifier.trim()) {
@@ -127,6 +126,69 @@ export const StaffAuth: React.FC<StaffAuthProps> = ({ onSuccess }) => {
         message: 'Please enter your password or access PIN.',
       });
       return;
+    }
+
+    setLoading(true);
+    const controller = new AbortController();
+    const timeoutId = setTimeout(() => controller.abort(), 4000);
+
+    // Attempt cryptographic server-side staff authentication
+    try {
+      const res = await fetch('/api/auth/staff', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        signal: controller.signal,
+        body: JSON.stringify({ identifier: identifier.trim(), password: password.trim() }),
+      });
+      clearTimeout(timeoutId);
+
+      const data = await res.json();
+      if (res.ok && data.success && data.user) {
+        if (data.user.role === 'delivery_staff') {
+          addToast({
+            type: 'warning',
+            title: 'Mobile App Exclusive 📱',
+            message: 'Rider operations are exclusively supported on the Foodies Mobile App. Please log in on the mobile app.',
+          });
+          setLoading(false);
+          return;
+        }
+        if (data.sessionToken && typeof window !== 'undefined') {
+          localStorage.setItem('foodies_staff_session', data.sessionToken);
+        }
+        store.dispatch(setReduxRole(data.user.role));
+        store.dispatch(setReduxUser(data.user));
+        setCurrentRole(data.user.role);
+        setCurrentUser(data.user);
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('foodies_staff_view');
+          localStorage.setItem('foodies_staff_user', JSON.stringify(data.user));
+          localStorage.setItem('foodies_staff_role', data.user.role);
+          localStorage.setItem('foodies_staff_login_time', Date.now().toString());
+        }
+        if (data.user.branchId) {
+          setCurrentBranchId(data.user.branchId);
+        }
+        addToast({
+          type: 'success',
+          title: 'Welcome Back! 👋',
+          message: `Logged in as ${data.user.name} (${data.user.role.replace('_', ' ')}).`,
+        });
+        setLoading(false);
+        onSuccess(data.user.role);
+        return;
+      } else if (!res.ok) {
+        addToast({
+          type: 'error',
+          title: res.status === 403 ? 'Account Inactive 🚫' : 'Login Failed ❌',
+          message: data.error || 'Invalid credentials or inactive account.',
+        });
+        setLoading(false);
+        return;
+      }
+    } catch (apiErr) {
+      clearTimeout(timeoutId);
+      // Fall through to offline local verification if server times out or is unreachable
     }
 
     const idClean = identifier.trim();
@@ -189,8 +251,6 @@ export const StaffAuth: React.FC<StaffAuthProps> = ({ onSuccess }) => {
         candidateRole = 'kitchen_staff';
       } else if (idLower.includes('floor')) {
         candidateRole = 'floor_staff';
-      } else if (idLower.includes('rep') || idLower.includes('support') || idLower.includes('services')) {
-        candidateRole = 'branch_representative';
       } else if (idLower.includes('rider') || idLower.includes('delivery')) {
         candidateRole = 'delivery_staff';
       }
@@ -223,6 +283,7 @@ export const StaffAuth: React.FC<StaffAuthProps> = ({ onSuccess }) => {
 
     // 4. If account is not found in database (e.g. deleted by manager)
     if (!matchedUser) {
+      setLoading(false);
       addToast({
         type: 'error',
         title: 'Account Not Found ❌',
@@ -231,13 +292,34 @@ export const StaffAuth: React.FC<StaffAuthProps> = ({ onSuccess }) => {
       return;
     }
 
-    // 5. Check password / access PIN match
-    if (
-      matchedUser.password &&
-      matchedUser.password !== password &&
-      password !== 'password123' &&
-      matchedUser.pin !== password
-    ) {
+    if (matchedUser.role === 'delivery_staff') {
+      setLoading(false);
+      addToast({
+        type: 'warning',
+        title: 'Mobile App Exclusive 📱',
+        message: 'Rider operations are exclusively supported on the Foodies Mobile App. Please log in on the mobile app.',
+      });
+      return;
+    }
+
+    // 5. STRICT ENFORCEMENT: Check account status (blocked/suspended/deactivated)
+    if (matchedUser.status && matchedUser.status !== 'active') {
+      setLoading(false);
+      const isSuspended = matchedUser.status === 'suspended';
+      addToast({
+        type: 'error',
+        title: isSuspended ? 'Account Suspended 🚫' : 'Account Inactive ⚠️',
+        message: `Account access for ${matchedUser.name} (${matchedUser.role.replace('_', ' ')}) is ${matchedUser.status.toUpperCase()} by management. Login is prohibited.`,
+      });
+      return;
+    }
+
+    // 6. Check password / access PIN match (strict enforcement of new credentials)
+    const expectedPassword = matchedUser.password || 'password123';
+    const isPasswordCorrect =
+      password === expectedPassword || (matchedUser.pin && password === matchedUser.pin);
+    if (!isPasswordCorrect) {
+      setLoading(false);
       addToast({
         type: 'error',
         title: 'Invalid Password ❌',
@@ -246,31 +328,14 @@ export const StaffAuth: React.FC<StaffAuthProps> = ({ onSuccess }) => {
       return;
     }
 
-    // 6. STRICT ENFORCEMENT: Check account suspension
-    if (matchedUser.status === 'suspended') {
-      addToast({
-        type: 'error',
-        title: 'Account Suspended 🚫',
-        message: `Account access for ${matchedUser.name} (${matchedUser.role.replace('_', ' ')}) has been SUSPENDED by branch management. Login is prohibited.`,
-      });
-      return;
-    }
-
-    // 7. Account deactivated check
-    if (matchedUser.status === 'deactivated') {
-      addToast({
-        type: 'error',
-        title: 'Account Deactivated ⚠️',
-        message: `Account for ${matchedUser.name} is currently inactive. Contact your branch manager to restore access.`,
-      });
-      return;
-    }
-
     // 8. Login Success: assign real verified staff credentials and synchronize branch
+    store.dispatch(setReduxRole(matchedUser.role));
+    store.dispatch(setReduxUser(matchedUser));
     setCurrentRole(matchedUser.role);
     setCurrentUser(matchedUser);
 
     if (typeof window !== 'undefined') {
+      localStorage.removeItem('foodies_staff_view');
       localStorage.setItem('foodies_staff_user', JSON.stringify(matchedUser));
       localStorage.setItem('foodies_staff_role', matchedUser.role);
       localStorage.setItem('foodies_staff_login_time', Date.now().toString());
@@ -290,6 +355,7 @@ export const StaffAuth: React.FC<StaffAuthProps> = ({ onSuccess }) => {
       message: `Welcome, ${matchedUser.name} (${matchedUser.role.replace('_', ' ')}).`,
     });
 
+    setLoading(false);
     onSuccess(matchedUser.role);
   };
 
@@ -306,6 +372,7 @@ export const StaffAuth: React.FC<StaffAuthProps> = ({ onSuccess }) => {
         boxSizing: 'border-box',
       }}
     >
+      <HistoricalLoadingModal visible={loading} />
       {/* Light backdrop ambience glow */}
       <div
         style={{
@@ -408,7 +475,8 @@ export const StaffAuth: React.FC<StaffAuthProps> = ({ onSuccess }) => {
                   (u.email && u.email.toLowerCase() === preset.email.toLowerCase()) ||
                   (u.role === preset.role && (!u.branchId || u.branchId === currentBranch.id))
               );
-              const isSuspended = matchingStaff?.status === 'suspended';
+              const isInactive = Boolean(matchingStaff && matchingStaff.status !== 'active');
+              const isSuspended = isInactive;
               const isLast = idx === staffPresets.length - 1;
 
               return (
@@ -416,7 +484,7 @@ export const StaffAuth: React.FC<StaffAuthProps> = ({ onSuccess }) => {
                   key={preset.role}
                   type="button"
                   onClick={() => handleSelectPreset(preset)}
-                  title={isSuspended ? `${preset.label}: Account Suspended by Branch Manager` : undefined}
+                  title={isInactive ? `${preset.label}: Account ${matchingStaff?.status?.toUpperCase()} by Management` : undefined}
                   style={{
                     padding: '8px 6px',
                     borderRadius: '8px',
@@ -455,7 +523,7 @@ export const StaffAuth: React.FC<StaffAuthProps> = ({ onSuccess }) => {
                 >
                   <Icon size={13} />
                   <span>{preset.label}</span>
-                  {isSuspended && (
+                  {isInactive && (
                     <span
                       style={{
                         fontSize: '8px',
@@ -468,7 +536,7 @@ export const StaffAuth: React.FC<StaffAuthProps> = ({ onSuccess }) => {
                         textTransform: 'uppercase',
                       }}
                     >
-                      Lock
+                      {matchingStaff?.status === 'suspended' ? 'Suspended' : 'Locked'}
                     </span>
                   )}
                 </button>
@@ -564,6 +632,7 @@ export const StaffAuth: React.FC<StaffAuthProps> = ({ onSuccess }) => {
           {/* Submit Button — styled like Customer Login Modal */}
           <button
             type="submit"
+            disabled={loading}
             style={{
               marginTop: '4px',
               padding: 'clamp(10px, 2.2vw, 13px)',
@@ -572,7 +641,7 @@ export const StaffAuth: React.FC<StaffAuthProps> = ({ onSuccess }) => {
               color: '#000000',
               fontSize: 'clamp(13px, 2.8vw, 14.5px)',
               fontWeight: 600,
-              cursor: 'pointer',
+              cursor: loading ? 'wait' : 'pointer',
               display: 'flex',
               alignItems: 'center',
               justifyContent: 'center',
@@ -580,9 +649,10 @@ export const StaffAuth: React.FC<StaffAuthProps> = ({ onSuccess }) => {
               boxShadow: '0 4px 14px var(--primary-glow)',
               border: 'none',
               transition: 'transform 0.15s ease, box-shadow 0.15s ease',
+              opacity: loading ? 0.75 : 1,
             }}
           >
-            <span>Sign In</span>
+            <span>{loading ? 'Signing In...' : 'Sign In'}</span>
             <ArrowRight size={16} />
           </button>
         </form>

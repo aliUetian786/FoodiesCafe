@@ -5,7 +5,6 @@ import {
   Table,
   TableStatus,
   TableSession,
-  Complaint,
   CashShift,
   RefundRequest,
   AuditLog,
@@ -15,6 +14,10 @@ import {
   User,
   ManagerAccessRequest,
   BranchPaymentSettings,
+  Announcement,
+  AppNotification,
+  NotificationSettings,
+  DEFAULT_NOTIFICATION_SETTINGS,
 } from '@/types/cafe';
 import { INITIAL_MENU, INITIAL_CATEGORIES } from '@/database/embeddedSeed';
 
@@ -116,7 +119,6 @@ const INITIAL_USERS: User[] = [
   { id: 'user-cust', name: 'Zeeshan Ahmed', phone: '+92 301 5551234', email: 'zeeshan@example.com', address: 'House 14, Street 9, Model Town, Lahore', role: 'customer', status: 'active', noShowCount: 0, password: 'password123', pin: '1234' },
   { id: 'user-owner', name: 'Malik Jahangir', phone: '+92 300 0000001', email: 'owner@foodiescafe.pk', role: 'platform_owner', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-bm', name: 'Rashid Mehmood', phone: '+92 300 2223344', email: 'manager.gulberg@foodiescafe.pk', role: 'branch_manager', branchId: 'gulberg-lahore', status: 'active', password: 'password123', pin: '1234' },
-  { id: 'user-rep', name: 'Zara Noor', phone: '+92 300 4445566', email: 'rep.gulberg@foodiescafe.pk', role: 'branch_representative', branchId: 'gulberg-lahore', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-kitchen', name: 'Chef Ustaad Aslam', phone: '+92 300 6667788', email: 'kitchen.gulberg@foodiescafe.pk', role: 'kitchen_staff', branchId: 'gulberg-lahore', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-cashier', name: 'Bilal Farooq', phone: '+92 300 8889900', email: 'cashier.gulberg@foodiescafe.pk', role: 'cashier', branchId: 'gulberg-lahore', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-floor', name: 'Kashif Ali', phone: '+92 300 1112233', email: 'floor.gulberg@foodiescafe.pk', role: 'floor_staff', branchId: 'gulberg-lahore', status: 'active', password: 'password123', pin: '1234' },
@@ -126,12 +128,10 @@ const INITIAL_USERS: User[] = [
   { id: 'user-cashier-isb', name: 'Hamza Tariq', phone: '+92 300 3338899', email: 'cashier.islamabad@foodiescafe.pk', role: 'cashier', branchId: 'f7-islamabad', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-kitchen-isb', name: 'Chef Imran Khan', phone: '+92 300 3337766', email: 'kitchen.islamabad@foodiescafe.pk', role: 'kitchen_staff', branchId: 'f7-islamabad', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-floor-isb', name: 'Fahad Mustafa', phone: '+92 300 3336655', email: 'floor.islamabad@foodiescafe.pk', role: 'floor_staff', branchId: 'f7-islamabad', status: 'active', password: 'password123', pin: '1234' },
-  { id: 'user-rep-isb', name: 'Ayesha Siddiqui', phone: '+92 300 3335544', email: 'rep.islamabad@foodiescafe.pk', role: 'branch_representative', branchId: 'f7-islamabad', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-bm-khi', name: 'Kamran Siddiqui', phone: '+92 300 5556677', email: 'manager.karachi@foodiescafe.pk', role: 'branch_manager', branchId: 'clifton-karachi', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-cashier-khi', name: 'Saad Ali', phone: '+92 300 5558899', email: 'cashier.karachi@foodiescafe.pk', role: 'cashier', branchId: 'clifton-karachi', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-kitchen-khi', name: 'Chef Zakir Hussain', phone: '+92 300 5557766', email: 'kitchen.karachi@foodiescafe.pk', role: 'kitchen_staff', branchId: 'clifton-karachi', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-floor-khi', name: 'Rizwan Ahmed', phone: '+92 300 5556655', email: 'floor.karachi@foodiescafe.pk', role: 'floor_staff', branchId: 'clifton-karachi', status: 'active', password: 'password123', pin: '1234' },
-  { id: 'user-rep-khi', name: 'Mahnoor Baloch', phone: '+92 300 5555544', email: 'rep.karachi@foodiescafe.pk', role: 'branch_representative', branchId: 'clifton-karachi', status: 'active', password: 'password123', pin: '1234' },
 ];
 
 const DEFAULT_OPEN_SHIFT: CashShift = {
@@ -158,6 +158,11 @@ const INITIAL_FOOTER_SETTINGS: FooterSettings = {
   orderRoutingSupportFirst: true,
   autoForwardKitchenMin: 3,
   autoForwardMode: 'timed',
+  homeNotificationEnabled: true,
+  homeNotificationBadge: 'LIVE ORDER NOTICE',
+  homeNotificationTitle: 'Fresh Handi & Dum Biryani Batch Ready — Fast Dine-In, Takeaway & Delivery!',
+  homeNotificationMessage: 'Select your order mode above to browse today’s live branch menu, local chef deals, and real-time order tracking.',
+  homeNotificationType: 'promo',
 };
 
 const INITIAL_HERO_BANNERS: HeroBanner[] = [
@@ -208,6 +213,36 @@ const INITIAL_DEAL_CARD: DealCard = {
   categoryLink: 'Biryani & Rice',
 };
 
+export const INITIAL_ANNOUNCEMENTS: Announcement[] = [
+  {
+    id: 'ann-1',
+    title: 'Midnight Biryani & Karahi Feast: Flat 20% Off',
+    tag: 'HOT DEAL',
+    description: 'Enjoy 20% off all Mutton & Chicken Karahi orders between 10:00 PM and 2:00 AM across all branches.',
+    validUntil: 'Tonight 02:00 AM',
+    discountPercent: 20,
+    badgeColor: '#EF4444',
+  },
+  {
+    id: 'ann-2',
+    title: 'Gulberg Rooftop Terrace Live BBQ Night',
+    tag: 'BRANCH SPECIAL',
+    description: 'Join us on the Gulberg Rooftop for live open-flame charcoal Seekh Kababs & Mutton Chops every Friday & Saturday.',
+    branchId: 'gulberg-lahore',
+    branchName: 'Gulberg Lahore',
+    validUntil: 'Every Weekend',
+    badgeColor: '#F59E0B',
+  },
+  {
+    id: 'ann-3',
+    title: 'Free Delivery on Doorstep Orders above Rs. 1500',
+    tag: 'ANNOUNCEMENT',
+    description: 'Zero delivery fee on all online delivery orders exceeding Rs. 1500 via the mobile app.',
+    validUntil: 'Valid this Month',
+    badgeColor: '#10B981',
+  },
+];
+
 export interface CafeState {
   branches: Branch[];
   currentBranchId: string;
@@ -215,7 +250,6 @@ export interface CafeState {
   categories: string[];
   tables: Table[];
   tableSessions: TableSession[];
-  complaints: Complaint[];
   shifts: CashShift[];
   refundRequests: RefundRequest[];
   auditLogs: AuditLog[];
@@ -223,7 +257,10 @@ export interface CafeState {
   dealCard: DealCard;
   footerSettings: FooterSettings;
   users: User[];
+  announcements: Announcement[];
   managerAccessRequests: Record<string, ManagerAccessRequest>;
+  notifications: AppNotification[];
+  notificationSettings: NotificationSettings;
   floors: string[];
   activeTableSession: { tableId: string; tableNumber: string; branchId: string; seatedAt: string; orderId?: string } | null;
   customerCoordinates: { lat: number; lng: number } | null;
@@ -249,7 +286,6 @@ const initialState: CafeState = {
   categories: INITIAL_CATEGORIES,
   tables: INITIAL_TABLES,
   tableSessions: [],
-  complaints: [],
   shifts: [DEFAULT_OPEN_SHIFT],
   refundRequests: [],
   auditLogs: [],
@@ -257,7 +293,53 @@ const initialState: CafeState = {
   dealCard: INITIAL_DEAL_CARD,
   footerSettings: INITIAL_FOOTER_SETTINGS,
   users: INITIAL_USERS,
+  announcements: INITIAL_ANNOUNCEMENTS,
   managerAccessRequests: {},
+  notifications: [
+    {
+      id: 'notif-seed-1',
+      title: 'Welcome to Foodies Cafe Live Alerts',
+      message: 'Real-time order updates for Dine-In, Takeaway Pickup & Doorstep Delivery are active.',
+      type: 'success',
+      category: 'system',
+      branchId: 'all',
+      senderId: 'user-owner',
+      senderName: 'Malik Jahangir',
+      senderRole: 'platform_owner',
+      targetRoles: ['all'],
+      readBy: [],
+      createdAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+    },
+    {
+      id: 'notif-seed-2',
+      title: 'Takeaway Express Counter Open',
+      message: 'Place a Takeaway order via Web or Mobile and receive an instant pickup notification as soon as it is packed.',
+      type: 'info',
+      category: 'takeaway',
+      branchId: 'gulberg-lahore',
+      senderId: 'user-cashier',
+      senderName: 'Bilal Farooq',
+      senderRole: 'cashier',
+      targetRoles: ['customer', 'cashier', 'branch_manager'],
+      readBy: [],
+      createdAt: new Date(Date.now() - 5 * 60 * 1000).toISOString(),
+    },
+    {
+      id: 'notif-seed-3',
+      title: 'Rush Hour Kitchen Coordination Active',
+      message: 'Cashier, Kitchen, Waiters & Delivery Riders receive automatic alerts when orders are placed or updated.',
+      type: 'warning',
+      category: 'staff_alert',
+      branchId: 'all',
+      senderId: 'user-bm',
+      senderName: 'Rashid Mehmood',
+      senderRole: 'branch_manager',
+      targetRoles: ['branch_manager', 'cashier', 'kitchen_staff', 'floor_staff', 'delivery_staff', 'platform_owner'],
+      readBy: [],
+      createdAt: new Date(Date.now() - 2 * 60 * 1000).toISOString(),
+    },
+  ],
+  notificationSettings: DEFAULT_NOTIFICATION_SETTINGS,
   floors: ['Ground Floor (Main Dining)', '1st Floor (Family Hall)', 'Rooftop Terrace (Open Air)'],
   activeTableSession: null,
   customerCoordinates: null,
@@ -366,21 +448,6 @@ export const cafeSlice = createSlice({
     setTableSessions: (state, action: PayloadAction<TableSession[]>) => {
       state.tableSessions = action.payload;
     },
-    setComplaints: (state, action: PayloadAction<Complaint[]>) => {
-      state.complaints = action.payload;
-    },
-    addComplaintInStore: (state, action: PayloadAction<Complaint>) => {
-      state.complaints.unshift(action.payload);
-    },
-    addComplaintReplyInStore: (
-      state,
-      action: PayloadAction<{ complaintId: string; message: any }>
-    ) => {
-      const cmp = state.complaints.find((c) => c.id === action.payload.complaintId);
-      if (cmp) {
-        cmp.messages.push(action.payload.message);
-      }
-    },
     setShifts: (state, action: PayloadAction<CashShift[]>) => {
       state.shifts = action.payload;
     },
@@ -434,6 +501,47 @@ export const cafeSlice = createSlice({
     setManagerAccessRequests: (state, action: PayloadAction<Record<string, ManagerAccessRequest>>) => {
       state.managerAccessRequests = action.payload;
     },
+    setAnnouncements: (state, action: PayloadAction<Announcement[]>) => {
+      state.announcements = action.payload;
+    },
+    addAnnouncementInStore: (state, action: PayloadAction<Announcement>) => {
+      state.announcements = [action.payload, ...state.announcements.filter((a) => a.id !== action.payload.id)];
+    },
+    deleteAnnouncementFromStore: (state, action: PayloadAction<string>) => {
+      state.announcements = state.announcements.filter((a) => a.id !== action.payload);
+    },
+    setNotifications: (state, action: PayloadAction<AppNotification[]>) => {
+      state.notifications = action.payload;
+    },
+    addNotificationInStore: (state, action: PayloadAction<AppNotification>) => {
+      state.notifications = [
+        action.payload,
+        ...state.notifications.filter((n) => n.id !== action.payload.id),
+      ].slice(0, 150);
+    },
+    markNotificationReadInStore: (
+      state,
+      action: PayloadAction<{ id?: string; userId: string; markAll?: boolean }>
+    ) => {
+      const { id, userId, markAll } = action.payload;
+      state.notifications = state.notifications.map((n) => {
+        if (markAll || n.id === id) {
+          if (!n.readBy.includes(userId)) {
+            return { ...n, readBy: [...n.readBy, userId] };
+          }
+        }
+        return n;
+      });
+    },
+    removeNotificationFromStore: (state, action: PayloadAction<string>) => {
+      state.notifications = state.notifications.filter((n) => n.id !== action.payload);
+    },
+    clearNotificationsInStore: (state) => {
+      state.notifications = [];
+    },
+    setNotificationSettings: (state, action: PayloadAction<NotificationSettings>) => {
+      state.notificationSettings = action.payload;
+    },
     setSyncTimestamps: (state, action: PayloadAction<{ fast?: boolean; full?: boolean }>) => {
       const now = new Date().toISOString();
       if (action.payload.fast) state.lastFastSynced = now;
@@ -455,9 +563,6 @@ export const {
   setTables,
   updateTableStatusInStore,
   setTableSessions,
-  setComplaints,
-  addComplaintInStore,
-  addComplaintReplyInStore,
   setShifts,
   setRefundRequests,
   setAuditLogs,
@@ -474,6 +579,15 @@ export const {
   setAllowRepresentativeDirectPublish,
   setManagerAccessRequests,
   setSyncTimestamps,
+  setAnnouncements,
+  addAnnouncementInStore,
+  deleteAnnouncementFromStore,
+  setNotifications,
+  addNotificationInStore,
+  markNotificationReadInStore,
+  removeNotificationFromStore,
+  clearNotificationsInStore,
+  setNotificationSettings,
 } = cafeSlice.actions;
 
 // Selectors
@@ -488,7 +602,6 @@ export const selectCategories = (state: { cafe: CafeState }) => state.cafe.categ
 export const selectTables = (state: { cafe: CafeState }) => state.cafe.tables;
 export const selectBranchTables = (branchId: string) =>
   createSelector([selectTables], (tables) => tables.filter((t) => t.branchId === branchId));
-export const selectComplaints = (state: { cafe: CafeState }) => state.cafe.complaints;
 export const selectShifts = (state: { cafe: CafeState }) => state.cafe.shifts;
 export const selectCurrentShift = (branchId?: string) =>
   createSelector([selectShifts], (shifts) => {
@@ -507,5 +620,8 @@ export const selectAuditLogs = (state: { cafe: CafeState }) => state.cafe.auditL
 export const selectTableSessions = (state: { cafe: CafeState }) => state.cafe.tableSessions;
 export const selectActiveTableSession = (state: { cafe: CafeState }) => state.cafe.activeTableSession;
 export const selectCustomerCoordinates = (state: { cafe: CafeState }) => state.cafe.customerCoordinates;
+export const selectAnnouncements = (state: { cafe: CafeState }) => state.cafe.announcements;
+export const selectNotifications = (state: { cafe: CafeState }) => state.cafe.notifications;
+export const selectNotificationSettings = (state: { cafe: CafeState }) => state.cafe.notificationSettings;
 
 export default cafeSlice.reducer;

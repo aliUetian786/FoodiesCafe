@@ -1,5 +1,7 @@
 'use client';
 
+import { HistoricalLoadingModal } from '../components/common/HistoricalLoadingModal';
+
 import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
 import { Order, PaymentStatus, OrderItem } from '@/types/cafe';
@@ -38,8 +40,11 @@ import {
   Trash2,
   UtensilsCrossed,
   QrCode,
+  Bell,
 } from 'lucide-react';
 import { TableQrModal } from './TableQrModal';
+import { WalkInOrderModal } from './WalkInOrderModal';
+import { AssignTablesModal } from './AssignTablesModal';
 
 export const CashierScreen: React.FC = () => {
   const {
@@ -49,6 +54,7 @@ export const CashierScreen: React.FC = () => {
     currentShift,
     openShift,
     closeShift,
+    updateShiftOpeningBalance,
     requestRefund,
     decideRefund,
     refundRequests,
@@ -69,6 +75,7 @@ export const CashierScreen: React.FC = () => {
     isFetchingOlderOrders,
     fetchOlderOrders,
     filterOrdersToToday,
+    openNotificationModal,
   } = useApp();
 
   const isManager = currentRole === 'branch_manager';
@@ -97,6 +104,8 @@ export const CashierScreen: React.FC = () => {
   const [closeShiftModal, setCloseShiftModal] = useState(false);
   const [countedCashInput, setCountedCashInput] = useState('');
   const [differenceReason, setDifferenceReason] = useState('Exact count');
+  const [editingShiftId, setEditingShiftId] = useState<string | null>(null);
+  const [editOpeningValue, setEditOpeningValue] = useState<string>('');
 
   // Refund request modal
   const [refundModalOpen, setRefundModalOpen] = useState(false);
@@ -106,66 +115,119 @@ export const CashierScreen: React.FC = () => {
   // Table QR Code Management
   const [showTableQrModal, setShowTableQrModal] = useState(false);
 
-  // Rich Walk-in Order Flow States
+  // Table Waiter Assignment Management
+  const [showAssignTablesModal, setShowAssignTablesModal] = useState(false);
+
+  // Walk-in Order Flow State
   const [showWalkInModal, setShowWalkInModal] = useState(false);
-  const [walkInStep, setWalkInStep] = useState<'menu' | 'checkout'>('menu');
-  const [walkInCart, setWalkInCart] = useState<OrderItem[]>([]);
-  const [walkInSearch, setWalkInSearch] = useState('');
-  const [walkInCategory, setWalkInCategory] = useState('All');
-  const [walkInOrderType, setWalkInOrderType] = useState<'dine_in' | 'takeaway' | 'delivery'>('dine_in');
-  const [walkInTable, setWalkInTable] = useState('');
-  const [walkInCustomerName, setWalkInCustomerName] = useState('Walk-in Guest');
-  const [walkInCustomerPhone, setWalkInCustomerPhone] = useState('');
-  const [walkInDeliveryAddress, setWalkInDeliveryAddress] = useState('');
-  const [walkInPaymentChoice, setWalkInPaymentChoice] = useState<'unpaid' | 'paid'>('paid');
 
-  const availableTables = useMemo(() => {
-    return tables.filter(
-      (t) => (!t.branchId || t.branchId === currentBranch.id) && t.status === 'available'
+  // Helper to test if date string is today
+  const isToday = (dateStr?: string) => {
+    if (!dateStr) return false;
+    const s = String(dateStr).toLowerCase();
+    if (s.includes('today') || s.includes('just now') || s.includes('m ago') || s.includes('s ago')) return true;
+    const d = new Date(dateStr);
+    if (isNaN(d.getTime())) return false;
+    const today = new Date();
+    return (
+      d.getDate() === today.getDate() &&
+      d.getMonth() === today.getMonth() &&
+      d.getFullYear() === today.getFullYear()
     );
-  }, [tables, currentBranch.id]);
+  };
 
-  useEffect(() => {
-    if (availableTables.length > 0 && (!walkInTable || !availableTables.some((t) => t.number === walkInTable))) {
-      setWalkInTable(availableTables[0].number);
-    }
-  }, [availableTables, walkInTable]);
-
-  // Cashier should ONLY see Dine-In orders placed via Walk-in or Table QR scan!
+  // Cashier Desk: Strictly ONLY his takeaway orders created today (no other order types)
   const cashierOrders = useMemo(() => {
     return orders.filter((o) => {
       if (o.branchId && o.branchId !== currentBranch.id) return false;
-      if (isManager) return true;
-      if (o.type !== 'dine_in') return false;
-      return (
-        o.isWalkIn === true ||
-        o.isTableQr === true ||
-        !!o.tableQrSessionId ||
-        o.cashierId === currentUser.id ||
-        (o.notes && o.notes.toLowerCase().includes('walk-in')) ||
-        (o.pickupTime && o.pickupTime.toLowerCase().includes('walk-in'))
-      );
+      // Strictly takeaway only
+      if (o.type !== 'takeaway') return false;
+      // Strictly today's orders only
+      if (!isToday(o.createdAt)) return false;
+      // Strictly his takeaway orders
+      if (o.cashierId && currentUser?.id && o.cashierId !== currentUser.id) return false;
+      return true;
     });
-  }, [orders, currentBranch.id, isManager, currentUser.id]);
+  }, [orders, currentBranch.id, currentUser]);
 
   const filteredOrders = useMemo(() => {
     return cashierOrders.filter((o) => {
-      if (paymentFilter === 'all') return true;
-      return o.paymentStatus === paymentFilter;
+      if (paymentFilter === 'unpaid') {
+        return o.paymentStatus !== 'paid' && o.status !== 'cancelled';
+      }
+      if (paymentFilter === 'paid') {
+        return o.paymentStatus === 'paid';
+      }
+      return true;
     });
   }, [cashierOrders, paymentFilter]);
+
+  // Cash collected today across branch (takeaway at desk + delivery COD collected by riders)
+  const todayBranchCashOrders = useMemo(() => {
+    return orders.filter((o) => {
+      if (o.branchId && o.branchId !== currentBranch.id) return false;
+      if (!isToday(o.createdAt)) return false;
+      const isPaid = o.paymentStatus === 'paid' || o.paymentCollected === true;
+      if (!isPaid) return false;
+      const m = (o.paymentMethod || '').toLowerCase();
+      const isCashOrCod = m.includes('cash') || m.includes('cod') || !m;
+      return isCashOrCod;
+    });
+  }, [orders, currentBranch.id]);
+
+  const todayCashCollectedFromOrders = useMemo(() => {
+    return todayBranchCashOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+  }, [todayBranchCashOrders]);
+
+  const effectiveCashCollected = useMemo(() => {
+    return Math.max(Number(currentShift?.cashCollected || 0), todayCashCollectedFromOrders);
+  }, [currentShift?.cashCollected, todayCashCollectedFromOrders]);
+
+  const effectiveExpectedTill = useMemo(() => {
+    return Number(currentShift?.openingFloat || 0) + effectiveCashCollected;
+  }, [currentShift?.openingFloat, effectiveCashCollected]);
+
+  const latestClosedBranchShift = useMemo(() => {
+    return shifts.find(
+      (s) => s.status === 'closed' && (!s.branchId || s.branchId === currentBranch.id)
+    ) || null;
+  }, [shifts, currentBranch.id]);
+
+  const activeBranchShiftForManager = useMemo(() => {
+    return (
+      shifts.find(
+        (s) => s.status === 'open' && (!s.branchId || s.branchId === currentBranch.id)
+      ) || null
+    );
+  }, [shifts, currentBranch.id]);
 
   const selectedOrder = useMemo(() => {
     return (
       filteredOrders.find((o) => o.id === selectedOrderId) ||
       filteredOrders[0] ||
       cashierOrders[0] ||
-      orders[0]
+      null
     );
-  }, [filteredOrders, selectedOrderId, cashierOrders, orders]);
+  }, [filteredOrders, selectedOrderId, cashierOrders]);
 
   const handleRecordPayment = () => {
     if (!selectedOrder) return;
+    if (selectedOrder.status === 'cancelled') {
+      addToast({
+        type: 'error',
+        title: 'Payment Blocked',
+        message: 'This order was cancelled. Payment cannot be collected.',
+      });
+      return;
+    }
+    if (selectedOrder.type !== 'takeaway') {
+      addToast({
+        type: 'error',
+        title: 'Takeaway Only',
+        message: 'Cashier can only accept payment for takeaway orders. Dine-In is collected by Waiter, and Delivery is collected by Rider.',
+      });
+      return;
+    }
     const tendered = parseFloat(cashTendered) || 0;
     if (tendered < selectedOrder.total) {
       addToast({
@@ -183,6 +245,14 @@ export const CashierScreen: React.FC = () => {
   const handlePrintReceipt = (targetOrder?: Order) => {
     const ord = targetOrder || selectedOrder;
     if (!ord) return;
+    if (ord.status === 'cancelled') {
+      addToast({
+        type: 'error',
+        title: 'Receipt Blocked',
+        message: 'This order was cancelled. Payment receipts cannot be printed for cancelled orders.',
+      });
+      return;
+    }
 
     const existingIframe = document.getElementById('foodies-print-iframe');
     if (existingIframe) existingIframe.remove();
@@ -333,105 +403,6 @@ export const CashierScreen: React.FC = () => {
     }, 300);
   };
 
-  const filteredWalkInItems = useMemo(() => {
-    return menuItems.filter((item) => {
-      const matchesSearch =
-        item.name.toLowerCase().includes(walkInSearch.toLowerCase()) ||
-        item.description.toLowerCase().includes(walkInSearch.toLowerCase());
-      const matchesCategory = walkInCategory === 'All' || item.category === walkInCategory;
-      return matchesSearch && matchesCategory;
-    });
-  }, [menuItems, walkInSearch, walkInCategory]);
-
-  const handleAddWalkInItem = (item: any) => {
-    const price = item.branchPriceOverrides?.[currentBranch.id] ?? item.basePrice;
-    setWalkInCart((prev) => {
-      const existing = prev.find((ci) => ci.menuItemId === item.id);
-      if (existing) {
-        return prev.map((ci) =>
-          ci.menuItemId === item.id ? { ...ci, quantity: ci.quantity + 1 } : ci
-        );
-      }
-      return [
-        ...prev,
-        {
-          id: `wi-${Date.now()}-${item.id}`,
-          menuItemId: item.id,
-          name: item.name,
-          unitPrice: price,
-          quantity: 1,
-          isAddOn: false,
-        },
-      ];
-    });
-  };
-
-  const handleUpdateWalkInCartQty = (menuItemId: string, delta: number) => {
-    setWalkInCart((prev) => {
-      return prev
-        .map((ci) => {
-          if (ci.menuItemId === menuItemId) {
-            const newQty = ci.quantity + delta;
-            return newQty > 0 ? { ...ci, quantity: newQty } : null;
-          }
-          return ci;
-        })
-        .filter(Boolean) as OrderItem[];
-    });
-  };
-
-  const handleCreateWalkIn = () => {
-    if (walkInCart.length === 0) {
-      addToast({
-        type: 'error',
-        title: 'Order is Empty',
-        message: 'Please add dishes from the menu to create a walk-in order.',
-      });
-      return;
-    }
-
-    const tablePin = tables.find(
-      (t) => t.number === walkInTable && (!t.branchId || t.branchId === currentBranch.id)
-    )?.pin;
-
-    const placed = placeOrder(
-      walkInOrderType,
-      walkInOrderType === 'dine_in' ? walkInTable : undefined,
-      walkInOrderType === 'dine_in' ? tablePin : undefined,
-      walkInOrderType === 'takeaway' ? 'Immediate walk-in counter collection' : undefined,
-      walkInOrderType === 'delivery' ? walkInDeliveryAddress : undefined,
-      'Cash',
-      walkInCart,
-      {
-        customerName: walkInCustomerName || 'Walk-in Guest',
-        customerPhone: walkInCustomerPhone || '+92 300 0000000',
-        cashierId: currentUser.id || 'user-cashier',
-        cashierName: currentUser.name || 'Bilal Farooq',
-        isWalkIn: true,
-      }
-    );
-
-    // DIRECT KITCHEN DISPATCH (Does NOT wait for timer, sent directly to kitchen!)
-    sendOrderToKitchen(placed.id);
-
-    // If paid now at till
-    if (walkInPaymentChoice === 'paid') {
-      recordCashPayment(placed.id, placed.total);
-    }
-
-    addToast({
-      type: 'success',
-      title: 'Dispatched Directly to Kitchen 👨‍🍳',
-      message: `Walk-in Order #${placed.orderNumber} sent directly to kitchen. Support staff and orders hub can monitor progress.`,
-    });
-
-    // Reset walk-in modal
-    setShowWalkInModal(false);
-    setWalkInStep('menu');
-    setWalkInCart([]);
-    setSelectedOrderId(placed.id);
-  };
-
   if (isManager) {
     const isWithinDateRange = (dateStr?: string) => {
       if (!dateStr) return true;
@@ -477,29 +448,70 @@ export const CashierScreen: React.FC = () => {
     const selectedShift = shiftCashierFilter.startsWith('shift:')
       ? shifts.find((s) => s.id === shiftCashierFilter.replace('shift:', ''))
       : null;
+    const targetCashierId = shiftCashierFilter.startsWith('cashier:')
+      ? shiftCashierFilter.replace('cashier:', '')
+      : null;
+    const targetCashierUser = targetCashierId ? users.find((u) => u.id === targetCashierId) : null;
+    const cashierShifts = targetCashierId
+      ? shifts.filter(
+          (s) =>
+            s.cashierId === targetCashierId ||
+            (targetCashierUser && s.cashierName && s.cashierName.toLowerCase().includes(targetCashierUser.name.toLowerCase()))
+        )
+      : [];
+    const cashierShiftIds = cashierShifts.map((s) => s.id);
+
+    const branchCashiers = users.filter(
+      (u) =>
+        (u.role === 'cashier' || u.role === 'branch_manager') &&
+        (!u.branchId || u.branchId === currentBranch.id)
+    );
 
     const managerFilteredOrders = orders.filter((o) => {
+      // Must match branch if order has branchId
+      if (o.branchId && o.branchId !== currentBranch.id) return false;
       if (managerTypeFilter !== 'all' && o.type !== managerTypeFilter) return false;
       
       // Shift / Cashier filter
       if (shiftCashierFilter !== 'all') {
         if (selectedShift) {
-          const matchCashier =
-            (o.cashierId && o.cashierId === selectedShift.cashierId) ||
-            (o.cashierName && selectedShift.cashierName && o.cashierName.toLowerCase().includes(selectedShift.cashierName.toLowerCase()));
-          const matchWindow =
-            selectedShift.openedAt &&
-            (selectedShift.openedAt.toLowerCase().includes('today')
-              ? o.createdAt?.toLowerCase().includes('today') || isWithinDateRange(o.createdAt)
-              : false);
-          if (!matchCashier && !matchWindow) return false;
-        } else if (shiftCashierFilter.startsWith('cashier:')) {
-          const targetCashierId = shiftCashierFilter.replace('cashier:', '');
-          const targetUser = users.find((u) => u.id === targetCashierId);
-          const matches =
-            o.cashierId === targetCashierId ||
-            (targetUser && o.cashierName && o.cashierName.toLowerCase() === targetUser.name.toLowerCase());
-          if (!matches) return false;
+          const matchShiftId = o.shiftId === selectedShift.id;
+          const matchCashierId = Boolean(o.cashierId && o.cashierId === selectedShift.cashierId);
+          const matchCashierName = Boolean(
+            o.cashierName &&
+            selectedShift.cashierName &&
+            o.cashierName.toLowerCase().includes(selectedShift.cashierName.toLowerCase())
+          );
+          const isShiftBranch = !selectedShift.branchId || selectedShift.branchId === currentBranch.id;
+          
+          if (matchShiftId || matchCashierId || matchCashierName) {
+            // matches directly
+          } else if (isShiftBranch && !o.cashierId && !o.shiftId) {
+            // Unassigned order at this branch: check if shift matches this branch
+            const isOnlyShift = shifts.filter((s) => !s.branchId || s.branchId === currentBranch.id).length <= 1;
+            const shiftOpenedToday = selectedShift.openedAt?.toLowerCase().includes('today') || isWithinDateRange(selectedShift.openedAt);
+            if (!isOnlyShift && !shiftOpenedToday) return false;
+          } else {
+            return false;
+          }
+        } else if (targetCashierId) {
+          const matchDirect = o.cashierId === targetCashierId;
+          const matchName = Boolean(
+            targetCashierUser &&
+            o.cashierName &&
+            o.cashierName.toLowerCase().includes(targetCashierUser.name.toLowerCase())
+          );
+          const matchShift = o.shiftId ? cashierShiftIds.includes(o.shiftId) : false;
+
+          if (matchDirect || matchName || matchShift) {
+            // matches directly
+          } else if (!o.cashierId && !o.shiftId && targetCashierUser) {
+            // Unassigned orders: attribute to primary cashier if branch matches
+            const isPrimary = branchCashiers[0]?.id === targetCashierId;
+            if (!isPrimary) return false;
+          } else {
+            return false;
+          }
         }
       }
 
@@ -517,11 +529,23 @@ export const CashierScreen: React.FC = () => {
     const pendingRefunds = refundRequests.filter((r) => r.status === 'requested');
     const activeMonitorOrder = orders.find((o) => o.id === selectedMonitorOrderId) || managerFilteredOrders[0] || orders[0];
 
-    const totalPeriodRevenue = managerFilteredOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
-    const cashCollectedPeriod = managerFilteredOrders
-      .filter((o) => !o.paymentMethod || o.paymentMethod.toLowerCase().includes('cash'))
+    // Compute period collections with recorded shift collections fallback
+    const rawOrderRevenue = managerFilteredOrders.reduce((sum, o) => sum + (Number(o.total) || 0), 0);
+    const rawCashFromOrders = managerFilteredOrders
+      .filter((o) => !o.paymentMethod || o.paymentMethod.toLowerCase().includes('cash') || o.paymentMethod.toLowerCase().includes('cod'))
       .reduce((sum, o) => sum + (Number(o.total) || 0), 0);
-    const digitalCollectedPeriod = totalPeriodRevenue - cashCollectedPeriod;
+
+    const relevantShifts = selectedShift
+      ? [selectedShift]
+      : targetCashierId
+      ? cashierShifts
+      : shifts.filter((s) => !s.branchId || s.branchId === currentBranch.id);
+
+    const recordedShiftCash = relevantShifts.reduce((sum, s) => sum + (Number(s.cashCollected) || 0), 0);
+    const cashCollectedPeriod = Math.max(rawCashFromOrders, recordedShiftCash);
+    const digitalCollectedPeriod = Math.max(0, rawOrderRevenue - rawCashFromOrders);
+    const totalPeriodRevenue = Math.max(rawOrderRevenue, cashCollectedPeriod + digitalCollectedPeriod);
+
     const approvedRefundsPeriod = refundRequests
       .filter((r) => r.status === 'approved' && isWithinDateRange(r.createdAt))
       .reduce((sum, r) => sum + (Number(r.amount) || 0), 0);
@@ -538,6 +562,7 @@ export const CashierScreen: React.FC = () => {
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '22px' }}>
+        <HistoricalLoadingModal visible={isFetchingOlderOrders} />
         {/* Header & Role Notice */}
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '16px' }}>
           <div>
@@ -619,90 +644,8 @@ export const CashierScreen: React.FC = () => {
               }}
             >
               <Receipt size={15} />
-              <span>Orders ({hasLoadedOlderOrders ? `${orders.length} Total` : `Today: ${managerFilteredOrders.length}`})</span>
+              <span>Orders ({managerFilteredOrders.length})</span>
             </button>
-          </div>
-        </div>
-
-        {/* FAST PERFORMANCE / ON-DEMAND DATA BANNER (Hidden on Mobile) */}
-        <div
-          className="cashier-fastmode-banner"
-          style={{
-            backgroundColor: 'var(--bg-card)',
-            borderRadius: 'var(--radius-lg)',
-            border: '1px solid var(--border-color)',
-            padding: '12px 18px',
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'center',
-            flexWrap: 'wrap',
-            gap: '12px',
-            boxShadow: 'var(--shadow-sm)',
-          }}
-        >
-          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-            <span
-              style={{
-                fontSize: '11.5px',
-                fontWeight: 800,
-                padding: '3px 8px',
-                borderRadius: 'var(--radius-full)',
-                backgroundColor: hasLoadedOlderOrders ? 'rgba(37, 99, 235, 0.1)' : 'rgba(22, 163, 74, 0.1)',
-                color: hasLoadedOlderOrders ? '#2563EB' : '#16A34A',
-              }}
-            >
-              {hasLoadedOlderOrders ? '📂 Archive Loaded' : '⚡ Fast Mode'}
-            </span>
-            <span style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
-              {hasLoadedOlderOrders
-                ? `Full database historical orders loaded (${orders.length} records).`
-                : 'Displaying financial detailing of today only. Older records will only be fetched when you choose to load them.'}
-            </span>
-          </div>
-
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            {!hasLoadedOlderOrders ? (
-              <button
-                onClick={() => fetchOlderOrders()}
-                disabled={isFetchingOlderOrders}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '6px 14px',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'var(--bg-card-subtle)',
-                  border: '1px solid var(--border-color)',
-                  color: 'var(--primary)',
-                  fontWeight: 750,
-                  fontSize: '12.5px',
-                  cursor: isFetchingOlderOrders ? 'not-allowed' : 'pointer',
-                  transition: 'all 0.15s ease',
-                }}
-              >
-                <span>{isFetchingOlderOrders ? '⏳ Fetching Data...' : '📂 Fetch Older Data ⬇'}</span>
-              </button>
-            ) : (
-              <button
-                onClick={() => filterOrdersToToday()}
-                disabled={isFetchingOlderOrders}
-                style={{
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: '6px',
-                  padding: '6px 14px',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'var(--bg-card-subtle)',
-                  border: '1px solid var(--border-color)',
-                  color: 'var(--text-secondary)',
-                  fontWeight: 700,
-                  fontSize: '12.5px',
-                  cursor: 'pointer',
-                }}
-              >
-                <span>Show Today Only ⚡</span>
-              </button>
-            )}
           </div>
         </div>
 
@@ -938,13 +881,15 @@ export const CashierScreen: React.FC = () => {
                   }}
                 >
                   <option value="all">All Shifts & Cashiers</option>
-                  {shifts.map((s) => (
+                  {shifts
+                    .filter((s) => !s.branchId || s.branchId === currentBranch.id)
+                    .map((s) => (
                     <option key={s.id} value={`shift:${s.id}`}>
                       Shift #{s.id} · {s.cashierName} ({s.status.toUpperCase()})
                     </option>
                   ))}
                   {users
-                    .filter((u) => u.role === 'cashier' || u.role === 'branch_manager')
+                    .filter((u) => (u.role === 'cashier' || u.role === 'branch_manager') && (!u.branchId || u.branchId === currentBranch.id))
                     .map((u) => (
                       <option key={u.id} value={`cashier:${u.id}`}>
                         Cashier: {u.name} ({u.role === 'cashier' ? 'Cashier' : 'Manager'})
@@ -972,6 +917,157 @@ export const CashierScreen: React.FC = () => {
                   />
                 </div>
               )}
+            </div>
+
+            {/* Always-Visible Cashier Account Balance (Opening & Closing) Card for Manager */}
+            <div
+              style={{
+                backgroundColor: 'var(--bg-card)',
+                borderRadius: 'var(--radius-lg)',
+                border: '1px solid #FDBA74',
+                padding: '18px 20px',
+                boxShadow: 'var(--shadow-sm)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '14px',
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <Banknote size={18} color="#EA580C" />
+                  <h4 style={{ margin: 0, fontSize: '15px', fontWeight: 850, color: 'var(--text-main)' }}>
+                    Cashier Account Balance (Opening & Closing) — Manager Control
+                  </h4>
+                </div>
+                <span style={{ fontSize: '11.5px', fontWeight: 700, color: '#C2410C', backgroundColor: '#FFF7ED', padding: '4px 10px', borderRadius: '999px', border: '1px solid #FED7AA' }}>
+                  Manager can inspect & edit Cashier Opening Balance
+                </span>
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(220px, 1fr))', gap: '12px' }}>
+                {/* Open Shift Box */}
+                <div style={{ backgroundColor: '#F0FDF4', border: '1px solid #BBF7D0', borderRadius: '10px', padding: '12px 14px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 800, color: '#15803D', textTransform: 'uppercase' }}>
+                    When Account Opened ({activeBranchShiftForManager ? `🟢 Open • ${activeBranchShiftForManager.cashierName}` : 'No Active Open Shift'})
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: '6px' }}>
+                    <span style={{ fontSize: '12px', color: '#166534', fontWeight: 650 }}>Opening Balance:</span>
+                    <span style={{ fontSize: '17px', fontWeight: 900, color: '#14532D' }}>
+                      Rs. {Number(activeBranchShiftForManager?.openingFloat || 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: '4px' }}>
+                    <span style={{ fontSize: '12px', color: '#166534', fontWeight: 650 }}>Current Amount in Account:</span>
+                    <span style={{ fontSize: '15px', fontWeight: 850, color: '#15803D' }}>
+                      Rs. {activeBranchShiftForManager
+                        ? (Number(activeBranchShiftForManager.openingFloat || 0) + Math.max(Number(activeBranchShiftForManager.cashCollected || 0), cashCollectedPeriod)).toLocaleString()
+                        : '0'}
+                    </span>
+                  </div>
+                  {activeBranchShiftForManager && (
+                    <div style={{ marginTop: '8px' }}>
+                      {editingShiftId === activeBranchShiftForManager.id ? (
+                        <div style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                          <input
+                            type="number"
+                            value={editOpeningValue}
+                            onChange={(e) => setEditOpeningValue(e.target.value)}
+                            placeholder="New Opening Rs."
+                            style={{ flex: 1, padding: '6px 8px', borderRadius: '6px', border: '1px solid #86EFAC', fontSize: '12.5px', fontWeight: 700, backgroundColor: '#FFFFFF' }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              updateShiftOpeningBalance(activeBranchShiftForManager.id, parseFloat(editOpeningValue) || 0);
+                              setEditingShiftId(null);
+                            }}
+                            style={{ padding: '6px 10px', borderRadius: '6px', border: 'none', backgroundColor: '#16A34A', color: '#FFFFFF', fontSize: '11.5px', fontWeight: 800, cursor: 'pointer' }}
+                          >
+                            Save
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setEditingShiftId(null)}
+                            style={{ padding: '6px 8px', borderRadius: '6px', border: '1px solid #CBD5E1', backgroundColor: '#FFFFFF', color: '#475569', fontSize: '11.5px', fontWeight: 700, cursor: 'pointer' }}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingShiftId(activeBranchShiftForManager.id);
+                            setEditOpeningValue(String(activeBranchShiftForManager.openingFloat || 0));
+                          }}
+                          style={{ padding: '5px 10px', borderRadius: '6px', border: '1px solid #16A34A', backgroundColor: '#FFFFFF', color: '#15803D', fontSize: '11.5px', fontWeight: 800, cursor: 'pointer' }}
+                        >
+                          Edit Opening Balance
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                {/* Closed Shift Box */}
+                <div style={{ backgroundColor: '#F8FAFC', border: '1px solid #E2E8F0', borderRadius: '10px', padding: '12px 14px' }}>
+                  <div style={{ fontSize: '11px', fontWeight: 800, color: '#475569', textTransform: 'uppercase' }}>
+                    After Closing Account ({latestClosedBranchShift ? `${latestClosedBranchShift.cashierName} • ${latestClosedBranchShift.closedAt || 'Closed'}` : 'No Closed Shift Yet'})
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: '6px' }}>
+                    <span style={{ fontSize: '12px', color: '#475569', fontWeight: 650 }}>Opened Balance:</span>
+                    <span style={{ fontSize: '14px', fontWeight: 800, color: '#0F172A' }}>
+                      Rs. {Number(latestClosedBranchShift?.openingFloat || 0).toLocaleString()}
+                    </span>
+                  </div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'baseline', marginTop: '4px' }}>
+                    <span style={{ fontSize: '12px', color: '#475569', fontWeight: 650 }}>Closing Account Balance:</span>
+                    <span style={{ fontSize: '17px', fontWeight: 900, color: '#EA580C' }}>
+                      {latestClosedBranchShift
+                        ? `Rs. ${Number(latestClosedBranchShift.countedCash ?? latestClosedBranchShift.expectedCash ?? 0).toLocaleString()}`
+                        : '—'}
+                    </span>
+                  </div>
+                  {latestClosedBranchShift && (
+                    <div style={{ marginTop: '8px', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '6px' }}>
+                      <span style={{ fontSize: '11px', fontWeight: 700, color: (Number(latestClosedBranchShift.difference) || 0) === 0 ? '#16A34A' : '#DC2626' }}>
+                        Diff: Rs. {(Number(latestClosedBranchShift.difference) || 0) >= 0 ? '+' : ''}{(Number(latestClosedBranchShift.difference) || 0).toLocaleString()}
+                      </span>
+                      {editingShiftId === latestClosedBranchShift.id ? (
+                        <div style={{ display: 'flex', gap: '4px', alignItems: 'center' }}>
+                          <input
+                            type="number"
+                            value={editOpeningValue}
+                            onChange={(e) => setEditOpeningValue(e.target.value)}
+                            style={{ width: '90px', padding: '4px 6px', borderRadius: '6px', border: '1px solid #CBD5E1', fontSize: '12px', fontWeight: 700 }}
+                          />
+                          <button
+                            type="button"
+                            onClick={() => {
+                              updateShiftOpeningBalance(latestClosedBranchShift.id, parseFloat(editOpeningValue) || 0);
+                              setEditingShiftId(null);
+                            }}
+                            style={{ padding: '4px 8px', borderRadius: '6px', border: 'none', backgroundColor: '#EA580C', color: '#FFFFFF', fontSize: '11px', fontWeight: 800, cursor: 'pointer' }}
+                          >
+                            Save
+                          </button>
+                        </div>
+                      ) : (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingShiftId(latestClosedBranchShift.id);
+                            setEditOpeningValue(String(latestClosedBranchShift.openingFloat || 0));
+                          }}
+                          style={{ padding: '4px 9px', borderRadius: '6px', border: '1px solid #CBD5E1', backgroundColor: '#FFFFFF', color: '#334155', fontSize: '11px', fontWeight: 750, cursor: 'pointer' }}
+                        >
+                          Edit Opening Balance
+                        </button>
+                      )}
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Selected Shift Reconciliation Card (When a shift is selected via dropdown) */}
@@ -1013,10 +1109,53 @@ export const CashierScreen: React.FC = () => {
 
                 <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(130px, 1fr))', gap: '10px' }}>
                   <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '10px 12px', borderRadius: 'var(--radius-md)' }}>
-                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700 }}>OPENING FLOAT</div>
-                    <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-main)', marginTop: '2px' }}>
-                      Rs. {Number(selectedShift.openingFloat || 0).toLocaleString()}
+                    <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '4px' }}>
+                      <span>OPENING BALANCE</span>
+                      {editingShiftId !== selectedShift.id && (
+                        <button
+                          type="button"
+                          onClick={() => {
+                            setEditingShiftId(selectedShift.id);
+                            setEditOpeningValue(String(selectedShift.openingFloat || 0));
+                          }}
+                          style={{
+                            border: 'none',
+                            background: 'none',
+                            color: '#EA580C',
+                            fontSize: '10.5px',
+                            fontWeight: 800,
+                            cursor: 'pointer',
+                            padding: 0,
+                          }}
+                        >
+                          Edit
+                        </button>
+                      )}
                     </div>
+                    {editingShiftId === selectedShift.id ? (
+                      <div style={{ display: 'flex', gap: '4px', marginTop: '4px', alignItems: 'center' }}>
+                        <input
+                          type="number"
+                          value={editOpeningValue}
+                          onChange={(e) => setEditOpeningValue(e.target.value)}
+                          style={{ width: '85px', padding: '4px 6px', borderRadius: '5px', border: '1px solid var(--border-color)', fontSize: '12px', fontWeight: 700 }}
+                        />
+                        <button
+                          type="button"
+                          onClick={() => {
+                            updateShiftOpeningBalance(selectedShift.id, parseFloat(editOpeningValue) || 0);
+                            setEditingShiftId(null);
+                          }}
+                          style={{ padding: '4px 8px', borderRadius: '5px', border: 'none', backgroundColor: '#16A34A', color: '#FFFFFF', fontSize: '11px', fontWeight: 800, cursor: 'pointer' }}
+                        >
+                          Save
+                        </button>
+                      </div>
+                    ) : (
+                      <div style={{ fontSize: '16px', fontWeight: 800, color: 'var(--text-main)', marginTop: '2px' }}>
+                        Rs. {Number(selectedShift.openingFloat || 0).toLocaleString()}
+                      </div>
+                    )}
                   </div>
                   <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '10px 12px', borderRadius: 'var(--radius-md)' }}>
                     <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700 }}>CASH COLLECTED</div>
@@ -1275,57 +1414,6 @@ export const CashierScreen: React.FC = () => {
                 gap: '14px',
               }}
             >
-              {!hasLoadedOlderOrders ? (
-                <div
-                  className="cashier-orders-archive-banner"
-                  style={{ backgroundColor: 'var(--bg-card-subtle)', borderRadius: 'var(--radius-md)', padding: '10px 12px', border: '1px solid var(--border-color)', display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: '8px' }}
-                >
-                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-                    <span>Showing <strong>Today's</strong> orders ({managerFilteredOrders.length}).</span>
-                  </div>
-                  <button
-                    onClick={() => fetchOlderOrders()}
-                    disabled={isFetchingOlderOrders}
-                    style={{
-                      padding: '5px 10px',
-                      borderRadius: '6px',
-                      backgroundColor: 'var(--primary)',
-                      color: '#FFFFFF',
-                      fontSize: '11px',
-                      fontWeight: 750,
-                      border: 'none',
-                      cursor: isFetchingOlderOrders ? 'not-allowed' : 'pointer',
-                    }}
-                  >
-                    {isFetchingOlderOrders ? 'Loading...' : 'Fetch Older Orders ⬇'}
-                  </button>
-                </div>
-              ) : (
-                <div
-                  className="cashier-orders-archive-banner"
-                  style={{ backgroundColor: 'rgba(37, 99, 235, 0.06)', borderRadius: 'var(--radius-md)', padding: '8px 12px', border: '1px solid rgba(37, 99, 235, 0.2)', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}
-                >
-                  <span style={{ fontSize: '12px', color: '#2563EB', fontWeight: 700 }}>
-                    📂 Full Archive: {managerFilteredOrders.length} orders
-                  </span>
-                  <button
-                    onClick={() => filterOrdersToToday()}
-                    style={{
-                      padding: '3px 8px',
-                      borderRadius: '5px',
-                      backgroundColor: '#FFFFFF',
-                      border: '1px solid #93C5FD',
-                      color: '#2563EB',
-                      fontSize: '11px',
-                      fontWeight: 750,
-                      cursor: 'pointer',
-                    }}
-                  >
-                    Today Only ⚡
-                  </button>
-                </div>
-              )}
-
               <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                 <Search size={16} color="var(--text-muted)" />
                 <input
@@ -1690,12 +1778,30 @@ export const CashierScreen: React.FC = () => {
           </div>
 
           {/* Shift Control Buttons */}
-          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
             <button
-              onClick={() => {
-                setShowWalkInModal(true);
-                setWalkInStep('menu');
+              type="button"
+              onClick={() => openNotificationModal('send')}
+              style={{
+                padding: '8px 13px',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: '#FFF7ED',
+                border: '1px solid #FDBA74',
+                color: '#C2410C',
+                fontSize: '12.5px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
               }}
+            >
+              <Bell size={14} />
+              <span>Notify User / Staff</span>
+            </button>
+
+            <button
+              onClick={() => setShowWalkInModal(true)}
               style={{
                 padding: '8px 14px',
                 borderRadius: 'var(--radius-md)',
@@ -1731,9 +1837,31 @@ export const CashierScreen: React.FC = () => {
                 gap: '6px',
                 boxShadow: 'var(--shadow-sm)',
               }}
+              title="Manage dine-in tables, create new tables, delete tables, and generate QR codes"
             >
-              <QrCode size={16} color="var(--primary)" />
-              <span>Table QR Codes</span>
+              <Utensils size={16} color="var(--primary)" />
+              <span>Tables & QR Codes</span>
+            </button>
+
+            <button
+              onClick={() => setShowAssignTablesModal(true)}
+              style={{
+                padding: '8px 14px',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'var(--bg-card)',
+                border: '1.5px solid #2563EB',
+                color: '#2563EB',
+                fontSize: '13px',
+                fontWeight: 800,
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                boxShadow: 'var(--shadow-sm)',
+              }}
+            >
+              <Users size={16} color="#2563EB" />
+              <span>Assign Tables</span>
             </button>
 
             {currentShift ? (
@@ -1794,23 +1922,32 @@ export const CashierScreen: React.FC = () => {
           </div>
 
           <div>
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Opening Float (Cash In Till):</span>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Opening Account Balance:</span>
             <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-main)', marginTop: '1px' }}>
-              Rs. {(currentShift?.openingFloat || 0).toLocaleString()}
+              Rs. {(currentShift?.openingFloat ?? latestClosedBranchShift?.openingFloat ?? 0).toLocaleString()}
             </div>
           </div>
 
           <div>
             <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Cash Collected Today:</span>
             <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--primary)', marginTop: '1px' }}>
-              Rs. {(currentShift?.cashCollected || 0).toLocaleString()}
+              Rs. {effectiveCashCollected.toLocaleString()}
             </div>
           </div>
 
           <div>
-            <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Expected Till Total:</span>
-            <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-main)', marginTop: '1px' }}>
-              Rs. {(currentShift?.expectedCash || 0).toLocaleString()}
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Live Account Amount (Open):</span>
+            <div style={{ fontSize: '15px', fontWeight: 800, color: '#16A34A', marginTop: '1px' }}>
+              Rs. {effectiveExpectedTill.toLocaleString()}
+            </div>
+          </div>
+
+          <div>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 700, textTransform: 'uppercase' }}>Last Closing Account Amount:</span>
+            <div style={{ fontSize: '15px', fontWeight: 800, color: '#EA580C', marginTop: '1px' }}>
+              {latestClosedBranchShift
+                ? `Rs. ${Number(latestClosedBranchShift.countedCash ?? latestClosedBranchShift.expectedCash ?? 0).toLocaleString()}`
+                : '—'}
             </div>
           </div>
         </div>
@@ -1826,8 +1963,41 @@ export const CashierScreen: React.FC = () => {
         }}
       >
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(320px, 1fr))', gap: '16px', alignItems: 'flex-start' }}>
-        {/* Left: Orders List with Filter */}
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        {/* Left: Orders List with Takeaway Badge & Payment Filter */}
+        <div style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+          {/* Header indicator: Takeaway Orders Today */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              backgroundColor: 'var(--bg-card-subtle)',
+              padding: '8px 12px',
+              borderRadius: 'var(--radius-md)',
+              border: '1px solid var(--border-color)',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <ShoppingBag size={15} color="var(--primary)" />
+              <span style={{ fontSize: '12.5px', fontWeight: 800, color: 'var(--text-main)' }}>
+                Takeaway Orders
+              </span>
+            </div>
+            <span
+              style={{
+                fontSize: '11px',
+                fontWeight: 750,
+                color: 'var(--primary)',
+                backgroundColor: 'var(--bg-card)',
+                padding: '2px 8px',
+                borderRadius: 'var(--radius-full)',
+                border: '1px solid var(--border-color)',
+              }}
+            >
+              Today Only
+            </span>
+          </div>
+
           {/* Payment Status Filter */}
           <div style={{ display: 'flex', gap: '8px', backgroundColor: 'var(--bg-card-subtle)', padding: '4px', borderRadius: 'var(--radius-md)' }}>
             {(['all', 'unpaid', 'paid'] as const).map((filter) => (
@@ -1845,6 +2015,7 @@ export const CashierScreen: React.FC = () => {
                   color: paymentFilter === filter ? 'var(--primary)' : 'var(--text-secondary)',
                   boxShadow: paymentFilter === filter ? 'var(--shadow-sm)' : 'none',
                   cursor: 'pointer',
+                  border: 'none',
                 }}
               >
                 {filter}
@@ -1854,6 +2025,31 @@ export const CashierScreen: React.FC = () => {
 
           {/* Orders */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+            {filteredOrders.length === 0 && (
+              <div
+                style={{
+                  padding: '36px 16px',
+                  textAlign: 'center',
+                  backgroundColor: 'var(--bg-card)',
+                  borderRadius: 'var(--radius-md)',
+                  border: '1px dashed var(--border-color)',
+                  color: 'var(--text-muted)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '8px',
+                }}
+              >
+                <ShoppingBag size={28} color="var(--text-muted)" />
+                <div style={{ fontSize: '13.5px', fontWeight: 700, color: 'var(--text-main)' }}>
+                  No Takeaway Orders For Today
+                </div>
+                <div style={{ fontSize: '12px' }}>
+                  Only your takeaway orders placed today appear on this desk.
+                </div>
+              </div>
+            )}
+
             {filteredOrders.map((ord) => {
               const isSelected = selectedOrder?.id === ord.id;
               return (
@@ -1876,20 +2072,34 @@ export const CashierScreen: React.FC = () => {
                     <span style={{ fontWeight: 800, fontSize: '15px' }}>Order #{ord.orderNumber}</span>
                     <span
                       style={{
-                        fontSize: '11px',
+                        fontSize: '10.5px',
                         fontWeight: 800,
                         padding: '2px 8px',
                         borderRadius: 'var(--radius-full)',
-                        backgroundColor: ord.paymentStatus === 'paid' ? 'var(--pay-paid-bg)' : 'var(--pay-unpaid-bg)',
-                        color: ord.paymentStatus === 'paid' ? 'var(--pay-paid-text)' : 'var(--pay-unpaid-text)',
+                        backgroundColor:
+                          ord.status === 'cancelled'
+                            ? '#FEE2E2'
+                            : ord.paymentStatus === 'paid'
+                            ? 'var(--pay-paid-bg)'
+                            : 'var(--pay-unpaid-bg)',
+                        color:
+                          ord.status === 'cancelled'
+                            ? '#991B1B'
+                            : ord.paymentStatus === 'paid'
+                            ? 'var(--pay-paid-text)'
+                            : 'var(--pay-unpaid-text)',
                       }}
                     >
-                      {ord.paymentStatus.toUpperCase()}
+                      {ord.status === 'cancelled'
+                        ? 'CANCELLED'
+                        : ord.paymentStatus === 'paid'
+                        ? 'PAID (CASHIER)'
+                        : 'UNPAID'}
                     </span>
                   </div>
 
                   <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)' }}>
-                    Customer: {ord.customerName} · {ord.type.toUpperCase()}
+                    Customer: {ord.customerName} · TAKEAWAY
                   </div>
 
                   <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '4px' }}>
@@ -1999,120 +2209,205 @@ export const CashierScreen: React.FC = () => {
               </div>
             </div>
 
-            {/* Amount Received and Change Due Calculator (PRD Requirement) */}
-            {selectedOrder.paymentStatus !== 'paid' && (
-              <div style={{ backgroundColor: 'var(--bg-card-subtle)', borderRadius: 'var(--radius-md)', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 700 }}>
-                  <Calculator size={16} color="var(--primary)" />
-                  <span>Cash Payment Calculator</span>
+            {/* Payment Workstation: Calculator for Takeaway, Waiter notice for Dine-in, Rider notice for Delivery, Blocked for Cancelled */}
+            {selectedOrder.status === 'cancelled' ? (
+              <div
+                style={{
+                  backgroundColor: '#FEF2F2',
+                  border: '1.5px solid #FCA5A5',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '16px',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: '6px',
+                  textAlign: 'center',
+                }}
+              >
+                <div style={{ fontSize: '15px', fontWeight: 800, color: '#DC2626' }}>
+                  ❌ Order Cancelled
                 </div>
-
-                <div>
-                  <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
-                    Cash Received from Customer (Rs.)
-                  </label>
-                  <input
-                    type="number"
-                    value={cashTendered}
-                    onChange={(e) => setCashTendered(e.target.value)}
+                <div style={{ fontSize: '12px', color: '#991B1B', fontWeight: 600 }}>
+                  This order was cancelled. Payment confirmation and receipts are blocked.
+                </div>
+              </div>
+            ) : selectedOrder.paymentStatus !== 'paid' ? (
+              selectedOrder.type !== 'takeaway' ? (
+                selectedOrder.type === 'dine_in' ? (
+                  <div
                     style={{
-                      width: '100%',
-                      padding: '10px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--border-color)',
-                      backgroundColor: 'var(--bg-input)',
-                      fontSize: '16px',
-                      fontWeight: 800,
-                      color: 'var(--text-main)',
-                      outline: 'none',
+                      backgroundColor: '#EFF6FF',
+                      border: '1.5px solid #BFDBFE',
+                      borderRadius: 'var(--radius-md)',
+                      padding: '16px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
                     }}
-                  />
-                </div>
+                  >
+                    <div style={{ fontSize: '14px', fontWeight: 800, color: '#1E40AF', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Utensils size={16} />
+                      <span>Dine-In Order · Table #{selectedOrder.tableNumber || '?'}</span>
+                    </div>
+                    <p style={{ margin: 0, fontSize: '12.5px', color: '#1E3A8A', lineHeight: 1.5 }}>
+                      Payment collection is handled at the table by <strong>Floor Staff / Waiter</strong>. Once the waiter marks payment received, this order will automatically show here as <strong>PAID</strong>. Cashiers cannot collect payment for dine-in orders directly.
+                    </p>
+                  </div>
+                ) : (
+                  <div
+                    style={{
+                      backgroundColor: '#FAF5FF',
+                      border: '1.5px solid #E9D5FF',
+                      borderRadius: 'var(--radius-md)',
+                      padding: '16px',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: '8px',
+                    }}
+                  >
+                    <div style={{ fontSize: '14px', fontWeight: 800, color: '#6B21A8', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Bike size={16} />
+                      <span>Delivery Order</span>
+                    </div>
+                    <p style={{ margin: 0, fontSize: '12.5px', color: '#581C87', lineHeight: 1.5 }}>
+                      Payment is collected at the customer doorstep by the <strong>Delivery Rider</strong> upon handover. Once the rider marks payment collected, this order will automatically show here as <strong>PAID</strong>. Cashiers cannot collect payment for delivery orders directly.
+                    </p>
+                  </div>
+                )
+              ) : (
+                <div style={{ backgroundColor: 'var(--bg-card-subtle)', borderRadius: 'var(--radius-md)', padding: '16px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', fontWeight: 700 }}>
+                    <Calculator size={16} color="var(--primary)" />
+                    <span>Takeaway Cash Payment Calculator</span>
+                  </div>
 
-                {/* Change Due / Shortage Display */}
-                {(() => {
-                  const tenderedNum = parseFloat(cashTendered) || 0;
-                  const isUnderpaid = tenderedNum < selectedOrder.total;
-                  const shortage = selectedOrder.total - tenderedNum;
-                  const changeDue = Math.max(0, tenderedNum - selectedOrder.total);
+                  <div>
+                    <label style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                      Cash Received from Customer (Rs.)
+                    </label>
+                    <input
+                      type="number"
+                      value={cashTendered}
+                      onChange={(e) => setCashTendered(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '10px',
+                        borderRadius: '6px',
+                        border: '1px solid var(--border-color)',
+                        backgroundColor: 'var(--bg-input)',
+                        fontSize: '16px',
+                        fontWeight: 800,
+                        color: 'var(--text-main)',
+                        outline: 'none',
+                      }}
+                    />
+                  </div>
 
-                  return (
-                    <>
-                      <div
-                        style={{
-                          display: 'flex',
-                          justifyContent: 'space-between',
-                          alignItems: 'center',
-                          padding: '10px 12px',
-                          backgroundColor: isUnderpaid ? '#FEF2F2' : 'var(--bg-card)',
-                          borderRadius: '6px',
-                          border: isUnderpaid ? '1px solid #FCA5A5' : '1px solid var(--border-color)',
-                        }}
-                      >
-                        <span style={{ fontSize: '13px', fontWeight: 700, color: isUnderpaid ? '#DC2626' : 'var(--text-main)' }}>
-                          {isUnderpaid ? 'Shortage / Underpayment:' : 'Change Due to Customer:'}
-                        </span>
-                        <span style={{ fontSize: '18px', fontWeight: 800, color: isUnderpaid ? '#DC2626' : '#16A34A' }}>
-                          {isUnderpaid ? `- Rs. ${shortage.toLocaleString()}` : `Rs. ${changeDue.toLocaleString()}`}
-                        </span>
-                      </div>
+                  {/* Change Due / Shortage Display */}
+                  {(() => {
+                    const tenderedNum = parseFloat(cashTendered) || 0;
+                    const isUnderpaid = tenderedNum < selectedOrder.total;
+                    const shortage = selectedOrder.total - tenderedNum;
+                    const changeDue = Math.max(0, tenderedNum - selectedOrder.total);
 
-                      {isUnderpaid && (
+                    return (
+                      <>
                         <div
                           style={{
                             display: 'flex',
+                            justifyContent: 'space-between',
                             alignItems: 'center',
-                            gap: '6px',
-                            padding: '8px 12px',
-                            backgroundColor: '#FEF2F2',
-                            color: '#DC2626',
+                            padding: '10px 12px',
+                            backgroundColor: isUnderpaid ? '#FEF2F2' : 'var(--bg-card)',
                             borderRadius: '6px',
-                            fontSize: '12px',
-                            fontWeight: 700,
-                            border: '1px dashed #EF4444',
+                            border: isUnderpaid ? '1px solid #FCA5A5' : '1px solid var(--border-color)',
                           }}
                         >
-                          <AlertTriangle size={15} />
-                          <span>Customer must pay the full price. Short by Rs. {shortage.toLocaleString()}</span>
+                          <span style={{ fontSize: '13px', fontWeight: 700, color: isUnderpaid ? '#DC2626' : 'var(--text-main)' }}>
+                            {isUnderpaid ? 'Shortage / Underpayment:' : 'Change Due to Customer:'}
+                          </span>
+                          <span style={{ fontSize: '18px', fontWeight: 800, color: isUnderpaid ? '#DC2626' : '#16A34A' }}>
+                            {isUnderpaid ? `- Rs. ${shortage.toLocaleString()}` : `Rs. ${changeDue.toLocaleString()}`}
+                          </span>
                         </div>
-                      )}
 
-                      <button
-                        disabled={isUnderpaid}
-                        onClick={() => !isUnderpaid && setPaymentConfirmOpen(true)}
-                        style={{
-                          padding: '13px',
-                          borderRadius: 'var(--radius-md)',
-                          backgroundColor: isUnderpaid ? '#94A3B8' : '#16A34A',
-                          color: isUnderpaid ? '#F1F5F9' : '#FFFFFF',
-                          fontSize: '14.5px',
-                          fontWeight: 800,
-                          cursor: isUnderpaid ? 'not-allowed' : 'pointer',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          gap: '8px',
-                          boxShadow: isUnderpaid ? 'none' : '0 4px 12px rgba(22, 163, 74, 0.3)',
-                          opacity: isUnderpaid ? 0.6 : 1,
-                          pointerEvents: isUnderpaid ? 'none' : 'auto',
-                        }}
-                      >
-                        <Banknote size={18} />
-                        <span>
-                          {isUnderpaid
-                            ? `Short by Rs. ${shortage.toLocaleString()} — Cannot Record`
-                            : `Record Cash Payment (Rs. ${selectedOrder.total.toLocaleString()})`}
-                        </span>
-                      </button>
-                    </>
-                  );
-                })()}
+                        {isUnderpaid && (
+                          <div
+                            style={{
+                              display: 'flex',
+                              alignItems: 'center',
+                              gap: '6px',
+                              padding: '8px 12px',
+                              backgroundColor: '#FEF2F2',
+                              color: '#DC2626',
+                              borderRadius: '6px',
+                              fontSize: '12px',
+                              fontWeight: 700,
+                              border: '1px dashed #EF4444',
+                            }}
+                          >
+                            <AlertTriangle size={15} />
+                            <span>Customer must pay the full price. Short by Rs. {shortage.toLocaleString()}</span>
+                          </div>
+                        )}
+
+                        <button
+                          disabled={isUnderpaid}
+                          onClick={() => !isUnderpaid && setPaymentConfirmOpen(true)}
+                          style={{
+                            padding: '13px',
+                            borderRadius: 'var(--radius-md)',
+                            backgroundColor: isUnderpaid ? '#94A3B8' : '#16A34A',
+                            color: isUnderpaid ? '#F1F5F9' : '#FFFFFF',
+                            fontSize: '14.5px',
+                            fontWeight: 800,
+                            cursor: isUnderpaid ? 'not-allowed' : 'pointer',
+                            display: 'flex',
+                            alignItems: 'center',
+                            justifyContent: 'center',
+                            gap: '8px',
+                            boxShadow: isUnderpaid ? 'none' : '0 4px 12px rgba(22, 163, 74, 0.3)',
+                            opacity: isUnderpaid ? 0.6 : 1,
+                            pointerEvents: isUnderpaid ? 'none' : 'auto',
+                          }}
+                        >
+                          <Banknote size={18} />
+                          <span>
+                            {isUnderpaid
+                              ? `Short by Rs. ${shortage.toLocaleString()} — Cannot Record`
+                              : `Record Cash Payment (Rs. ${selectedOrder.total.toLocaleString()})`}
+                          </span>
+                        </button>
+                      </>
+                    );
+                  })()}
+                </div>
+              )
+            ) : (
+              <div
+                style={{
+                  backgroundColor: '#DCFCE7',
+                  border: '1.5px solid #86EFAC',
+                  borderRadius: 'var(--radius-md)',
+                  padding: '14px',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '8px',
+                  color: '#166534',
+                  fontSize: '13px',
+                  fontWeight: 750,
+                }}
+              >
+                <CheckCircle2 size={18} color="#166534" />
+                <span>
+                  Order Payment Completed ({selectedOrder.type === 'dine_in' ? 'Collected by Waiter at Table' : selectedOrder.type === 'delivery' ? 'Collected by Rider at Doorstep' : 'Collected by Cashier'})
+                </span>
               </div>
             )}
 
             {/* Actions: Print Receipt & Request Refund */}
             <div style={{ display: 'flex', gap: '10px', borderTop: '1px solid var(--border-color)', paddingTop: '14px', flexWrap: 'wrap' }}>
-              {selectedOrder.tableNumber && (
+              {selectedOrder.tableNumber && selectedOrder.status !== 'cancelled' && (
                 <button
                   type="button"
                   onClick={() => {
@@ -2139,28 +2434,30 @@ export const CashierScreen: React.FC = () => {
                 </button>
               )}
 
-              <button
-                onClick={() => handlePrintReceipt()}
-                style={{
-                  flex: 1,
-                  minWidth: '130px',
-                  padding: '10px',
-                  borderRadius: 'var(--radius-md)',
-                  backgroundColor: 'var(--bg-card-subtle)',
-                  border: '1px solid var(--border-color)',
-                  color: 'var(--text-main)',
-                  fontWeight: 600,
-                  fontSize: '13px',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  gap: '6px',
-                  cursor: 'pointer',
-                }}
-              >
-                <Printer size={15} />
-                <span>Print Order Paid Slip</span>
-              </button>
+              {selectedOrder.status !== 'cancelled' && (
+                <button
+                  onClick={() => handlePrintReceipt()}
+                  style={{
+                    flex: 1,
+                    minWidth: '130px',
+                    padding: '10px',
+                    borderRadius: 'var(--radius-md)',
+                    backgroundColor: 'var(--bg-card-subtle)',
+                    border: '1px solid var(--border-color)',
+                    color: 'var(--text-main)',
+                    fontWeight: 600,
+                    fontSize: '13px',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    gap: '6px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  <Printer size={15} />
+                  <span>Print Order Paid Slip</span>
+                </button>
+              )}
 
               <button
                 onClick={() => setRefundModalOpen(true)}
@@ -2181,12 +2478,37 @@ export const CashierScreen: React.FC = () => {
             </div>
           </div>
         )}
+
+        {!selectedOrder && (
+          <div
+            style={{
+              backgroundColor: 'var(--bg-card)',
+              borderRadius: 'var(--radius-lg)',
+              border: '1px dashed var(--border-color)',
+              padding: '48px 24px',
+              textAlign: 'center',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: '12px',
+              color: 'var(--text-muted)',
+            }}
+          >
+            <ShoppingBag size={42} strokeWidth={1.5} color="var(--text-muted)" />
+            <div style={{ fontSize: '15px', fontWeight: 800, color: 'var(--text-main)' }}>
+              No Order Selected
+            </div>
+            <div style={{ fontSize: '12.5px', maxWidth: '320px', lineHeight: 1.5 }}>
+              Select a takeaway order from the list on the left to record cash payments, calculate change, or print receipts.
+            </div>
+          </div>
+        )}
       </div>
       </div>
 
       {/* Confirmation Modal for Recording Cash Payment (PRD Section F16) */}
       <ModalConfirmation
-        isOpen={paymentConfirmOpen}
+        isOpen={paymentConfirmOpen && selectedOrder?.status !== 'cancelled' && selectedOrder?.type === 'takeaway'}
         onClose={() => setPaymentConfirmOpen(false)}
         onConfirm={handleRecordPayment}
         title="Record Cash Payment?"
@@ -2196,555 +2518,12 @@ export const CashierScreen: React.FC = () => {
         cancelText="No, go back"
       />
 
-      {/* WALK-IN INTERACTIVE CUSTOMER-WEB MENU MODAL */}
-      {showWalkInModal && (
-        <div
-          style={{
-            position: 'fixed',
-            inset: 0,
-            zIndex: 9999,
-            backgroundColor: 'rgba(0,0,0,0.75)',
-            backdropFilter: 'blur(5px)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            padding: '16px',
-          }}
-          onClick={() => setShowWalkInModal(false)}
-        >
-          <div
-            onClick={(e) => e.stopPropagation()}
-            style={{
-              backgroundColor: 'var(--bg-card)',
-              borderRadius: 'var(--radius-xl)',
-              maxWidth: walkInStep === 'menu' ? '1060px' : '620px',
-              width: '100%',
-              maxHeight: '92vh',
-              height: '92vh',
-              display: 'flex',
-              flexDirection: 'column',
-              overflow: 'hidden',
-              border: '1px solid var(--border-color)',
-              boxShadow: 'var(--shadow-xl)',
-              position: 'relative',
-              transition: 'max-width 0.2s ease',
-            }}
-          >
-            {/* Top Header of Walk-in Modal */}
-            <div
-              style={{
-                padding: '14px 20px',
-                borderBottom: '1px solid var(--border-color)',
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                backgroundColor: 'var(--bg-card-subtle)',
-                flexShrink: 0,
-              }}
-            >
-              <h3 style={{ margin: 0, fontSize: '17px', fontWeight: 800, color: 'var(--text-main)' }}>
-                Walk-in Order
-              </h3>
-
-              <button
-                onClick={() => {
-                  setShowWalkInModal(false);
-                  setWalkInStep('menu');
-                }}
-                style={{
-                  border: 'none',
-                  background: 'transparent',
-                  cursor: 'pointer',
-                  padding: '6px',
-                  borderRadius: '6px',
-                  color: 'var(--text-muted)',
-                }}
-              >
-                <X size={20} />
-              </button>
-            </div>
-
-            {/* STEP 1: INTERACTIVE MENU PAGE (SAME AS CUSTOMER WEB) */}
-            {walkInStep === 'menu' && (
-              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflow: 'hidden', position: 'relative' }}>
-                {/* Search bar & Category filters */}
-                <div
-                  style={{
-                    padding: '12px 20px',
-                    borderBottom: '1px solid var(--border-color)',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    gap: '10px',
-                    backgroundColor: 'var(--bg-card)',
-                    flexShrink: 0,
-                  }}
-                >
-                  {/* Search Input */}
-                  <div
-                    style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: '10px',
-                      backgroundColor: 'var(--bg-card-subtle)',
-                      border: '1px solid var(--border-color)',
-                      borderRadius: 'var(--radius-full)',
-                      padding: '8px 16px',
-                    }}
-                  >
-                    <Search size={16} color="var(--text-muted)" />
-                    <input
-                      type="text"
-                      value={walkInSearch}
-                      onChange={(e) => setWalkInSearch(e.target.value)}
-                      placeholder="Search biryanis, karahi, burgers, kebabs, sides..."
-                      style={{
-                        border: 'none',
-                        outline: 'none',
-                        backgroundColor: 'transparent',
-                        fontSize: '13px',
-                        color: 'var(--text-main)',
-                        width: '100%',
-                      }}
-                    />
-                    {walkInSearch && (
-                      <button
-                        onClick={() => setWalkInSearch('')}
-                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', padding: 0, color: 'var(--text-muted)' }}
-                      >
-                        <X size={14} />
-                      </button>
-                    )}
-                  </div>
-
-                  {/* Category tabs */}
-                  <div
-                    style={{
-                      display: 'flex',
-                      gap: '8px',
-                      overflowX: 'auto',
-                      scrollbarWidth: 'none',
-                      paddingBottom: '2px',
-                    }}
-                  >
-                    {[
-                      'All',
-                      'Biryani & Rice',
-                      'Karahi & Handi',
-                      'BBQ & Kebabs',
-                      'Burgers & Fast Food',
-                      'Breads & Sides',
-                      'Beverages & Desserts',
-                    ].map((cat) => (
-                      <button
-                        key={cat}
-                        onClick={() => setWalkInCategory(cat)}
-                        style={{
-                          padding: '6px 14px',
-                          borderRadius: 'var(--radius-full)',
-                          backgroundColor: walkInCategory === cat ? 'var(--primary)' : 'var(--bg-card-subtle)',
-                          color: walkInCategory === cat ? '#FFFFFF' : 'var(--text-secondary)',
-                          border: walkInCategory === cat ? '1px solid var(--primary)' : '1px solid var(--border-color)',
-                          fontSize: '12.5px',
-                          fontWeight: walkInCategory === cat ? 800 : 600,
-                          whiteSpace: 'nowrap',
-                          cursor: 'pointer',
-                          transition: 'all 0.15s ease',
-                        }}
-                      >
-                        {cat}
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Dishes Grid (Scrollable) */}
-                <div
-                  style={{
-                    flex: 1,
-                    minHeight: 0,
-                    overflowY: 'auto',
-                    padding: '16px 20px 80px',
-                    display: 'grid',
-                    gridTemplateColumns: 'repeat(auto-fill, minmax(260px, 1fr))',
-                    gap: '16px',
-                    alignContent: 'start',
-                  }}
-                >
-                  {filteredWalkInItems.map((item) => {
-                    const inCart = walkInCart.find((ci) => ci.menuItemId === item.id);
-                    const isAvailable = item.branchAvailability[currentBranch.id] ?? item.isAvailable;
-                    const price = item.branchPriceOverrides?.[currentBranch.id] ?? item.basePrice;
-
-                    return (
-                      <div
-                        key={item.id}
-                        style={{
-                          backgroundColor: 'var(--bg-card-subtle)',
-                          borderRadius: 'var(--radius-md)',
-                          border: '1px solid var(--border-color)',
-                          overflow: 'hidden',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          justifyContent: 'space-between',
-                          boxShadow: 'var(--shadow-xs)',
-                          opacity: isAvailable ? 1 : 0.6,
-                          position: 'relative',
-                        }}
-                      >
-                        {/* Photo & Category */}
-                        <div style={{ height: '140px', width: '100%', position: 'relative', overflow: 'hidden' }}>
-                          <img
-                            src={item.image}
-                            alt={item.name}
-                            style={{ width: '100%', height: '100%', objectFit: 'cover' }}
-                          />
-                          <span
-                            style={{
-                              position: 'absolute',
-                              top: '8px',
-                              left: '8px',
-                              backgroundColor: 'rgba(0, 0, 0, 0.7)',
-                              color: '#FFFFFF',
-                              fontSize: '10.5px',
-                              fontWeight: 700,
-                              padding: '2px 8px',
-                              borderRadius: 'var(--radius-full)',
-                            }}
-                          >
-                            {item.category}
-                          </span>
-                        </div>
-
-                        {/* Details */}
-                        <div style={{ padding: '12px', display: 'flex', flexDirection: 'column', flex: 1, justifyContent: 'space-between' }}>
-                          <div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', gap: '6px' }}>
-                              <h4 style={{ margin: 0, fontSize: '14px', fontWeight: 800, color: 'var(--text-main)' }}>
-                                {item.name}
-                              </h4>
-                              <span style={{ fontWeight: 850, fontSize: '14px', color: 'var(--primary)', flexShrink: 0 }}>
-                                Rs. {price.toLocaleString()}
-                              </span>
-                            </div>
-                            <p style={{ margin: '4px 0 10px', fontSize: '11.5px', color: 'var(--text-secondary)', lineHeight: 1.4, display: '-webkit-box', WebkitLineClamp: 2, WebkitBoxOrient: 'vertical', overflow: 'hidden' }}>
-                              {item.description}
-                            </p>
-                          </div>
-
-                          {/* Add to Walk-in Cart / Stepper */}
-                          <div>
-                            {inCart ? (
-                              <div
-                                style={{
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'space-between',
-                                  backgroundColor: 'var(--primary-light)',
-                                  borderRadius: 'var(--radius-md)',
-                                  padding: '4px 8px',
-                                  border: '1px solid var(--primary)',
-                                }}
-                              >
-                                <button
-                                  onClick={() => handleUpdateWalkInCartQty(item.id, -1)}
-                                  style={{
-                                    border: 'none',
-                                    backgroundColor: '#FFFFFF',
-                                    color: 'var(--primary)',
-                                    width: '24px',
-                                    height: '24px',
-                                    borderRadius: '4px',
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                  }}
-                                >
-                                  <Minus size={13} />
-                                </button>
-                                <span style={{ fontSize: '13px', fontWeight: 800, color: 'var(--primary)' }}>
-                                  {inCart.quantity} in order
-                                </span>
-                                <button
-                                  onClick={() => handleUpdateWalkInCartQty(item.id, 1)}
-                                  style={{
-                                    border: 'none',
-                                    backgroundColor: 'var(--primary)',
-                                    color: '#FFFFFF',
-                                    width: '24px',
-                                    height: '24px',
-                                    borderRadius: '4px',
-                                    cursor: 'pointer',
-                                    display: 'flex',
-                                    alignItems: 'center',
-                                    justifyContent: 'center',
-                                  }}
-                                >
-                                  <Plus size={13} />
-                                </button>
-                              </div>
-                            ) : (
-                              <button
-                                disabled={!isAvailable}
-                                onClick={() => handleAddWalkInItem(item)}
-                                style={{
-                                  width: '100%',
-                                  padding: '8px',
-                                  borderRadius: 'var(--radius-md)',
-                                  backgroundColor: isAvailable ? 'var(--primary)' : 'var(--border-color)',
-                                  color: isAvailable ? '#FFFFFF' : 'var(--text-muted)',
-                                  fontSize: '12.5px',
-                                  fontWeight: 750,
-                                  cursor: isAvailable ? 'pointer' : 'not-allowed',
-                                  border: 'none',
-                                  display: 'flex',
-                                  alignItems: 'center',
-                                  justifyContent: 'center',
-                                  gap: '5px',
-                                }}
-                              >
-                                <Plus size={14} />
-                                <span>Add to Order</span>
-                              </button>
-                            )}
-                          </div>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-
-                {/* Sticky Bottom Floating Bar when Walk-in Cart has items */}
-                {walkInCart.length > 0 && (
-                  <div
-                    style={{
-                      position: 'absolute',
-                      bottom: '16px',
-                      left: '20px',
-                      right: '20px',
-                      backgroundColor: 'var(--primary)',
-                      color: '#FFFFFF',
-                      borderRadius: 'var(--radius-lg)',
-                      padding: '12px 20px',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'space-between',
-                      boxShadow: '0 8px 24px rgba(0,0,0,0.3)',
-                      zIndex: 10,
-                    }}
-                  >
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                      <div
-                        style={{
-                          width: '32px',
-                          height: '32px',
-                          borderRadius: '50%',
-                          backgroundColor: 'rgba(255, 255, 255, 0.25)',
-                          display: 'flex',
-                          alignItems: 'center',
-                          justifyContent: 'center',
-                          fontWeight: 800,
-                          fontSize: '14px',
-                        }}
-                      >
-                        {walkInCart.reduce((acc, i) => acc + i.quantity, 0)}
-                      </div>
-                      <div>
-                        <div style={{ fontSize: '11px', opacity: 0.9 }}>Walk-in Cart Total</div>
-                        <div style={{ fontSize: '16px', fontWeight: 800 }}>
-                          Rs. {walkInCart.reduce((acc, i) => acc + i.unitPrice * i.quantity, 0).toLocaleString()}
-                        </div>
-                      </div>
-                    </div>
-
-                    <button
-                      onClick={() => setWalkInStep('checkout')}
-                      style={{
-                        padding: '9px 18px',
-                        borderRadius: 'var(--radius-md)',
-                        backgroundColor: '#FFFFFF',
-                        color: 'var(--primary)',
-                        fontWeight: 800,
-                        fontSize: '13.5px',
-                        border: 'none',
-                        cursor: 'pointer',
-                        display: 'flex',
-                        alignItems: 'center',
-                        gap: '6px',
-                        boxShadow: 'var(--shadow-sm)',
-                      }}
-                    >
-                      <span>Proceed to Order Type & Dispatch</span>
-                      <ArrowUpRight size={16} />
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {/* STEP 2: ORDER TYPE, SEAT/TABLE SELECTOR & PAYMENT CHOICE */}
-            {walkInStep === 'checkout' && (
-              <div style={{ display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, overflowY: 'auto', padding: '20px', gap: '16px' }}>
-                {/* Back to menu button */}
-                <button
-                  onClick={() => setWalkInStep('menu')}
-                  style={{
-                    alignSelf: 'flex-start',
-                    padding: '6px 12px',
-                    borderRadius: 'var(--radius-md)',
-                    backgroundColor: 'var(--bg-card-subtle)',
-                    border: '1px solid var(--border-color)',
-                    color: 'var(--text-main)',
-                    fontSize: '12px',
-                    fontWeight: 700,
-                    cursor: 'pointer',
-                  }}
-                >
-                  ← Back to Menu Selection
-                </button>
-
-                {/* Cart Items Summary */}
-                <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
-                  <h4 style={{ margin: '0 0 10px', fontSize: '13px', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-muted)' }}>
-                    Selected Dishes ({walkInCart.length})
-                  </h4>
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
-                    {walkInCart.map((it) => (
-                      <div key={it.id} style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', fontSize: '13px' }}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                          <span style={{ fontWeight: 800, color: 'var(--primary)' }}>{it.quantity}×</span>
-                          <span style={{ fontWeight: 700, color: 'var(--text-main)' }}>{it.name}</span>
-                        </div>
-                        <span style={{ fontWeight: 800, color: 'var(--text-main)' }}>
-                          Rs. {(it.unitPrice * it.quantity).toLocaleString()}
-                        </span>
-                      </div>
-                    ))}
-                  </div>
-                  <div style={{ marginTop: '10px', paddingTop: '10px', borderTop: '1px dashed var(--border-color)', display: 'flex', justifyContent: 'space-between', fontWeight: 850, fontSize: '15px' }}>
-                    <span>Total Bill:</span>
-                    <span style={{ color: 'var(--primary)' }}>
-                      Rs. {walkInCart.reduce((acc, i) => acc + i.unitPrice * i.quantity, 0).toLocaleString()}
-                    </span>
-                  </div>
-                </div>
-
-                {/* 1. DINE-IN: AVAILABLE SEAT/TABLE SELECTOR (Walk-in is strictly Dine-In by default) */}
-                <div style={{ backgroundColor: 'var(--bg-card-subtle)', padding: '14px', borderRadius: 'var(--radius-md)', border: '1px solid var(--border-color)' }}>
-                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
-                    <label style={{ fontSize: '12.5px', fontWeight: 800, color: 'var(--text-main)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-                      🍽️ Select Dine-In Table for Guest:
-                    </label>
-                    <span style={{ fontSize: '11px', color: 'var(--primary)', fontWeight: 750, backgroundColor: 'var(--primary-light)', padding: '2px 8px', borderRadius: '10px' }}>
-                      Dine-In Seating Only
-                    </span>
-                  </div>
-                  {availableTables.length > 0 ? (
-                    <select
-                      value={walkInTable}
-                      onChange={(e) => setWalkInTable(e.target.value)}
-                      style={{
-                        width: '100%',
-                        padding: '10px',
-                        borderRadius: 'var(--radius-md)',
-                        border: '1px solid var(--border-color)',
-                        backgroundColor: 'var(--bg-card)',
-                        color: 'var(--text-main)',
-                        fontSize: '13.5px',
-                        fontWeight: 700,
-                      }}
-                    >
-                      {availableTables.map((t) => (
-                        <option key={t.id} value={t.number}>
-                          Table #{t.number} — Capacity: {t.capacity} Seats (Available)
-                        </option>
-                      ))}
-                    </select>
-                  ) : (
-                    <div style={{ color: '#DC2626', fontSize: '12.5px', fontWeight: 700 }}>
-                      ⚠️ No tables currently available in floor grid. Please free a table first.
-                    </div>
-                  )}
-                </div>
-
-                {/* 3. MODE OF PAYMENT */}
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: 800, textTransform: 'uppercase', color: 'var(--text-muted)', display: 'block', marginBottom: '8px' }}>
-                    2. Mode of Payment
-                  </label>
-                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '10px' }}>
-                    <button
-                      onClick={() => setWalkInPaymentChoice('paid')}
-                      style={{
-                        padding: '12px',
-                        borderRadius: 'var(--radius-md)',
-                        backgroundColor: walkInPaymentChoice === 'paid' ? '#DCFCE7' : 'var(--bg-card-subtle)',
-                        border: walkInPaymentChoice === 'paid' ? '2px solid #16A34A' : '1px solid var(--border-color)',
-                        color: walkInPaymentChoice === 'paid' ? '#166534' : 'var(--text-main)',
-                        fontWeight: 800,
-                        fontSize: '13px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '8px',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <Banknote size={18} />
-                      <span>Pay Cash Now (Paid)</span>
-                    </button>
-
-                    <button
-                      onClick={() => setWalkInPaymentChoice('unpaid')}
-                      style={{
-                        padding: '12px',
-                        borderRadius: 'var(--radius-md)',
-                        backgroundColor: walkInPaymentChoice === 'unpaid' ? '#FEF3C7' : 'var(--bg-card-subtle)',
-                        border: walkInPaymentChoice === 'unpaid' ? '2px solid #D97706' : '1px solid var(--border-color)',
-                        color: walkInPaymentChoice === 'unpaid' ? '#92400E' : 'var(--text-main)',
-                        fontWeight: 800,
-                        fontSize: '13px',
-                        display: 'flex',
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                        gap: '8px',
-                        cursor: 'pointer',
-                      }}
-                    >
-                      <Clock size={18} />
-                      <span>Pay After Meal / At Till (Unpaid)</span>
-                    </button>
-                  </div>
-                </div>
-
-                <button
-                  onClick={handleCreateWalkIn}
-                  style={{
-                    padding: '14px',
-                    borderRadius: 'var(--radius-md)',
-                    backgroundColor: 'var(--primary)',
-                    color: '#FFFFFF',
-                    fontSize: '15px',
-                    fontWeight: 850,
-                    cursor: 'pointer',
-                    border: 'none',
-                    display: 'flex',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    gap: '8px',
-                    boxShadow: '0 4px 14px var(--primary-glow)',
-                    marginTop: '4px',
-                    width: '100%',
-                    transition: 'all 0.15s ease',
-                  }}
-                >
-                  <span>Proceed</span>
-                </button>
-              </div>
-            )}
-          </div>
-        </div>
-      )}
+      {/* Walk-in Order Modal */}
+      <WalkInOrderModal
+        isOpen={showWalkInModal}
+        onClose={() => setShowWalkInModal(false)}
+        onOrderSuccess={(ord) => setSelectedOrderId(ord.id)}
+      />
 
       {/* Open Shift Modal */}
       {openShiftModal && (
@@ -2883,6 +2662,14 @@ export const CashierScreen: React.FC = () => {
               window.location.href = `/?tableQr=${encodeURIComponent(tbl)}`;
             }
           }}
+        />
+      )}
+
+      {/* Table Waiter Assignment Management Modal */}
+      {showAssignTablesModal && (
+        <AssignTablesModal
+          isOpen={showAssignTablesModal}
+          onClose={() => setShowAssignTablesModal(false)}
         />
       )}
     </div>

@@ -24,9 +24,13 @@ import {
   RefreshCw,
   MapPin,
   Edit,
+  PhoneCall,
+  AlertTriangle,
 } from 'lucide-react';
 import { StoreMapModal } from './StoreMapModal';
+import { getCancellationAttribution } from '@/types/cafe';
 import { CustomerLoginModal } from './CustomerLoginModal';
+import { NotificationCenterModal } from '../components/common/NotificationCenterModal';
 
 interface CustomerHeaderProps {
   currentView: string;
@@ -48,6 +52,9 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
     currentUser,
     setCurrentUser,
     users,
+    orders,
+    unreadNotificationsCount,
+    openNotificationModal,
   } = useApp();
 
   // Customer Login Modal State (Email Verification Code)
@@ -65,6 +72,18 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
 
   // Left Sidebar Drawer State
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [contactModalOpen, setContactModalOpen] = useState(false);
+
+  const cleanPhone = currentUser?.phone ? currentUser.phone.replace(/\D/g, '').slice(-10) : '';
+  const recentCancelledOrder = React.useMemo(() => {
+    return orders.find((o) => {
+      if (o.status !== 'cancelled') return false;
+      if (currentUser?.id && currentUser.id !== 'user-guest' && o.customerId === currentUser.id) return true;
+      if (currentUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === currentUser.email.toLowerCase()) return true;
+      if (cleanPhone && o.customerPhone && o.customerPhone.replace(/\D/g, '').slice(-10) === cleanPhone) return true;
+      return false;
+    });
+  }, [orders, currentUser, cleanPhone]);
 
   // Cart Popup Notification State
   const [cartPopup, setCartPopup] = useState<{ show: boolean; itemName: string; count: number }>({
@@ -87,14 +106,14 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
   // Prevent background scrolling when any modal is open
   useEffect(() => {
     if (typeof window === 'undefined') return;
-    if (authModalOpen || sidebarOpen || profileModalOpen) {
+    if (authModalOpen || sidebarOpen || profileModalOpen || contactModalOpen) {
       const originalOverflow = document.body.style.overflow;
       document.body.style.overflow = 'hidden';
       return () => {
         document.body.style.overflow = originalOverflow;
       };
     }
-  }, [authModalOpen, sidebarOpen, profileModalOpen]);
+  }, [authModalOpen, sidebarOpen, profileModalOpen, contactModalOpen]);
 
   // Auto-detect branch based on customer location (with manual override remembered)
   useEffect(() => {
@@ -103,7 +122,9 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
     // If user previously manually picked a branch, honor their explicit choice
     const savedBranch = localStorage.getItem('foodies_customer_selected_branch');
     if (savedBranch && branches.some((b) => b.id === savedBranch)) {
-      setCurrentBranchId(savedBranch);
+      if (savedBranch !== currentBranchId) {
+        setCurrentBranchId(savedBranch, true);
+      }
       return;
     }
 
@@ -132,7 +153,10 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
           });
 
           if (nearestId !== currentBranchId) {
-            setCurrentBranchId(nearestId);
+            const hasManual = localStorage.getItem('foodies_customer_selected_branch');
+            if (!hasManual) {
+              setCurrentBranchId(nearestId, false);
+            }
           }
         },
         () => {
@@ -189,6 +213,10 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
     });
     if (typeof window !== 'undefined') {
       localStorage.removeItem('foodies_customer_user');
+      localStorage.removeItem('foodies_customer_login_time');
+      localStorage.removeItem('foodies_customer_session');
+      localStorage.removeItem('foodies_customer_order_ids');
+      localStorage.removeItem('foodies_customer_history_cache');
     }
     addToast({
       type: 'info',
@@ -200,17 +228,11 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
   };
 
   const isLoggedIn = Boolean(
-    (currentUser && currentUser.name && currentUser.name !== 'Guest Customer') ||
-    (typeof window !== 'undefined' && (() => {
-      try {
-        const saved = localStorage.getItem('foodies_customer_user');
-        if (saved) {
-          const parsed = JSON.parse(saved);
-          return parsed && parsed.name && parsed.name !== 'Guest Customer';
-        }
-      } catch (e) {}
-      return false;
-    })())
+    currentUser &&
+    currentUser.name &&
+    currentUser.name !== 'Guest Customer' &&
+    currentUser.id !== 'user-guest' &&
+    currentUser.id !== 'guest'
   );
 
   // Sidebar navigation handler
@@ -317,6 +339,8 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
                   if (authModalOpen) setAuthModalOpen(false);
                   if (cartCount === 0) {
                     onNavigate('menu');
+                  } else if (typeof window !== 'undefined' && window.innerWidth > 860) {
+                    onNavigate('menu');
                   } else {
                     onOpenCart();
                   }
@@ -373,33 +397,6 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
                 </span>
               )}
             </div>
-
-            {/* Store Locator & Nearest Branch Maps Button */}
-            <button
-              onClick={() => setStoreMapModalOpen(true)}
-              title="Store Maps & Nearest Branch"
-              style={{
-                height: '42px',
-                padding: '0 12px',
-                borderRadius: 'var(--radius-full)',
-                backgroundColor: 'var(--bg-card-subtle)',
-                border: '1px solid var(--border-color)',
-                color: 'var(--text-main)',
-                fontSize: '12.5px',
-                fontWeight: 750,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-                boxShadow: 'var(--shadow-sm)',
-                flexShrink: 0,
-              }}
-            >
-              <MapPinned size={17} color="var(--primary)" />
-              <span style={{ fontSize: '12px', fontWeight: 800 }}>
-                {branches.find((b) => b.id === currentBranchId)?.city || 'Store Maps'}
-              </span>
-            </button>
 
             {/* 4. Compact Account Icon */}
             <button
@@ -616,7 +613,7 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
           <SidebarItem
             icon={<Bell size={19} />}
             label="Notifications"
-            badge="1"
+            badge={unreadNotificationsCount > 0 ? String(unreadNotificationsCount) : undefined}
             isActive={currentView === 'notifications' || currentView === 'profile'}
             onClick={() => handleSidebarNav('notifications')}
           />
@@ -633,59 +630,356 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
           />
         </div>
 
-        {/* ---- Drawer Footer: Help / Contact to Cafe Staff (Branch location removed per requirement) ---- */}
+        {/* ---- Drawer Footer: Contact Us (Pinned at bottom, drawer is unscrollable) ---- */}
         <div
           style={{
-            padding: '16px 20px',
+            marginTop: 'auto',
+            padding: '12px 14px 16px',
             borderTop: '1px solid var(--border-color)',
             backgroundColor: 'var(--bg-card-subtle)',
             flexShrink: 0,
           }}
         >
           <button
-            onClick={() => handleSidebarNav('support')}
+            type="button"
+            onClick={() => {
+              setSidebarOpen(false);
+              setContactModalOpen(true);
+            }}
             style={{
               width: '100%',
               display: 'flex',
               alignItems: 'center',
-              gap: '12px',
-              padding: '12px 16px',
-              borderRadius: 'var(--radius-md)',
-              backgroundColor: currentView === 'support' ? 'var(--primary-light)' : 'var(--bg-card)',
-              border: '1px solid var(--border-color)',
-              color: currentView === 'support' ? 'var(--primary)' : 'var(--text-main)',
+              justifyContent: 'center',
+              gap: '8px',
+              padding: '10px 14px',
+              borderRadius: '12px',
+              backgroundColor: 'var(--primary)',
+              color: '#FFFFFF',
+              border: 'none',
+              fontSize: '13px',
+              fontWeight: 850,
               cursor: 'pointer',
-              fontWeight: 800,
-              fontSize: '13.5px',
-              boxShadow: 'var(--shadow-sm)',
+              boxShadow: '0 2px 10px var(--primary-glow)',
               transition: 'all 0.15s ease',
             }}
           >
-            <div
-              style={{
-                width: '32px',
-                height: '32px',
-                borderRadius: '8px',
-                backgroundColor: 'var(--primary-light)',
-                color: 'var(--primary)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                flexShrink: 0,
-              }}
-            >
-              <HelpCircle size={18} />
-            </div>
-            <div style={{ textAlign: 'left', flex: 1, minWidth: 0 }}>
-              <div style={{ fontWeight: 800, fontSize: '13.5px', lineHeight: 1.2 }}>Help & Contact Cafe</div>
-              <div style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600, marginTop: '1px' }}>
-                Chat with cafe staff
-              </div>
-            </div>
-            <ChevronRight size={16} color="var(--text-muted)" />
+            <PhoneCall size={15} />
+            <span>Contact Us</span>
           </button>
         </div>
+
       </div>
+
+      {/* ============ CONTACT US POPUP MODAL ============ */}
+      {contactModalOpen && (
+        <div
+          onClick={() => setContactModalOpen(false)}
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 99999,
+            backgroundColor: 'rgba(15, 12, 10, 0.65)',
+            backdropFilter: 'blur(5px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+            animation: 'fadeInOverlay 0.2s ease',
+          }}
+        >
+          <div
+            onClick={(e) => e.stopPropagation()}
+            style={{
+              backgroundColor: 'var(--bg-card)',
+              borderRadius: '24px',
+              border: '1.5px solid var(--border-color)',
+              boxShadow: '0 24px 60px rgba(0, 0, 0, 0.28)',
+              maxWidth: '460px',
+              width: '100%',
+              maxHeight: '90vh',
+              padding: '22px 24px',
+              position: 'relative',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+              overflowY: 'auto',
+              boxSizing: 'border-box',
+            }}
+          >
+            {/* Header */}
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', borderBottom: '1px solid var(--border-color)', paddingBottom: '12px' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+                <div
+                  style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '12px',
+                    backgroundColor: 'rgba(217, 101, 40, 0.1)',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    color: 'var(--primary)',
+                  }}
+                >
+                  <PhoneCall size={20} />
+                </div>
+                <div>
+                  <h3 style={{ margin: 0, fontSize: '18px', fontWeight: 900, color: 'var(--text-main)', fontFamily: 'Outfit, sans-serif' }}>
+                    Contact Us
+                  </h3>
+                  <p style={{ margin: '2px 0 0', fontSize: '12.5px', color: 'var(--text-secondary)' }}>
+                    Cashier Desk Helpline & Official Branch Locations
+                  </p>
+                </div>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setContactModalOpen(false)}
+                style={{
+                  width: '30px',
+                  height: '30px',
+                  borderRadius: '50%',
+                  backgroundColor: 'var(--bg-card-subtle)',
+                  border: '1px solid var(--border-color)',
+                  color: 'var(--text-muted)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  cursor: 'pointer',
+                }}
+                aria-label="Close"
+              >
+                <X size={16} />
+              </button>
+            </div>
+
+            {/* 0. Recent Cancelled Order Alert */}
+            {recentCancelledOrder && (() => {
+              const cancelAttr = getCancellationAttribution(recentCancelledOrder);
+              return (
+                <div
+                  style={{
+                    padding: '12px 14px',
+                    borderRadius: '14px',
+                    backgroundColor: '#FEF2F2',
+                    border: '1.5px solid #FCA5A5',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: '4px',
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#DC2626', fontWeight: 800, fontSize: '13px' }}>
+                    <AlertTriangle size={15} />
+                    <span>
+                      Recent Order #{recentCancelledOrder.orderNumber}:{' '}
+                      {cancelAttr.isCustomer
+                        ? 'Cancelled by You'
+                        : cancelAttr.badge === 'CANCELLED (BRANCH CLOSED)'
+                          ? 'CANCELLED (Branch Closed Offline)'
+                          : 'Cancelled by Staff'}
+                    </span>
+                  </div>
+                  <div style={{ fontSize: '11.5px', color: '#7F1D1D', lineHeight: 1.45 }}>
+                    {cancelAttr.isCustomer
+                      ? 'You cancelled this order. View your Order History for full receipts and records.'
+                      : cancelAttr.badge === 'CANCELLED (BRANCH CLOSED)'
+                        ? 'This order was cancelled prior to receipt because the branch closed offline. If paid, your refund is being processed. Contact the cashier desk below for instant assistance.'
+                        : 'This order was cancelled prior to receipt by cafe staff. If paid, your refund is being processed. Contact the cashier desk below for instant assistance.'}
+                  </div>
+                </div>
+              );
+            })()}
+
+            {/* 1. Cashier Desk Helpline Card */}
+            <div
+              style={{
+                backgroundColor: 'rgba(217, 101, 40, 0.06)',
+                border: '1.5px solid rgba(217, 101, 40, 0.25)',
+                borderRadius: '16px',
+                padding: '14px 16px',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: '8px',
+              }}
+            >
+              <div style={{ fontSize: '11px', fontWeight: 850, color: 'var(--primary)', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
+                Cashier Desk Helpline 📞
+              </div>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '8px' }}>
+                <div>
+                  <div style={{ fontSize: '18px', fontWeight: 900, color: 'var(--text-main)', fontFamily: 'Outfit, sans-serif' }}>
+                    +92 42 3575 8899
+                  </div>
+                  <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+                    UAN Helpline: +92 42 111-FOODIES • Daily 11:00 AM – 1:00 AM
+                  </div>
+                </div>
+                <a
+                  href="tel:+924235758899"
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: '6px',
+                    padding: '8px 14px',
+                    borderRadius: '10px',
+                    backgroundColor: 'var(--primary)',
+                    color: '#FFFFFF',
+                    fontSize: '12.5px',
+                    fontWeight: 800,
+                    textDecoration: 'none',
+                    boxShadow: '0 2px 8px var(--primary-glow)',
+                  }}
+                >
+                  <Phone size={13} />
+                  <span>Call Now</span>
+                </a>
+              </div>
+              <div style={{ fontSize: '12px', color: 'var(--text-secondary)', borderTop: '1px dashed rgba(217, 101, 40, 0.25)', paddingTop: '6px', marginTop: '2px' }}>
+                ✉️ Support Email: <strong style={{ color: 'var(--text-main)' }}>support@foodiescafe.pk</strong>
+              </div>
+            </div>
+
+            {/* 2. Official Branches with City Names & Locations */}
+            <div>
+              <div style={{ fontSize: '12px', fontWeight: 850, color: 'var(--text-muted)', textTransform: 'uppercase', letterSpacing: '0.06em', marginBottom: '8px' }}>
+                Official Branches & Locations
+              </div>
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                {/* Lahore */}
+                <div
+                  style={{
+                    backgroundColor: 'var(--bg-card-subtle)',
+                    border: '1.2px solid var(--border-color)',
+                    borderRadius: '14px',
+                    padding: '12px 14px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '10px',
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <MapPin size={14} color="var(--primary)" />
+                      <strong style={{ fontSize: '14px', color: 'var(--text-main)' }}>Gulberg Branch (Lahore)</strong>
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '3px', lineHeight: 1.3 }}>
+                      Mian Mehmood Ali Kasoori Road, Gulberg III, Lahore
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                      📞 +92 42 3575 8899
+                    </div>
+                  </div>
+                  <a
+                    href="tel:+924235758899"
+                    style={{
+                      flexShrink: 0,
+                      padding: '7px 12px',
+                      borderRadius: '8px',
+                      backgroundColor: 'var(--bg-card)',
+                      border: '1.2px solid var(--primary)',
+                      color: 'var(--primary)',
+                      fontSize: '11.5px',
+                      fontWeight: 800,
+                      textDecoration: 'none',
+                    }}
+                  >
+                    Call
+                  </a>
+                </div>
+
+                {/* Islamabad */}
+                <div
+                  style={{
+                    backgroundColor: 'var(--bg-card-subtle)',
+                    border: '1.2px solid var(--border-color)',
+                    borderRadius: '14px',
+                    padding: '12px 14px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '10px',
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <MapPin size={14} color="var(--primary)" />
+                      <strong style={{ fontSize: '14px', color: 'var(--text-main)' }}>F-7 Branch (Islamabad)</strong>
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '3px', lineHeight: 1.3 }}>
+                      College Road, F-7 Markaz, Jinnah Super, Islamabad
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                      📞 +92 51 265 4433
+                    </div>
+                  </div>
+                  <a
+                    href="tel:+92512654433"
+                    style={{
+                      flexShrink: 0,
+                      padding: '7px 12px',
+                      borderRadius: '8px',
+                      backgroundColor: 'var(--bg-card)',
+                      border: '1.2px solid var(--primary)',
+                      color: 'var(--primary)',
+                      fontSize: '11.5px',
+                      fontWeight: 800,
+                      textDecoration: 'none',
+                    }}
+                  >
+                    Call
+                  </a>
+                </div>
+
+                {/* Karachi */}
+                <div
+                  style={{
+                    backgroundColor: 'var(--bg-card-subtle)',
+                    border: '1.2px solid var(--border-color)',
+                    borderRadius: '14px',
+                    padding: '12px 14px',
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: '10px',
+                  }}
+                >
+                  <div style={{ minWidth: 0 }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <MapPin size={14} color="var(--primary)" />
+                      <strong style={{ fontSize: '14px', color: 'var(--text-main)' }}>Clifton Branch (Karachi)</strong>
+                    </div>
+                    <div style={{ fontSize: '12px', color: 'var(--text-secondary)', marginTop: '3px', lineHeight: 1.3 }}>
+                      26th Street, Tauheed Commercial, Clifton Block 4, Karachi
+                    </div>
+                    <div style={{ fontSize: '11.5px', color: 'var(--text-muted)', marginTop: '2px' }}>
+                      📞 +92 21 3583 2211
+                    </div>
+                  </div>
+                  <a
+                    href="tel:+922135832211"
+                    style={{
+                      flexShrink: 0,
+                      padding: '7px 12px',
+                      borderRadius: '8px',
+                      backgroundColor: 'var(--bg-card)',
+                      border: '1.2px solid var(--primary)',
+                      color: 'var(--primary)',
+                      fontSize: '11.5px',
+                      fontWeight: 800,
+                      textDecoration: 'none',
+                    }}
+                  >
+                    Call
+                  </a>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* ============ PROFILE POPUP SCREEN MODAL ============ */}
       {/* Appears when someone clicks on name/no in left slide (shows ONLY profile info, editable name & phone/email, sign out at last row) */}
@@ -985,6 +1279,7 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
       <CustomerLoginModal
         isOpen={authModalOpen}
         onClose={() => setAuthModalOpen(false)}
+        onSuccess={() => onNavigate?.('home')}
       />
 
       {/* Store Map Modal Pop-up */}
@@ -997,6 +1292,9 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
         startInEditMode={storeMapStartInEdit}
         initialEditingBranchId={currentBranchId}
       />
+
+      {/* Real-Time Notification Center Modal */}
+      <NotificationCenterModal />
 
       {/* Animation keyframes */}
       <style jsx>{`

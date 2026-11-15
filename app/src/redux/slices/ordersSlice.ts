@@ -1,5 +1,5 @@
 import { createSlice, PayloadAction, createSelector } from '@reduxjs/toolkit';
-import { Order, OrderStatus, OrderItem } from '@/types/cafe';
+import { Order, OrderStatus, OrderItem, PaymentStatus, STATUS_RANK } from '@/types/cafe';
 
 export interface OrdersState {
   orders: Order[];
@@ -53,18 +53,99 @@ export const ordersSlice = createSlice({
           !['FC-6744', 'FC-7819', 'FC-8812', 'FC-9021'].includes(o.orderNumber)
       );
 
-      // Create lookup map of incoming orders by id and orderNumber
-      const incomingMap = new Map<string, Order>();
-      incoming.forEach((o) => {
-        if (o.id) incomingMap.set(o.id, o);
-        if (o.orderNumber) incomingMap.set(o.orderNumber, o);
+      // Create lookup map of existing orders by id and orderNumber
+      const existingMap = new Map<string, Order>();
+      for (const ord of state.orders) {
+        if (ord.id) existingMap.set(ord.id, ord);
+        if (ord.orderNumber) existingMap.set(ord.orderNumber, ord);
+      }
+
+      // Merge incoming orders, guarding against stale status rollback from asynchronous server writes
+      const mergedIncoming = incoming.map((inc) => {
+        const existing = existingMap.get(inc.id) || (inc.orderNumber ? existingMap.get(inc.orderNumber) : undefined);
+        if (!existing) return inc;
+
+        const existingRank = STATUS_RANK[existing.status] || 0;
+        const incomingRank = STATUS_RANK[inc.status] || 0;
+
+        // Never let a stale server response downgrade an advanced local lifecycle status
+        // (unless the server response is an explicit cancellation)
+        const preserveLocalStatus =
+          existing.status !== 'cancelled' &&
+          inc.status !== 'cancelled' &&
+          existingRank > incomingRank;
+
+        const resolvedStatus = preserveLocalStatus ? existing.status : inc.status;
+        const resolvedSentToKitchen = existing.sentToKitchen || inc.sentToKitchen;
+        const resolvedSentToKitchenAt = inc.sentToKitchenAt || existing.sentToKitchenAt;
+        const resolvedPrepStartedAt = inc.preparationStartedAt || existing.preparationStartedAt;
+        const resolvedCompletedAt = inc.completedAt || existing.completedAt;
+        const resolvedDeliveredAt = inc.deliveredAt || existing.deliveredAt;
+        const resolvedRiderId = inc.assignedRiderId || existing.assignedRiderId;
+        const resolvedRiderName = inc.assignedRiderName || existing.assignedRiderName;
+        const resolvedRiderStatus = (inc.riderStatus || existing.riderStatus) as Order['riderStatus'];
+
+        // GUARD: Financial settlements (PAID) must never be downgraded to UNPAID by asynchronous/stale server sync!
+        const isLocallyPaid =
+          existing.paymentStatus === 'paid' ||
+          existing.paymentCollected === true;
+
+        const resolvedPaymentStatus = isLocallyPaid
+          ? (inc.paymentStatus === 'refunded' ? 'refunded' : 'paid')
+          : inc.paymentStatus;
+
+        const resolvedPaymentCollected =
+          isLocallyPaid ||
+          Boolean(inc.paymentCollected) ||
+          resolvedPaymentStatus === 'paid';
+
+        const resolvedCashierId = existing.cashierId || inc.cashierId;
+        const resolvedCashierName = existing.cashierName || inc.cashierName;
+        const resolvedShiftId = existing.shiftId || inc.shiftId;
+        const resolvedWaiterId = existing.assignedWaiterId || inc.assignedWaiterId;
+        const resolvedWaiterName = existing.assignedWaiterName || inc.assignedWaiterName;
+
+        const isDeliveryFinished =
+          (inc.status as string) === 'delivered' ||
+          inc.status === 'completed' ||
+          resolvedRiderStatus === 'delivered';
+
+        const finalStatus: OrderStatus = isDeliveryFinished ? 'completed' : resolvedStatus;
+        const finalRiderStatus: Order['riderStatus'] = isDeliveryFinished ? 'delivered' : resolvedRiderStatus;
+        const finalPaymentStatus: PaymentStatus = isDeliveryFinished ? 'paid' : resolvedPaymentStatus;
+        const finalPaymentCollected: boolean = isDeliveryFinished ? true : resolvedPaymentCollected;
+
+        return {
+          ...inc,
+          status: finalStatus,
+          paymentStatus: finalPaymentStatus,
+          paymentCollected: finalPaymentCollected,
+          cashierId: resolvedCashierId,
+          cashierName: resolvedCashierName,
+          shiftId: resolvedShiftId,
+          assignedWaiterId: resolvedWaiterId,
+          assignedWaiterName: resolvedWaiterName,
+          sentToKitchen: resolvedSentToKitchen,
+          sentToKitchenAt: resolvedSentToKitchenAt,
+          preparationStartedAt: resolvedPrepStartedAt,
+          completedAt: isDeliveryFinished ? (inc.completedAt || new Date().toISOString()) : resolvedCompletedAt,
+          deliveredAt: isDeliveryFinished ? (inc.deliveredAt || new Date().toISOString()) : resolvedDeliveredAt,
+          assignedRiderId: resolvedRiderId,
+          assignedRiderName: resolvedRiderName,
+          riderStatus: finalRiderStatus,
+        } as Order;
+      });
+
+      const merged: Order[] = [...mergedIncoming];
+      const handledKeys = new Set<string>();
+      mergedIncoming.forEach((o) => {
+        if (o.id) handledKeys.add(o.id);
+        if (o.orderNumber) handledKeys.add(o.orderNumber);
       });
 
       // Preserve existing orders that aren't in the incoming payload (e.g. from other branches or locally active)
-      const merged: Order[] = [...incoming];
-
       for (const existing of state.orders) {
-        if (!incomingMap.has(existing.id) && !incomingMap.has(existing.orderNumber)) {
+        if (!handledKeys.has(existing.id) && !handledKeys.has(existing.orderNumber)) {
           merged.push(existing);
         }
       }
@@ -81,8 +162,24 @@ export const ordersSlice = createSlice({
       persistOrders(merged);
     },
     upsertOrder: (state, action: PayloadAction<Order>) => {
-      const ord = action.payload;
-      const idx = state.orders.findIndex((o) => o.id === ord.id);
+      let ord = action.payload;
+      const isDeliveryFinished =
+        (ord.status as string) === 'delivered' ||
+        ord.status === 'completed' ||
+        ord.riderStatus === 'delivered';
+
+      if (isDeliveryFinished) {
+        ord = {
+          ...ord,
+          status: 'completed',
+          riderStatus: 'delivered',
+          paymentStatus: 'paid',
+          paymentCollected: true,
+          completedAt: ord.completedAt || new Date().toISOString(),
+          deliveredAt: ord.deliveredAt || new Date().toISOString(),
+        };
+      }
+      const idx = state.orders.findIndex((o) => o.id === ord.id || (ord.orderNumber && o.orderNumber === ord.orderNumber));
       if (idx >= 0) {
         state.orders[idx] = { ...state.orders[idx], ...ord };
       } else {
@@ -101,7 +198,7 @@ export const ordersSlice = createSlice({
         paymentCollected?: boolean;
         assignedRiderId?: string;
         assignedRiderName?: string;
-        riderStatus?: 'assigned' | 'picked_up' | 'en_route' | 'delivered';
+        riderStatus?: 'assigned' | 'accepted' | 'picked_up' | 'en_route' | 'delivered';
         assignedWaiterId?: string;
         assignedWaiterName?: string;
       }>

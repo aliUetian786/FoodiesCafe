@@ -1,7 +1,6 @@
 export type Role =
   | 'platform_owner'
   | 'branch_manager'
-  | 'branch_representative'
   | 'kitchen_staff'
   | 'cashier'
   | 'floor_staff'
@@ -25,6 +24,8 @@ export interface User {
   riderAvailability?: 'available' | 'busy' | 'offline';
   riderTotalDeliveries?: number;
   riderActiveOrderId?: string;
+  assignedFloor?: string;
+  assignedTableNumbers?: string[];
 }
 
 export type PaymentMode = 'COD' | 'Wallet' | 'Card' | 'Bank' | 'Installment';
@@ -61,6 +62,16 @@ export interface Branch {
   maxOrderDistanceKm?: number;
   tableQrMaxDistanceMeters?: number;
   paymentSettings?: BranchPaymentSettings;
+  minDeliveryAmount?: number; // Minimum order subtotal required for delivery orders
+}
+
+export function normalizeBranchId(id?: string): string {
+  if (!id) return 'gulberg-lahore';
+  if (id === 'all') return 'all';
+  if (id === 'branch-gulberg' || id.includes('gulberg')) return 'gulberg-lahore';
+  if (id === 'branch-f7' || id.includes('f7') || id.includes('islamabad')) return 'f7-islamabad';
+  if (id === 'branch-clifton' || id.includes('clifton') || id.includes('karachi')) return 'clifton-karachi';
+  return id;
 }
 
 export interface MenuItemOption {
@@ -108,7 +119,22 @@ export type OrderStatus =
   | 'served'
   | 'out_for_delivery'
   | 'completed'
-  | 'cancelled';
+  | 'cancelled'
+  | 'delivered'
+  | 'taken';
+
+export const STATUS_RANK: Record<OrderStatus, number> = {
+  placed: 1,
+  accepted: 2,
+  preparing: 3,
+  ready: 4,
+  out_for_delivery: 5,
+  served: 6,
+  delivered: 6,
+  taken: 6,
+  completed: 7,
+  cancelled: 8,
+};
 
 export type PaymentStatus = 'unpaid' | 'paid' | 'partially_refunded' | 'refunded';
 
@@ -140,6 +166,8 @@ export interface Order {
   readyTimeEstimated?: string;
   completedAt?: string;
   notes?: string;
+  cancellationReason?: string;
+  cancelledBy?: 'customer' | 'staff' | 'branch_offline' | string;
   deliveryAddress?: string;
   version: number;
   paymentMethod: string;
@@ -149,11 +177,12 @@ export interface Order {
   autoForwardCustomMin?: number;
   cashierId?: string;
   cashierName?: string;
+  shiftId?: string;
   isWalkIn?: boolean;
   customerCoordinates?: { lat: number; lng: number };
   assignedRiderId?: string;
   assignedRiderName?: string;
-  riderStatus?: 'assigned' | 'picked_up' | 'en_route' | 'delivered';
+  riderStatus?: 'assigned' | 'accepted' | 'picked_up' | 'en_route' | 'delivered' | 'on_trip';
   deliveredAt?: string;
   paymentCollected?: boolean;
   assignedWaiterId?: string;
@@ -180,6 +209,8 @@ export interface Table {
   qrExpiresAt?: string;
   qrValidMinutes?: number;
   allowQrOrderOnReserved?: boolean;
+  assignedWaiterId?: string;
+  assignedWaiterName?: string;
 }
 
 export interface TableSession {
@@ -213,6 +244,14 @@ export interface FooterSettings {
   orderRoutingSupportFirst?: boolean; // When true, incoming customer orders go directly to Customer Services (Support) first
   autoForwardKitchenMin?: number; // Custom auto-forward time in minutes (e.g. 1, 2, 3, 5, 10 min).
   autoForwardMode?: 'manual' | 'timed'; // 'manual' = Support clicks ready; 'timed' = auto-forward after custom time
+  // Web Home Notification Banner (Appears directly below the Order Mode Row on Web Home; editable by Manager)
+  homeNotificationEnabled?: boolean;
+  homeNotificationBadge?: string;
+  homeNotificationTitle?: string;
+  homeNotificationMessage?: string;
+  homeNotificationType?: 'promo' | 'info' | 'warning' | 'success';
+  homeNotificationUpdatedBy?: string;
+  homeNotificationUpdatedAt?: string;
 }
 
 export interface HeroBanner {
@@ -234,6 +273,20 @@ export interface DealCard {
   categoryLink?: string;
 }
 
+export interface Announcement {
+  id: string;
+  title: string;
+  tag: string;
+  description: string;
+  imageUrl?: string;
+  validUntil?: string;
+  branchId?: string;
+  branchName?: string;
+  discountPercent?: number;
+  badgeColor?: string;
+  createdAt?: string;
+}
+
 export interface BannerDealApprovalRequest {
   id: string;
   type: 'banner' | 'deal';
@@ -248,31 +301,6 @@ export interface BannerDealApprovalRequest {
   decisionBy?: string;
   decisionAt?: string;
   notes?: string;
-}
-
-export interface ComplaintMessage {
-  id: string;
-  sender: 'customer' | 'representative' | 'manager';
-  senderName: string;
-  text: string;
-  timestamp: string;
-}
-
-export interface Complaint {
-  id: string;
-  ticketNumber: string;
-  customerId: string;
-  customerName: string;
-  customerPhone: string;
-  customerEmail?: string;
-  branchId: string;
-  orderId?: string;
-  orderNumber?: string;
-  subject: string;
-  status: 'new' | 'in_progress' | 'resolved' | 'closed';
-  messages: ComplaintMessage[];
-  assignedTo?: string;
-  createdAt: string;
 }
 
 export interface CashShift {
@@ -346,4 +374,284 @@ export interface AuditLog {
   oldValue?: string;
   newValue?: string;
 }
+
+export type CancellationActor = 'customer' | 'staff' | 'branch_offline';
+
+export interface CancellationAttribution {
+  isCustomer: boolean;
+  actor: CancellationActor;
+  badge: string;
+  title: string;
+  description: string;
+}
+
+export function getCancellationAttribution(ord?: {
+  notes?: string;
+  cancellationReason?: string;
+  cancelledBy?: string;
+} | null): CancellationAttribution {
+  if (!ord) {
+    return {
+      isCustomer: false,
+      actor: 'staff',
+      badge: 'CANCELLED (BY STAFF)',
+      title: 'Order Cancelled by Staff',
+      description: 'This order was cancelled by cafe staff prior to receipt. All records and receipts are saved permanently in your Order History.',
+    };
+  }
+
+  const rawActor = ord.cancelledBy?.toLowerCase();
+  if (rawActor === 'customer' || rawActor === 'user') {
+    return {
+      isCustomer: true,
+      actor: 'customer',
+      badge: 'CANCELLED (BY YOU)',
+      title: 'Order Cancelled by You',
+      description: 'You cancelled this order. All records and receipts are saved permanently in your Order History.',
+    };
+  }
+
+  if (rawActor === 'branch_offline' || rawActor === 'branch_closed') {
+    return {
+      isCustomer: false,
+      actor: 'branch_offline',
+      badge: 'CANCELLED (BRANCH CLOSED)',
+      title: 'Cancelled (Branch Closed Offline)',
+      description: 'This order was cancelled because the branch was closed offline prior to receipt. All records and receipts are saved permanently in your Order History.',
+    };
+  }
+
+  if (rawActor === 'staff' || rawActor === 'cashier' || rawActor === 'manager' || rawActor === 'owner') {
+    return {
+      isCustomer: false,
+      actor: 'staff',
+      badge: 'CANCELLED (BY STAFF)',
+      title: 'Order Cancelled by Staff',
+      description: 'This order was cancelled by cafe staff prior to receipt. All records and receipts are saved permanently in your Order History.',
+    };
+  }
+
+  // Fallback inspect text in cancellationReason and notes
+  const text = `${ord.cancellationReason || ''} ${ord.notes || ''}`.toLowerCase();
+  if (
+    text.includes('customer') ||
+    text.includes('by you') ||
+    text.includes('deselected') ||
+    text.includes('user cancelled') ||
+    text.includes('cancelled by user')
+  ) {
+    return {
+      isCustomer: true,
+      actor: 'customer',
+      badge: 'CANCELLED (BY YOU)',
+      title: 'Order Cancelled by You',
+      description: 'You cancelled this order. All records and receipts are saved permanently in your Order History.',
+    };
+  }
+
+  if (
+    text.includes('branch closed') ||
+    text.includes('shutdown') ||
+    text.includes('offline')
+  ) {
+    return {
+      isCustomer: false,
+      actor: 'branch_offline',
+      badge: 'CANCELLED (BRANCH CLOSED)',
+      title: 'Cancelled (Branch Closed Offline)',
+      description: 'This order was cancelled because the branch was closed offline prior to receipt. All records and receipts are saved permanently in your Order History.',
+    };
+  }
+
+  // Default fallback is staff cancellation
+  return {
+    isCustomer: false,
+    actor: 'staff',
+    badge: 'CANCELLED (BY STAFF)',
+    title: 'Order Cancelled by Staff',
+    description: 'This order was cancelled by cafe staff prior to receipt. All records and receipts are saved permanently in your Order History.',
+  };
+}
+
+export type NotificationCategory =
+  | 'order_placed'
+  | 'takeaway'
+  | 'dine_in'
+  | 'delivery'
+  | 'kitchen'
+  | 'staff_alert'
+  | 'promo'
+  | 'system';
+
+export type NotificationTargetPlatform = 'all' | 'web' | 'app';
+
+export type NotificationEventKey =
+  | 'orderPlaced'
+  | 'sentToKitchen'
+  | 'cooking'
+  | 'orderReady'
+  | 'outForDelivery'
+  | 'orderServed'
+  | 'orderCompleted'
+  | 'orderCancelled'
+  | 'waiterAssigned'
+  | 'riderAssigned'
+  | 'paymentReceived';
+
+export interface RecipientNotificationRules {
+  customer: {
+    orderPlaced: boolean;
+    cooking: boolean;
+    orderReady: boolean;
+    outForDelivery: boolean;
+    orderCompleted: boolean;
+    orderCancelled: boolean;
+  };
+  rider: {
+    orderAssigned: boolean;
+    orderReady: boolean;
+    orderCancelled: boolean;
+  };
+  waiter: {
+    orderAssigned: boolean;
+    orderReady: boolean;
+    orderCancelled: boolean;
+  };
+  kitchen: {
+    newOrderPlaced: boolean;
+    orderCancelled: boolean;
+  };
+  cashierAndManager: {
+    orderPlaced: boolean;
+    orderCancelled: boolean;
+    paymentReceived: boolean;
+  };
+}
+
+export const DEFAULT_RECIPIENT_NOTIFICATION_RULES: RecipientNotificationRules = {
+  customer: {
+    orderPlaced: true,
+    cooking: true,
+    orderReady: true,
+    outForDelivery: true,
+    orderCompleted: true,
+    orderCancelled: true,
+  },
+  rider: {
+    orderAssigned: true,
+    orderReady: true,
+    orderCancelled: true,
+  },
+  waiter: {
+    orderAssigned: true,
+    orderReady: true,
+    orderCancelled: true,
+  },
+  kitchen: {
+    newOrderPlaced: true,
+    orderCancelled: true,
+  },
+  cashierAndManager: {
+    orderPlaced: true,
+    orderCancelled: true,
+    paymentReceived: true,
+  },
+};
+
+export interface NotificationSettings {
+  id?: string;
+  defaultPlatform: NotificationTargetPlatform;
+  notifyCustomer: boolean;
+  notifyConcernedRider: boolean;
+  notifyConcernedWaiter: boolean;
+  notifyKitchen: boolean;
+  notifyCashierAndManager: boolean;
+  events: Record<NotificationEventKey, boolean>;
+  recipientRules?: RecipientNotificationRules;
+  updatedBy?: string;
+  updatedByRole?: string;
+  updatedAt?: string;
+}
+
+export const DEFAULT_NOTIFICATION_SETTINGS: NotificationSettings = {
+  id: 'global',
+  defaultPlatform: 'all',
+  notifyCustomer: true,
+  notifyConcernedRider: true,
+  notifyConcernedWaiter: true,
+  notifyKitchen: true,
+  notifyCashierAndManager: true,
+  events: {
+    orderPlaced: true,
+    sentToKitchen: true,
+    cooking: true,
+    orderReady: true,
+    outForDelivery: true,
+    orderServed: true,
+    orderCompleted: true,
+    orderCancelled: true,
+    waiterAssigned: true,
+    riderAssigned: true,
+    paymentReceived: true,
+  },
+  recipientRules: DEFAULT_RECIPIENT_NOTIFICATION_RULES,
+};
+
+export interface ReceiverNotificationPreferences {
+  receiverKey?: string;
+  receiverLabel?: string;
+  receiveNotifications: boolean;
+  showLiveToast: boolean;
+  mutedCategories?: string[];
+  events: Record<NotificationEventKey, boolean>;
+  updatedAt?: string;
+}
+
+export const DEFAULT_RECEIVER_NOTIFICATION_PREFERENCES: ReceiverNotificationPreferences = {
+  receiveNotifications: true,
+  showLiveToast: true,
+  mutedCategories: [],
+  events: {
+    orderPlaced: true,
+    sentToKitchen: true,
+    cooking: true,
+    orderReady: true,
+    outForDelivery: true,
+    orderServed: true,
+    orderCompleted: true,
+    orderCancelled: true,
+    waiterAssigned: true,
+    riderAssigned: true,
+    paymentReceived: true,
+  },
+};
+
+export interface AppNotification {
+  id: string;
+  title: string;
+  message: string;
+  type: 'info' | 'success' | 'warning' | 'error';
+  category: NotificationCategory;
+  branchId?: string;
+  orderId?: string;
+  orderNumber?: string;
+  orderType?: OrderType;
+  senderId?: string;
+  senderName?: string;
+  senderRole?: Role | 'system';
+  targetRoles: Array<Role | 'all'>;
+  targetPlatform?: NotificationTargetPlatform;
+  targetUserId?: string;
+  targetCustomerPhone?: string;
+  targetCustomerName?: string;
+  targetWaiterId?: string;
+  targetWaiterName?: string;
+  targetRiderId?: string;
+  targetRiderName?: string;
+  eventKey?: string;
+  readBy: string[];
+  createdAt: string;
+}
+
+
 

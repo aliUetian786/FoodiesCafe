@@ -1,6 +1,6 @@
 'use client';
 
-import React, { createContext, useContext, useState, useEffect, useRef } from 'react';
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import {
   Role,
   User,
@@ -12,8 +12,6 @@ import {
   PaymentStatus,
   Table,
   TableStatus,
-  Complaint,
-  ComplaintMessage,
   CashShift,
   RefundRequest,
   TableSession,
@@ -26,6 +24,20 @@ import {
   PaymentMode,
   OrderTypePaymentSettings,
   ManagerAccessRequest,
+  Announcement,
+  AppNotification,
+  NotificationCategory,
+  NotificationTargetPlatform,
+  NotificationEventKey,
+  NotificationSettings,
+  DEFAULT_NOTIFICATION_SETTINGS,
+  RecipientNotificationRules,
+  DEFAULT_RECIPIENT_NOTIFICATION_RULES,
+  ReceiverNotificationPreferences,
+  DEFAULT_RECEIVER_NOTIFICATION_PREFERENCES,
+  OrderType,
+  normalizeBranchId,
+  STATUS_RANK,
 } from '@/types/cafe';
 
 import { store } from '@/redux/store';
@@ -50,13 +62,20 @@ import {
   setTables as setReduxTables,
   setShifts as setReduxShifts,
   setRefundRequests as setReduxRefundRequests,
-  setComplaints as setReduxComplaints,
   setTableSessions as setReduxTableSessions,
   setUsers as setReduxUsers,
   setHeroBanners as setReduxHeroBanners,
   setDealCard as setReduxDealCard,
   setFooterSettings as setReduxFooterSettings,
   updateTableStatusInStore as updateReduxTableStatus,
+  setAnnouncements as setReduxAnnouncements,
+  addAnnouncementInStore as addReduxAnnouncement,
+  deleteAnnouncementFromStore as deleteReduxAnnouncement,
+  setNotifications as setReduxNotifications,
+  addNotificationInStore as addReduxNotification,
+  markNotificationReadInStore as markReduxNotificationRead,
+  clearNotificationsInStore as clearReduxNotifications,
+  setNotificationSettings as setReduxNotificationSettings,
 } from '@/redux/slices/cafeSlice';
 import {
   setCurrentRole as setReduxRole,
@@ -67,12 +86,73 @@ import {
 } from '@/redux/slices/uiSlice';
 import { runSync, broadcastStateMutation } from '@/redux/sync/syncEngine';
 import { INITIAL_MENU, INITIAL_CATEGORIES } from '@/database/embeddedSeed';
+import {
+  reverseGeocodeOpenStreetMap,
+  calculateHaversineKm,
+} from '@/utils/openStreetMap';
+
+/**
+ * Calculates the lowest/minimum price available for an item across basePrice and all branch overrides
+ */
+export function getItemMinPrice(item: MenuItem): number {
+  const prices: number[] = [];
+  const base = Number(item.basePrice);
+  if (!isNaN(base) && base > 0) {
+    prices.push(base);
+  }
+  if (item.branchPriceOverrides && typeof item.branchPriceOverrides === 'object') {
+    Object.values(item.branchPriceOverrides).forEach((p) => {
+      const num = Number(p);
+      if (!isNaN(num) && num > 0) {
+        prices.push(num);
+      }
+    });
+  }
+  return prices.length > 0 ? Math.min(...prices) : (Number(item.basePrice) || 0);
+}
+
+/**
+ * Calculates the effective price for an item:
+ * - If a branch is selected: returns that branch's override or basePrice
+ * - If no branch is selected: returns the minimum price among all branches
+ */
+export function getItemEffectivePrice(item: MenuItem, branchId?: string | null): number {
+  if (branchId && item.branchPriceOverrides && typeof item.branchPriceOverrides === 'object') {
+    const override = item.branchPriceOverrides[branchId];
+    if (override !== undefined && override !== null && !isNaN(Number(override)) && Number(override) > 0) {
+      return Number(override);
+    }
+  }
+  return Number(item.basePrice) || 0;
+}
+
+export function isOrderDayEnded(createdAtStr?: string): boolean {
+  if (!createdAtStr) return false;
+  const d = new Date(createdAtStr);
+  if (isNaN(d.getTime())) return false;
+  const now = new Date();
+  const isPastDay =
+    d.getFullYear() < now.getFullYear() ||
+    (d.getFullYear() === now.getFullYear() && d.getMonth() < now.getMonth()) ||
+    (d.getFullYear() === now.getFullYear() && d.getMonth() === now.getMonth() && d.getDate() < now.getDate());
+  const isOlder24h = now.getTime() - d.getTime() > 24 * 60 * 60 * 1000;
+  return isPastDay || isOlder24h;
+}
 
 interface Toast {
   id: string;
   type: 'info' | 'success' | 'warning' | 'error';
   title: string;
   message: string;
+}
+
+export interface SavedDeliveryAddress {
+  id: string;
+  label: 'Home' | 'Work' | 'Other';
+  address: string;
+  city: string;
+  coordinates: { lat: number; lng: number };
+  isDefault?: boolean;
 }
 
 interface AppContextType {
@@ -83,14 +163,16 @@ interface AppContextType {
   currentUser: User;
   setCurrentUser: (user: User) => void;
   currentBranchId: string;
-  setCurrentBranchId: (id: string) => void;
+  setCurrentBranchId: (id: string, isExplicitSelection?: boolean) => void;
+  repriceCartForBranch: (branchId: string) => void;
+  hasSelectedBranch: boolean;
+  setHasSelectedBranch: (selected: boolean) => void;
   currentBranch: Branch;
   branches: Branch[];
   menuItems: MenuItem[];
   orders: Order[];
   tables: Table[];
   tableSessions: TableSession[];
-  complaints: Complaint[];
   shifts: CashShift[];
   refundRequests: RefundRequest[];
   auditLogs: AuditLog[];
@@ -100,13 +182,24 @@ interface AppContextType {
   toasts: Toast[];
   addToast: (toast: Omit<Toast, 'id'>) => void;
   removeToast: (id: string) => void;
-  
+
+  // Order Type & Confirmation
+  orderType: 'dine_in' | 'takeaway' | 'delivery' | null;
+  setOrderType: (type: 'dine_in' | 'takeaway' | 'delivery' | null) => void;
+  hasConfirmedOrderType: boolean;
+  setHasConfirmedOrderType: (confirmed: boolean) => void;
+
+  // Branch Item Unavailable Alert Modal
+  branchUnavailableModal: { visible: boolean; branchName: string; itemNames: string[] } | null;
+  setBranchUnavailableModal: (modal: { visible: boolean; branchName: string; itemNames: string[] } | null) => void;
+  closeBranchUnavailableModal: () => void;
+
   // Cart Actions
   addToCart: (item: OrderItem) => void;
   updateCartItemQty: (itemId: string, delta: number) => void;
   removeFromCart: (itemId: string) => void;
   clearCart: () => void;
-  
+
   // Order Actions
   placeOrder: (
     type: 'dine_in' | 'takeaway' | 'delivery',
@@ -126,6 +219,10 @@ interface AppContextType {
       isWalkIn?: boolean;
       notes?: string;
       customerCoordinates?: { lat: number; lng: number };
+      paymentStatus?: 'paid' | 'unpaid';
+      paymentCollected?: boolean;
+      assignedWaiterId?: string;
+      assignedWaiterName?: string;
     }
   ) => Order;
   updateOrderStatus: (
@@ -136,7 +233,9 @@ interface AppContextType {
   ) => void;
   sendOrderToKitchen: (orderId: string, silent?: boolean) => void;
   setOrderKitchenForwardTime: (orderId: string, customMinutes: number) => void;
+  setAllOrdersKitchenForwardTime: (customMinutes: number) => void;
   recordCashPayment: (orderId: string, amountReceived: number, silent?: boolean) => { change: number; success: boolean };
+  updateOrderPayment: (orderId: string, paymentStatus: PaymentStatus) => void;
   editOrderStage1: (orderId: string, updatedItems: OrderItem[]) => void;
   addAddOnsToOrderStage2: (orderId: string, addOnItems: OrderItem[]) => void;
   cancelOrder: (orderId: string, reason: string) => void;
@@ -144,12 +243,24 @@ interface AppContextType {
   // Delivery & Rider Actions
   assignRiderToOrder: (orderId: string, riderId: string, silent?: boolean) => void;
   unassignRiderFromOrder: (orderId: string) => void;
+  acceptRiderOrder: (orderId: string) => void;
   finishRiderDelivery: (orderId: string, paymentCollected?: boolean) => void;
   updateRiderAvailability: (riderId: string, status: 'available' | 'busy' | 'offline') => void;
   departRider: (riderId: string) => void;
   customerCoordinates: { lat: number; lng: number } | null;
   setCustomerCoordinates: (coords: { lat: number; lng: number } | null) => void;
-  
+  selectedDeliveryAddress: string;
+  setSelectedDeliveryAddress: (addr: string) => void;
+  savedAddresses: SavedDeliveryAddress[];
+  addSavedAddress: (addr: Omit<SavedDeliveryAddress, 'id'>) => SavedDeliveryAddress;
+  deleteSavedAddress: (id: string) => void;
+  detectAndStoreCurrentLocation: () => Promise<{
+    coords: { lat: number; lng: number };
+    address: string;
+    city: string;
+  } | null>;
+  calculateDistanceKm: (lat1: number, lng1: number, lat2: number, lng2: number) => number;
+
   // Table & Floor Actions
   floors: string[];
   addFloor: (floorName: string) => void;
@@ -166,9 +277,11 @@ interface AppContextType {
   activeTableSession: { tableId: string; tableNumber: string; branchId: string; seatedAt: string; orderId?: string } | null;
   setActiveTableSession: (session: { tableId: string; tableNumber: string; branchId: string; seatedAt: string; orderId?: string } | null) => void;
   assignWaiterToOrder: (orderId: string, waiterId: string, waiterName: string) => Promise<void>;
+  markOrderDeliveredToTable: (orderId: string) => void;
+  markOrderDoneAndCollected: (orderId: string, cashCollected?: boolean) => void;
   cancelDineInOrder: (orderId: string, reason?: string) => Promise<void>;
   addItemsToExistingOrder: (orderId: string, newItems: OrderItem[]) => Promise<void>;
-  
+
   // Menu & Categories Actions
   categories: string[];
   addCategory: (category: string) => void;
@@ -181,7 +294,8 @@ interface AppContextType {
   setAllowRepresentativeMenuEdit: (allowed: boolean) => void;
   toggleMenuItemBranchAvailability: (itemId: string, branchId: string) => void;
   updateMenuItemPrice: (itemId: string, newBasePrice: number, branchOverride?: { branchId: string; price: number }) => void;
-  
+  updateMenuItemBranchPrice: (itemId: string, branchId: string, overridePrice: number) => void;
+
   // Footer Settings
   footerSettings: FooterSettings;
   updateFooterSettings: (settings: Partial<FooterSettings>) => void;
@@ -198,25 +312,79 @@ interface AppContextType {
   updateDealCard: (deal: DealCard) => void;
   approveRequest: (requestId: string) => void;
   rejectRequest: (requestId: string) => void;
-  
+
+  // Announcements & Real Info
+  announcements: Announcement[];
+  addAnnouncement: (a: Omit<Announcement, 'id'>) => Promise<void>;
+  deleteAnnouncement: (id: string) => Promise<void>;
+
+  // Live Notifications (Web + Mobile)
+  notifications: AppNotification[];
+  allNotifications: AppNotification[];
+  unreadNotificationsCount: number;
+  notificationSettings: NotificationSettings;
+  updateNotificationSettings: (updates: Partial<NotificationSettings>) => Promise<boolean>;
+  activeReceiverKey: string;
+  myNotificationSettings: ReceiverNotificationPreferences;
+  receiverNotificationSettingsMap: Record<string, ReceiverNotificationPreferences>;
+  updateMyNotificationSettings: (
+    updates: Partial<ReceiverNotificationPreferences>,
+    targetReceiverKey?: string
+  ) => Promise<boolean>;
+  isNotificationModalOpen: boolean;
+  setIsNotificationModalOpen: (open: boolean) => void;
+  notificationModalDefaultTab: 'inbox' | 'send' | 'settings';
+  prefillNotificationOrder: Order | null;
+  openNotificationModal: (tab?: 'inbox' | 'send' | 'settings', prefillOrder?: Order) => void;
+  sendNotification: (payload: {
+    id?: string;
+    title: string;
+    message: string;
+    type?: 'info' | 'success' | 'warning' | 'error';
+    category?: NotificationCategory;
+    branchId?: string;
+    orderId?: string;
+    orderNumber?: string;
+    orderType?: OrderType;
+    targetRoles: Array<Role | 'all'>;
+    targetPlatform?: NotificationTargetPlatform;
+    targetUserId?: string;
+    targetCustomerPhone?: string;
+    targetCustomerName?: string;
+    targetWaiterId?: string;
+    targetWaiterName?: string;
+    targetRiderId?: string;
+    targetRiderName?: string;
+    silentToast?: boolean;
+  }) => Promise<AppNotification | null>;
+  markNotificationRead: (id: string) => Promise<void>;
+  markAllNotificationsRead: () => Promise<void>;
+  clearNotifications: () => Promise<void>;
+
   // Branch & Settings Actions
   updateBranchSettings: (branchId: string, settings: Partial<Branch>) => void;
   updateBranchPaymentSettings: (branchId: string, settings: BranchPaymentSettings) => void;
-  
-  // Support & Complaints Actions
-  submitComplaint: (subject: string, message: string, orderId?: string) => void;
-  sendComplaintReply: (complaintId: string, text: string) => void;
-  updateComplaintStatus: (complaintId: string, status: 'new' | 'in_progress' | 'resolved' | 'closed') => void;
-  
+  createBranch: (branchData: Partial<Branch>) => Promise<boolean>;
+  toggleBranchStatus: (branchId: string) => void;
+  shutdownModalState: {
+    isOpen: boolean;
+    branch: Branch | null;
+    pendingOrders: Order[];
+  };
+  closeShutdownModal: () => void;
+  confirmShutdownKeepProcessing: () => void;
+  confirmShutdownCancelOrders: () => void;
+
   // Cashier Shifts
   openShift: (openingFloat: number) => void;
   closeShift: (countedCash: number, differenceReason: string) => void;
+  updateShiftOpeningBalance: (shiftId: string, newOpeningFloat: number) => void;
   currentShift: CashShift | null;
-  
+
   // Refunds
   requestRefund: (orderId: string, amount: number, reason: string) => void;
   decideRefund: (refundId: string, approved: boolean) => void;
-  
+
   // Staff & Customer Management
   users: User[];
   updateUserStatus: (userId: string, status: 'active' | 'suspended' | 'deactivated') => void;
@@ -227,7 +395,7 @@ interface AppContextType {
   // On-demand Older Data / History Fetching
   hasLoadedOlderOrders: boolean;
   isFetchingOlderOrders: boolean;
-  fetchOlderOrders: (branchId?: string, dateScope?: string) => Promise<void>;
+  fetchOlderOrders: (branchId?: string, dateScope?: string, startDate?: string, endDate?: string) => Promise<void>;
   filterOrdersToToday: () => void;
 
   // Platform Owner & Manager Access Delegation
@@ -264,6 +432,7 @@ const INITIAL_BRANCHES: Branch[] = [
     longitude: 74.3436,
     maxOrderDistanceKm: 50,
     tableQrMaxDistanceMeters: 300,
+    minDeliveryAmount: 500,
     paymentSettings: {
       dine_in: { COD: true, Wallet: true, Card: true, Bank: true, Installment: false },
       takeaway: { COD: true, Wallet: true, Card: true, Bank: true, Installment: false },
@@ -287,6 +456,7 @@ const INITIAL_BRANCHES: Branch[] = [
     longitude: 73.0552,
     maxOrderDistanceKm: 50,
     tableQrMaxDistanceMeters: 300,
+    minDeliveryAmount: 500,
     paymentSettings: {
       dine_in: { COD: true, Wallet: true, Card: true, Bank: true, Installment: false },
       takeaway: { COD: true, Wallet: true, Card: true, Bank: true, Installment: false },
@@ -310,6 +480,7 @@ const INITIAL_BRANCHES: Branch[] = [
     longitude: 67.0305,
     maxOrderDistanceKm: 50,
     tableQrMaxDistanceMeters: 300,
+    minDeliveryAmount: 500,
     paymentSettings: {
       dine_in: { COD: true, Wallet: true, Card: true, Bank: true, Installment: false },
       takeaway: { COD: true, Wallet: true, Card: true, Bank: true, Installment: false },
@@ -336,6 +507,11 @@ const INITIAL_FOOTER_SETTINGS: FooterSettings = {
   orderRoutingSupportFirst: true,
   autoForwardKitchenMin: 3,
   autoForwardMode: 'timed',
+  homeNotificationEnabled: true,
+  homeNotificationBadge: 'LIVE ORDER NOTICE',
+  homeNotificationTitle: 'Fresh Handi & Dum Biryani Batch Ready — Fast Dine-In, Takeaway & Delivery!',
+  homeNotificationMessage: 'Select your order mode above to browse today’s live branch menu, local chef deals, and real-time order tracking.',
+  homeNotificationType: 'promo',
 };
 
 const INITIAL_HERO_BANNERS: HeroBanner[] = [
@@ -410,7 +586,6 @@ const INITIAL_USERS: User[] = [
   { id: 'user-cust', name: 'Zeeshan Ahmed', phone: '+92 301 5551234', email: 'zeeshan@example.com', address: 'House 14, Street 9, Model Town, Lahore', role: 'customer', status: 'active', noShowCount: 0, password: 'password123', pin: '1234' },
   { id: 'user-owner', name: 'Malik Jahangir', phone: '+92 300 0000001', email: 'owner@foodiescafe.pk', role: 'platform_owner', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-bm', name: 'Rashid Mehmood', phone: '+92 300 2223344', email: 'manager.gulberg@foodiescafe.pk', role: 'branch_manager', branchId: 'gulberg-lahore', status: 'active', password: 'password123', pin: '1234' },
-  { id: 'user-rep', name: 'Zara Noor', phone: '+92 300 4445566', email: 'rep.gulberg@foodiescafe.pk', role: 'branch_representative', branchId: 'gulberg-lahore', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-kitchen', name: 'Chef Ustaad Aslam', phone: '+92 300 6667788', email: 'kitchen.gulberg@foodiescafe.pk', role: 'kitchen_staff', branchId: 'gulberg-lahore', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-cashier', name: 'Bilal Farooq', phone: '+92 300 8889900', email: 'cashier.gulberg@foodiescafe.pk', role: 'cashier', branchId: 'gulberg-lahore', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-floor', name: 'Kashif Ali', phone: '+92 300 1112233', email: 'floor.gulberg@foodiescafe.pk', role: 'floor_staff', branchId: 'gulberg-lahore', status: 'active', password: 'password123', pin: '1234' },
@@ -421,16 +596,12 @@ const INITIAL_USERS: User[] = [
   { id: 'user-cashier-isb', name: 'Hamza Tariq', phone: '+92 300 3338899', email: 'cashier.islamabad@foodiescafe.pk', role: 'cashier', branchId: 'f7-islamabad', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-kitchen-isb', name: 'Chef Imran Khan', phone: '+92 300 3337766', email: 'kitchen.islamabad@foodiescafe.pk', role: 'kitchen_staff', branchId: 'f7-islamabad', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-floor-isb', name: 'Fahad Mustafa', phone: '+92 300 3336655', email: 'floor.islamabad@foodiescafe.pk', role: 'floor_staff', branchId: 'f7-islamabad', status: 'active', password: 'password123', pin: '1234' },
-  { id: 'user-rep-isb', name: 'Ayesha Siddiqui', phone: '+92 300 3335544', email: 'rep.islamabad@foodiescafe.pk', role: 'branch_representative', branchId: 'f7-islamabad', status: 'active', password: 'password123', pin: '1234' },
   // Karachi Staff
   { id: 'user-bm-khi', name: 'Kamran Siddiqui', phone: '+92 300 5556677', email: 'manager.karachi@foodiescafe.pk', role: 'branch_manager', branchId: 'clifton-karachi', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-cashier-khi', name: 'Saad Ali', phone: '+92 300 5558899', email: 'cashier.karachi@foodiescafe.pk', role: 'cashier', branchId: 'clifton-karachi', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-kitchen-khi', name: 'Chef Zakir Hussain', phone: '+92 300 5557766', email: 'kitchen.karachi@foodiescafe.pk', role: 'kitchen_staff', branchId: 'clifton-karachi', status: 'active', password: 'password123', pin: '1234' },
   { id: 'user-floor-khi', name: 'Rizwan Ahmed', phone: '+92 300 5556655', email: 'floor.karachi@foodiescafe.pk', role: 'floor_staff', branchId: 'clifton-karachi', status: 'active', password: 'password123', pin: '1234' },
-  { id: 'user-rep-khi', name: 'Mahnoor Baloch', phone: '+92 300 5555544', email: 'rep.karachi@foodiescafe.pk', role: 'branch_representative', branchId: 'clifton-karachi', status: 'active', password: 'password123', pin: '1234' },
 ];
-
-const INITIAL_COMPLAINTS: Complaint[] = [];
 
 const DEFAULT_OPEN_SHIFT: CashShift = {
   id: 'sh-today-1',
@@ -444,16 +615,106 @@ const DEFAULT_OPEN_SHIFT: CashShift = {
   status: 'open',
 };
 
-const INITIAL_SHIFTS: CashShift[] = [DEFAULT_OPEN_SHIFT];
+const INITIAL_SHIFTS: CashShift[] = [
+  DEFAULT_OPEN_SHIFT,
+  {
+    id: 'sh-today-isb',
+    cashierId: 'user-cashier-isb',
+    cashierName: 'Hamza Tariq',
+    branchId: 'f7-islamabad',
+    openedAt: 'Today, 09:00 AM',
+    openingFloat: 0,
+    cashCollected: 0,
+    expectedCash: 0,
+    status: 'open',
+  },
+  {
+    id: 'sh-today-khi',
+    cashierId: 'user-cashier-khi',
+    cashierName: 'Adeel Murtaza',
+    branchId: 'clifton-karachi',
+    openedAt: 'Today, 09:00 AM',
+    openingFloat: 0,
+    cashCollected: 0,
+    expectedCash: 0,
+    status: 'open',
+  },
+];
 
 const INITIAL_AUDIT_LOGS: AuditLog[] = [];
+
+function mergeNotificationSettings(
+  current: NotificationSettings,
+  incoming?: Partial<NotificationSettings> | null
+): NotificationSettings {
+  if (!incoming) return current;
+  return {
+    ...DEFAULT_NOTIFICATION_SETTINGS,
+    ...current,
+    ...incoming,
+    events: {
+      ...DEFAULT_NOTIFICATION_SETTINGS.events,
+      ...(current.events || {}),
+      ...(incoming.events || {}),
+    },
+    recipientRules: {
+      customer: {
+        ...DEFAULT_RECIPIENT_NOTIFICATION_RULES.customer,
+        ...(current.recipientRules?.customer || {}),
+        ...(incoming.recipientRules?.customer || {}),
+      },
+      rider: {
+        ...DEFAULT_RECIPIENT_NOTIFICATION_RULES.rider,
+        ...(current.recipientRules?.rider || {}),
+        ...(incoming.recipientRules?.rider || {}),
+      },
+      waiter: {
+        ...DEFAULT_RECIPIENT_NOTIFICATION_RULES.waiter,
+        ...(current.recipientRules?.waiter || {}),
+        ...(incoming.recipientRules?.waiter || {}),
+      },
+      kitchen: {
+        ...DEFAULT_RECIPIENT_NOTIFICATION_RULES.kitchen,
+        ...(current.recipientRules?.kitchen || {}),
+        ...(incoming.recipientRules?.kitchen || {}),
+      },
+      cashierAndManager: {
+        ...DEFAULT_RECIPIENT_NOTIFICATION_RULES.cashierAndManager,
+        ...(current.recipientRules?.cashierAndManager || {}),
+        ...(incoming.recipientRules?.cashierAndManager || {}),
+      },
+    },
+    updatedBy: incoming.updatedBy || current.updatedBy,
+    updatedByRole: incoming.updatedByRole || current.updatedByRole,
+    updatedAt: incoming.updatedAt || current.updatedAt,
+  };
+}
+
+function buildWebOrderNotificationRoles(
+  orderType: OrderType | undefined,
+  settings: NotificationSettings
+): Array<Role | 'all'> {
+  const roles: Array<Role | 'all'> = ['platform_owner'];
+  if (settings.notifyCustomer) roles.push('customer');
+  if (settings.notifyCashierAndManager) {
+    roles.push('cashier', 'branch_manager');
+  }
+  if (settings.notifyKitchen) roles.push('kitchen_staff');
+  if (orderType === 'dine_in' && settings.notifyConcernedWaiter) {
+    roles.push('floor_staff');
+  }
+  if (orderType === 'delivery' && settings.notifyConcernedRider) {
+    roles.push('delivery_staff');
+  }
+  return Array.from(new Set(roles));
+}
 
 const AppContext = createContext<AppContextType | undefined>(undefined);
 
 export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
   // Pure light mode forced for all portals per user request
   const theme = 'light' as const;
-  const toggleTheme = () => {};
+  const toggleTheme = () => { };
 
   const GUEST_CUSTOMER: User = {
     id: 'user-guest',
@@ -493,7 +754,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             if (parsed && parsed.role && parsed.role !== 'customer') {
               return parsed.role as Role;
             }
-          } catch (e) {}
+          } catch (e) { }
         }
       }
     }
@@ -522,19 +783,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               return parsedStaff;
             }
           }
-        } catch (e) {}
+        } catch (e) { }
       }
 
-      // Check customer user if not on staff path
+      // Check customer user if not on staff path (24-Hour Session Expiry Rule)
       try {
         const saved = localStorage.getItem('foodies_customer_user');
+        const loginTimeStr = localStorage.getItem('foodies_customer_login_time');
         if (saved) {
           const parsed = JSON.parse(saved);
           if (parsed && parsed.name && parsed.name !== 'Guest Customer' && parsed.role === 'customer') {
+            const loginTime = loginTimeStr ? Number(loginTimeStr) : null;
+            // 24 Hours in milliseconds = 86,400,000 ms. Expire strictly if loginTime exists AND exceeded 24h
+            if (loginTime && !isNaN(loginTime) && Date.now() - loginTime > 24 * 60 * 60 * 1000) {
+              localStorage.removeItem('foodies_customer_user');
+              localStorage.removeItem('foodies_customer_session');
+              localStorage.removeItem('foodies_customer_login_time');
+              localStorage.removeItem('foodies_customer_order_ids');
+              localStorage.removeItem('foodies_customer_history_cache');
+              return GUEST_CUSTOMER;
+            }
+            // Seed login time if missing so customer gets their full 24h
+            if (!loginTime || isNaN(loginTime)) {
+              localStorage.setItem('foodies_customer_login_time', Date.now().toString());
+            }
             return parsed;
           }
         }
-      } catch (e) {}
+      } catch (e) { }
     }
     return GUEST_CUSTOMER;
   });
@@ -550,13 +826,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (!localStorage.getItem('foodies_staff_login_time')) {
           localStorage.setItem('foodies_staff_login_time', Date.now().toString());
         }
+        store.dispatch(setReduxUser(currentUser));
       } else if (currentUser && currentUser.name && currentUser.name !== 'Guest Customer') {
-        // Customer: save strictly to customer key
+        // Customer: save strictly to customer key & ensure 24h login timestamp is recorded
         localStorage.setItem('foodies_customer_user', JSON.stringify(currentUser));
-      } else if (currentUser && currentUser.name === 'Guest Customer') {
-        localStorage.removeItem('foodies_customer_user');
+        if (!localStorage.getItem('foodies_customer_login_time')) {
+          localStorage.setItem('foodies_customer_login_time', Date.now().toString());
+        }
+        store.dispatch(setReduxUser(currentUser));
       }
-    } catch (e) {}
+    } catch (e) { }
+  }, [currentUser]);
+
+  // Periodic 24-Hour Customer Session Auto-Expiry Check
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const checkCustomerSessionExpiry = () => {
+      const isCust = currentUser && currentUser.role === 'customer' && currentUser.name && currentUser.name !== 'Guest Customer';
+      if (!isCust) return;
+      const loginTimeStr = localStorage.getItem('foodies_customer_login_time');
+      const loginTime = loginTimeStr ? Number(loginTimeStr) : null;
+      if (!loginTime || isNaN(loginTime)) {
+        localStorage.setItem('foodies_customer_login_time', Date.now().toString());
+        return;
+      }
+      if (Date.now() - loginTime > 24 * 60 * 60 * 1000) {
+        localStorage.removeItem('foodies_customer_user');
+        localStorage.removeItem('foodies_customer_session');
+        localStorage.removeItem('foodies_customer_login_time');
+        localStorage.removeItem('foodies_customer_order_ids');
+        localStorage.removeItem('foodies_customer_history_cache');
+        setCurrentUser(GUEST_CUSTOMER);
+        store.dispatch(setReduxUser(GUEST_CUSTOMER));
+        addToast({
+          type: 'info',
+          title: 'Session Expired (24 Hours) ⏰',
+          message: 'Your 24-hour customer session has expired. Please sign in again with your email to access your account.',
+        });
+      }
+    };
+
+    checkCustomerSessionExpiry();
+    const interval = setInterval(checkCustomerSessionExpiry, 30000);
+    return () => clearInterval(interval);
   }, [currentUser]);
 
   useEffect(() => {
@@ -565,9 +877,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (currentRole && currentRole !== 'customer') {
         localStorage.setItem('foodies_staff_role', currentRole);
       }
-    } catch (e) {}
+    } catch (e) { }
   }, [currentRole]);
-  const [currentBranchId, setCurrentBranchId] = useState<string>(() => {
+  const [currentBranchId, setCurrentBranchIdState] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       const urlParams = new URLSearchParams(window.location.search);
       const urlBranch = urlParams.get('branch');
@@ -579,6 +891,21 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     }
     return 'gulberg-lahore';
   });
+
+  const [hasSelectedBranch, setHasSelectedBranch] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      return Boolean(localStorage.getItem('foodies_customer_selected_branch'));
+    }
+    return false;
+  });
+
+  const [branchUnavailableModal, setBranchUnavailableModal] = useState<{
+    visible: boolean;
+    branchName: string;
+    itemNames: string[];
+  } | null>(null);
+
+  const closeBranchUnavailableModal = () => setBranchUnavailableModal(null);
   const [branches, setBranches] = useState<Branch[]>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -587,7 +914,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const parsed = JSON.parse(saved);
           if (Array.isArray(parsed) && parsed.length > 0) return parsed;
         }
-      } catch (e) {}
+      } catch (e) { }
     }
     return INITIAL_BRANCHES;
   });
@@ -602,9 +929,42 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const [footerSettings, setFooterSettings] = useState<FooterSettings>(INITIAL_FOOTER_SETTINGS);
   const [heroBanners, setHeroBanners] = useState<HeroBanner[]>(INITIAL_HERO_BANNERS);
   const [dealCard, setDealCard] = useState<DealCard>(INITIAL_DEAL_CARD);
+  const [announcements, setAnnouncements] = useState<Announcement[]>(() => store.getState().cafe.announcements || []);
+  const [allNotifications, setAllNotifications] = useState<AppNotification[]>(() => store.getState().cafe.notifications || []);
+  const [notificationSettings, setNotificationSettings] = useState<NotificationSettings>(() => {
+    const storeSettings = store.getState().cafe.notificationSettings;
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('foodies_notification_settings');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          return mergeNotificationSettings(DEFAULT_NOTIFICATION_SETTINGS, parsed);
+        }
+      } catch (e) { }
+    }
+    return storeSettings || DEFAULT_NOTIFICATION_SETTINGS;
+  });
+  const [receiverNotificationSettingsMap, setReceiverNotificationSettingsMap] = useState<
+    Record<string, ReceiverNotificationPreferences>
+  >(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('foodies_receiver_notif_settings_map');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && typeof parsed === 'object') return parsed;
+        }
+      } catch { }
+    }
+    return {};
+  });
+  const [isNotificationModalOpen, setIsNotificationModalOpen] = useState<boolean>(false);
+  const [notificationModalDefaultTab, setNotificationModalDefaultTab] = useState<'inbox' | 'send' | 'settings'>('inbox');
+  const [prefillNotificationOrder, setPrefillNotificationOrder] = useState<Order | null>(null);
+  const seenNotifIdsRef = useRef<Set<string>>(new Set((store.getState().cafe.notifications || []).map((n) => n.id)));
+  const activeBrowserNotificationsRef = useRef<Map<string, Notification>>(new Map());
   const [allowRepresentativeDirectPublish, setAllowRepresentativeDirectPublish] = useState<boolean>(false);
   const [pendingApprovalRequests, setPendingApprovalRequests] = useState<BannerDealApprovalRequest[]>([]);
-  const [complaints, setComplaints] = useState<Complaint[]>(INITIAL_COMPLAINTS);
   const [shifts, setShifts] = useState<CashShift[]>(() => {
     if (typeof window !== 'undefined') {
       try {
@@ -615,14 +975,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const clean = parsed
               .filter((s: CashShift) => s.id !== 'sh-yesterday-1' && s.id !== 'sh-yesterday-2')
               .map((s: CashShift) =>
-                s.id === 'sh-today-1' && (s.cashCollected === 34200 || s.openingFloat === 5000 || s.expectedCash === 5000)
+                s.id === 'sh-today-1' && s.cashCollected === 34200
                   ? { ...s, openingFloat: 0, cashCollected: 0, expectedCash: 0 }
                   : s
               );
             if (clean.length > 0) return clean;
           }
         }
-      } catch (e) {}
+      } catch (e) { }
     }
     return INITIAL_SHIFTS;
   });
@@ -634,7 +994,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         const saved = localStorage.getItem('foodies_users_live');
         if (saved) return JSON.parse(saved);
-      } catch (e) {}
+      } catch (e) { }
     }
     return INITIAL_USERS;
   });
@@ -643,7 +1003,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         const saved = localStorage.getItem('foodies_cart');
         if (saved) return JSON.parse(saved);
-      } catch (e) {}
+      } catch (e) { }
     }
     return [];
   });
@@ -654,22 +1014,302 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       localStorage.setItem('foodies_cart', JSON.stringify(cart));
       store.dispatch(setReduxCart(cart));
-    } catch (e) {}
+    } catch (e) { }
   }, [cart]);
+
+  const repriceCartForBranch = (branchId: string) => {
+    setCart((prevCart) => {
+      if (!prevCart || prevCart.length === 0) return prevCart;
+      const updated = prevCart.map((ci) => {
+        const dish = menuItems.find(
+          (m) => m.id === ci.menuItemId || m.name.toLowerCase() === ci.name.toLowerCase()
+        );
+        if (!dish) return ci;
+        let newUnitPrice = (dish.branchPriceOverrides && dish.branchPriceOverrides[branchId] !== undefined && !isNaN(Number(dish.branchPriceOverrides[branchId])))
+          ? Number(dish.branchPriceOverrides[branchId])
+          : Number(dish.basePrice) || 0;
+        if (ci.size && dish.sizes) {
+          const matchSize = dish.sizes.find((s) => s.name === ci.size);
+          if (matchSize) newUnitPrice += Number(matchSize.priceDelta) || 0;
+        }
+        if (ci.extras && dish.extras) {
+          ci.extras.forEach((ext) => {
+            const matchExtra = dish.extras?.find((e) => e.name === ext);
+            if (matchExtra) newUnitPrice += Number(matchExtra.price) || 0;
+          });
+        }
+        return { ...ci, unitPrice: newUnitPrice };
+      });
+      store.dispatch(setReduxCart(updated));
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('foodies_cart', JSON.stringify(updated));
+        } catch (e) { }
+      }
+      return updated;
+    });
+  };
+
+  const setCurrentBranchId = (branchId: string, isExplicitSelection: boolean = true) => {
+    if (branchId === currentBranchId && (isExplicitSelection ? hasSelectedBranch : true)) {
+      return;
+    }
+    setCurrentBranchIdState(branchId);
+    store.dispatch(setReduxBranchId(branchId));
+    if (typeof window !== 'undefined') {
+      localStorage.setItem('foodies_customer_branch', branchId);
+      if (isExplicitSelection) {
+        localStorage.setItem('foodies_customer_selected_branch', branchId);
+      }
+    }
+
+    if (isExplicitSelection) {
+      setHasSelectedBranch(true);
+      repriceCartForBranch(branchId);
+    }
+
+    // Check if any items currently in cart are unavailable at this newly selected branch
+    if (cart && cart.length > 0) {
+      const targetBranch = branches.find((b) => b.id === branchId);
+      const targetBranchName = targetBranch ? targetBranch.name : branchId;
+
+      const unavail = cart.filter((cartItem) => {
+        const dish = menuItems.find(
+          (m) => m.id === cartItem.menuItemId || m.name.toLowerCase() === cartItem.name.toLowerCase()
+        );
+        if (!dish) return false;
+        return dish.branchAvailability?.[branchId] === false || dish.isAvailable === false;
+      });
+
+      if (unavail.length > 0) {
+        const names = Array.from(new Set(unavail.map((i) => i.name)));
+        setBranchUnavailableModal({
+          visible: true,
+          branchName: targetBranchName,
+          itemNames: names,
+        });
+      }
+    }
+  };
   const [menuSearchQuery, setMenuSearchQuery] = useState<string>('');
   const [toasts, setToasts] = useState<Toast[]>([]);
-  const [customerCoordinates, setCustomerCoordinates] = useState<{ lat: number; lng: number } | null>(null);
+  const [orderType, setOrderType] = useState<'dine_in' | 'takeaway' | 'delivery' | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = sessionStorage.getItem('foodies_order_type') || localStorage.getItem('foodies_order_type');
+        if (saved === 'dine_in' || saved === 'takeaway' || saved === 'delivery') return saved;
+      } catch (e) { }
+    }
+    return null;
+  });
+  const [hasConfirmedOrderType, setHasConfirmedOrderType] = useState<boolean>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = sessionStorage.getItem('foodies_order_type_confirmed');
+        if (saved === 'true') return true;
+      } catch (e) { }
+    }
+    return false;
+  });
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      if (orderType) {
+        sessionStorage.setItem('foodies_order_type', orderType);
+        localStorage.setItem('foodies_order_type', orderType);
+      } else {
+        sessionStorage.removeItem('foodies_order_type');
+        localStorage.removeItem('foodies_order_type');
+      }
+    } catch (e) { }
+  }, [orderType]);
+
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    try {
+      sessionStorage.setItem('foodies_order_type_confirmed', hasConfirmedOrderType ? 'true' : 'false');
+    } catch (e) { }
+  }, [hasConfirmedOrderType]);
+  const DEFAULT_WEB_SAVED_ADDRESSES: SavedDeliveryAddress[] = [
+    {
+      id: 'addr-default-1',
+      label: 'Home',
+      address: 'House #14, Street 5, Main Boulevard Gulberg III, Lahore',
+      city: 'Lahore',
+      coordinates: { lat: 31.5204, lng: 74.3587 },
+      isDefault: true,
+    },
+  ];
+
+  const [customerCoordinates, setCustomerCoordinatesState] = useState<{ lat: number; lng: number } | null>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('foodies_customer_coordinates');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (parsed && typeof parsed.lat === 'number' && typeof parsed.lng === 'number') {
+            return parsed;
+          }
+        }
+      } catch (e) { }
+    }
+    return { lat: 31.5204, lng: 74.3587 };
+  });
+
+  const setCustomerCoordinates = useCallback((coords: { lat: number; lng: number } | null) => {
+    setCustomerCoordinatesState(coords);
+    if (typeof window !== 'undefined') {
+      try {
+        if (coords) {
+          localStorage.setItem('foodies_customer_coordinates', JSON.stringify(coords));
+        } else {
+          localStorage.removeItem('foodies_customer_coordinates');
+        }
+      } catch (e) { }
+    }
+  }, []);
+
+  const [selectedDeliveryAddress, setSelectedDeliveryAddressState] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('foodies_selected_delivery_address');
+        if (saved && saved.trim()) return saved;
+      } catch (e) { }
+    }
+    return 'House #14, Street 5, Main Boulevard Gulberg III, Lahore';
+  });
+
+  const setSelectedDeliveryAddress = useCallback((addr: string) => {
+    setSelectedDeliveryAddressState(addr);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('foodies_selected_delivery_address', addr);
+      } catch (e) { }
+    }
+  }, []);
+
+  const [savedAddresses, setSavedAddressesState] = useState<SavedDeliveryAddress[]>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('foodies_saved_addresses');
+        if (saved) {
+          const parsed = JSON.parse(saved);
+          if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+        }
+      } catch (e) { }
+    }
+    return DEFAULT_WEB_SAVED_ADDRESSES;
+  });
+
+  const addSavedAddress = useCallback((addr: Omit<SavedDeliveryAddress, 'id'>): SavedDeliveryAddress => {
+    const newItem: SavedDeliveryAddress = {
+      ...addr,
+      id: `addr-${Date.now()}`,
+    };
+    setSavedAddressesState((prev) => {
+      const next = [newItem, ...prev];
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('foodies_saved_addresses', JSON.stringify(next));
+        } catch (e) { }
+      }
+      return next;
+    });
+    setSelectedDeliveryAddress(newItem.address);
+    if (newItem.coordinates) {
+      setCustomerCoordinates(newItem.coordinates);
+    }
+    return newItem;
+  }, [setCustomerCoordinates, setSelectedDeliveryAddress]);
+
+  const deleteSavedAddress = useCallback((id: string) => {
+    setSavedAddressesState((prev) => {
+      const next = prev.filter((a) => a.id !== id);
+      if (typeof window !== 'undefined') {
+        try {
+          localStorage.setItem('foodies_saved_addresses', JSON.stringify(next));
+        } catch (e) { }
+      }
+      return next;
+    });
+  }, []);
+
+  const calculateDistanceKm = useCallback((lat1: number, lng1: number, lat2: number, lng2: number) => {
+    return calculateHaversineKm(lat1, lng1, lat2, lng2);
+  }, []);
+
+  const detectAndStoreCurrentLocation = useCallback(async () => {
+    if (typeof window === 'undefined' || !('geolocation' in navigator)) {
+      return null;
+    }
+    return new Promise<{ coords: { lat: number; lng: number }; address: string; city: string } | null>((resolve) => {
+      navigator.geolocation.getCurrentPosition(
+        async (pos) => {
+          const coords = {
+            lat: Number(pos.coords.latitude.toFixed(6)),
+            lng: Number(pos.coords.longitude.toFixed(6)),
+          };
+          setCustomerCoordinates(coords);
+          const geo = await reverseGeocodeOpenStreetMap(coords.lat, coords.lng);
+          setSelectedDeliveryAddress(geo.address);
+          resolve({ coords, address: geo.address, city: geo.city });
+        },
+        () => resolve(null),
+        { enableHighAccuracy: true, timeout: 7000 }
+      );
+    });
+  }, [setCustomerCoordinates, setSelectedDeliveryAddress]);
   const tabIdRef = useRef<string>(typeof window !== 'undefined' ? Math.random().toString(36).substring(2, 9) : 'tab');
   const liveBroadcastChannelRef = useRef<BroadcastChannel | null>(null);
   const toastTimerRef = useRef<NodeJS.Timeout | null>(null);
   const lastToastRef = useRef<{ title: string; message: string; timestamp: number } | null>(null);
+  const inFlightStatusRef = useRef<Map<string, {
+    status?: OrderStatus;
+    paymentStatus?: PaymentStatus;
+    paymentCollected?: boolean;
+    sentToKitchen?: boolean;
+    assignedRiderId?: string;
+    assignedRiderName?: string;
+    riderStatus?: 'assigned' | 'accepted' | 'picked_up' | 'en_route' | 'delivered';
+    timestamp: number;
+  }>>(new Map());
+
+  const getClientAuthHeaders = (): Record<string, string> => {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+    };
+    if (typeof window !== 'undefined') {
+      const sessionToken =
+        localStorage.getItem('foodies_staff_session') ||
+        localStorage.getItem('foodies_customer_session');
+      if (sessionToken) {
+        headers['Authorization'] = `Bearer ${sessionToken}`;
+      }
+      if (currentRole && currentRole !== 'customer') {
+        headers['x-foodies-staff-role'] = currentRole;
+        if (currentUser?.id) headers['x-foodies-user-id'] = currentUser.id;
+        if (currentBranchId) headers['x-foodies-branch-id'] = currentBranchId;
+      }
+    }
+    return headers;
+  };
+
+  const appFetch = async (url: string, options: RequestInit = {}) => {
+    const authHeaders = getClientAuthHeaders();
+    const headers = {
+      ...authHeaders,
+      ...((options.headers as any) || {}),
+    };
+    return fetch(url, { ...options, headers });
+  };
 
   const [managerAccessRequests, setManagerAccessRequests] = useState<Record<string, ManagerAccessRequest>>(() => {
     if (typeof window !== 'undefined') {
       try {
         const saved = localStorage.getItem('foodies_manager_access_requests');
         if (saved) return JSON.parse(saved);
-      } catch (e) {}
+      } catch (e) { }
     }
     return {};
   });
@@ -685,7 +1325,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           senderId: tabIdRef.current,
         });
       }
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const broadcastBranches = (branchesList: Branch[]) => {
@@ -701,7 +1341,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           senderId: tabIdRef.current,
         });
       }
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const broadcastOrders = (ordersList: Order[]) => {
@@ -709,7 +1349,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       localStorage.setItem('foodies_orders_live', JSON.stringify(ordersList));
       store.dispatch(setReduxOrders(ordersList));
-      broadcastStateMutation('SYNC_ORDERS', ordersList);
+      // NOTE: Do not broadcastStateMutation('SYNC_ORDERS') here.
+      // Remote tabs already receive the live payload instantly via foodies_system_live_sync below.
+      // Calling broadcastStateMutation triggers premature runSync on /api/sync before asynchronous PATCH commits.
       if (liveBroadcastChannelRef.current) {
         liveBroadcastChannelRef.current.postMessage({
           type: 'SYNC_ORDERS',
@@ -717,7 +1359,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           senderId: tabIdRef.current,
         });
       }
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const broadcastTables = (tablesList: Table[]) => {
@@ -733,7 +1375,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           senderId: tabIdRef.current,
         });
       }
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const broadcastMenu = (itemsList: MenuItem[]) => {
@@ -749,23 +1391,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           senderId: tabIdRef.current,
         });
       }
-    } catch (e) {}
-  };
-
-  const broadcastComplaints = (complaintsList: Complaint[]) => {
-    if (typeof window === 'undefined') return;
-    try {
-      localStorage.setItem('foodies_complaints', JSON.stringify(complaintsList));
-      store.dispatch(setReduxComplaints(complaintsList));
-      broadcastStateMutation('SYNC_COMPLAINTS', complaintsList);
-      if (liveBroadcastChannelRef.current) {
-        liveBroadcastChannelRef.current.postMessage({
-          type: 'SYNC_COMPLAINTS',
-          payload: complaintsList,
-          senderId: tabIdRef.current,
-        });
-      }
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const broadcastShifts = (shiftsList: CashShift[]) => {
@@ -781,7 +1407,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           senderId: tabIdRef.current,
         });
       }
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const broadcastRefunds = (refundsList: RefundRequest[]) => {
@@ -797,7 +1423,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           senderId: tabIdRef.current,
         });
       }
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const broadcastTableSessions = (sessionsList: TableSession[]) => {
@@ -813,7 +1439,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           senderId: tabIdRef.current,
         });
       }
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const broadcastUsers = (usersList: User[]) => {
@@ -829,7 +1455,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           senderId: tabIdRef.current,
         });
       }
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const broadcastMarketing = (data: {
@@ -852,7 +1478,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           senderId: tabIdRef.current,
         });
       }
-    } catch (e) {}
+    } catch (e) { }
   };
 
   useEffect(() => {
@@ -861,7 +1487,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     if (typeof window === 'undefined') return;
 
-    // Load persisted marketing elements on first mount
+    // Load persisted marketing elements & notification rules on first mount
     try {
       const savedBanners = localStorage.getItem('foodies_hero_banners');
       if (savedBanners) {
@@ -874,33 +1500,96 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         if (p && p.title) setDealCard(p);
       }
       const savedFooter = localStorage.getItem('foodies_footer_settings');
-      if (savedFooter) {
-        const p = JSON.parse(savedFooter);
-        if (p && p.helpline) setFooterSettings(p);
+      const savedHomeNotif = localStorage.getItem('foodies_web_home_notification');
+      if (savedFooter || savedHomeNotif) {
+        const pFooter = savedFooter ? JSON.parse(savedFooter) : {};
+        const pHomeNotif = savedHomeNotif ? JSON.parse(savedHomeNotif) : {};
+        setFooterSettings((prev) => ({
+          ...prev,
+          ...(pFooter && typeof pFooter === 'object' ? pFooter : {}),
+          ...(pHomeNotif && typeof pHomeNotif === 'object' ? pHomeNotif : {}),
+        }));
       }
       const savedCats = localStorage.getItem('foodies_categories');
       if (savedCats) {
         const p = JSON.parse(savedCats);
         if (Array.isArray(p) && p.length > 0) setCategories(p);
       }
-    } catch (e) {}
-
-    // Load persisted complaints on first mount (filter out stale dummy tickets)
-    const savedComplaints = localStorage.getItem('foodies_complaints');
-    if (savedComplaints) {
-      try {
-        const parsed = JSON.parse(savedComplaints);
-        if (Array.isArray(parsed) && parsed.length > 0) {
-          const cleanComplaints = parsed.filter(
-            (c: Complaint) => c.id !== 'cmp-101' && c.id !== 'cmp-102' && c.orderNumber !== 'FC-9999' && c.orderNumber !== 'FC-4352'
-          );
-          setComplaints(cleanComplaints);
-          localStorage.setItem('foodies_complaints', JSON.stringify(cleanComplaints));
+      const savedNotifSettings = localStorage.getItem('foodies_notification_settings');
+      if (savedNotifSettings) {
+        const p = JSON.parse(savedNotifSettings);
+        if (p && typeof p === 'object') {
+          const mergedNotifSettings = mergeNotificationSettings(DEFAULT_NOTIFICATION_SETTINGS, p);
+          setNotificationSettings(mergedNotifSettings);
+          store.dispatch(setReduxNotificationSettings(mergedNotifSettings));
         }
-      } catch (e) {}
-    }
+      }
+    } catch (e) { }
 
-    // Load persisted orders on first mount (filter out stale dummy orders if any)
+    // Always hydrate marketing banners, deals, footer routing settings, and categories from DB
+    fetch('/api/marketing')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (!data) return;
+        if (Array.isArray(data.heroBanners) && data.heroBanners.length > 0) {
+          setHeroBanners(data.heroBanners);
+          try {
+            localStorage.setItem('foodies_hero_banners', JSON.stringify(data.heroBanners));
+          } catch (e) { }
+        }
+        if (data.dealCard && data.dealCard.title) {
+          setDealCard(data.dealCard);
+          try {
+            localStorage.setItem('foodies_deal_card', JSON.stringify(data.dealCard));
+          } catch (e) { }
+        }
+        if (data.footerSettings) {
+          setFooterSettings((prev) => {
+            const cleaned: Record<string, any> = {};
+            Object.entries(data.footerSettings).forEach(([k, v]) => {
+              if (v !== null && v !== undefined) cleaned[k] = v;
+            });
+            let localHomeNotif: Record<string, any> = {};
+            try {
+              const rawHn = localStorage.getItem('foodies_web_home_notification');
+              if (rawHn) localHomeNotif = JSON.parse(rawHn) || {};
+            } catch { }
+            const merged = { ...prev, ...cleaned };
+            if (!cleaned.homeNotificationTitle && localHomeNotif.homeNotificationTitle) {
+              Object.assign(merged, localHomeNotif);
+            }
+            try {
+              localStorage.setItem('foodies_footer_settings', JSON.stringify(merged));
+            } catch (e) { }
+            return merged;
+          });
+        }
+        if (Array.isArray(data.categories) && data.categories.length > 0) {
+          setCategories(data.categories);
+          try {
+            localStorage.setItem('foodies_categories', JSON.stringify(data.categories));
+          } catch (e) { }
+        }
+      })
+      .catch(() => { });
+
+    // Hydrate per-receiver independent notification settings from backend
+    fetch('/api/notifications?limit=1')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data?.receiverSettingsMap && typeof data.receiverSettingsMap === 'object') {
+          setReceiverNotificationSettingsMap((prev) => {
+            const mergedMap = { ...prev, ...data.receiverSettingsMap };
+            try {
+              localStorage.setItem('foodies_receiver_notif_settings_map', JSON.stringify(mergedMap));
+            } catch { }
+            return mergedMap;
+          });
+        }
+      })
+      .catch(() => { });
+
+    // Load persisted orders on first mount (filter out stale dummy/test orders if any)
     const savedOrders = localStorage.getItem('foodies_orders_live');
 
     if (savedOrders) {
@@ -910,11 +1599,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           const cleanOrders = parsed.filter(
             (o: Order) =>
               !o.id?.startsWith('ord-seed-') &&
-              !o.id?.startsWith('ord-10') &&
+              !o.id?.startsWith('ord-del-') &&
+              !o.id?.startsWith('ord-dine-') &&
+              !o.id?.startsWith('ord-take-') &&
+              o.id !== 'ord-101' &&
+              o.id !== 'ord-102' &&
               o.id !== 'ord-seed-1' &&
               o.id !== 'ord-seed-2' &&
               o.id !== 'ord-seed-3' &&
               o.id !== 'ord-seed-4' &&
+              o.orderNumber !== 'FC-8821' &&
+              o.orderNumber !== 'FC-8822' &&
+              o.orderNumber !== 'FC-6202' &&
+              o.orderNumber !== 'FC-6101' &&
+              o.orderNumber !== 'FC-6102' &&
               o.orderNumber !== 'FC-6744' &&
               o.orderNumber !== 'FC-7819' &&
               o.orderNumber !== 'FC-8812' &&
@@ -928,7 +1626,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             setOrders([]);
           }
         }
-      } catch (e) {}
+      } catch (e) { }
     }
 
     // Sanitize shifts, refunds, and table sessions from localStorage
@@ -970,46 +1668,67 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (savedShifts) {
         const parsed = JSON.parse(savedShifts);
         if (Array.isArray(parsed)) {
-          const clean = parsed
-            .filter((s: CashShift) => s.id !== 'sh-yesterday-1' && s.id !== 'sh-yesterday-2')
-            .map((s: CashShift) =>
-              s.id === 'sh-today-1' && (s.cashCollected === 34200 || s.openingFloat === 5000 || s.expectedCash === 5000)
-                ? { ...s, openingFloat: 0, cashCollected: 0, expectedCash: 0 }
-                : s
-            );
+          const clean = parsed.filter((s: CashShift) => s.id !== 'sh-yesterday-1' && s.id !== 'sh-yesterday-2');
           setShifts(clean.length > 0 ? clean : INITIAL_SHIFTS);
           localStorage.setItem('foodies_shifts_live', JSON.stringify(clean.length > 0 ? clean : INITIAL_SHIFTS));
         }
       }
-    } catch (e) {}
+    } catch (e) { }
 
-    // Load persisted menu items on first mount with smart fallback merge
+    // Load persisted menu items without reverting staff edits or re-inserting deleted items
     const savedMenu = localStorage.getItem('foodies_menu_items');
     if (savedMenu) {
       try {
         const parsed = JSON.parse(savedMenu);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const existingIds = new Set(parsed.map((p: any) => p.id));
-          const missingDefaults = INITIAL_MENU.filter((m) => !existingIds.has(m.id));
-          const fullMerged = [...parsed, ...missingDefaults];
-          setMenuItems(fullMerged);
-          localStorage.setItem('foodies_menu_items', JSON.stringify(fullMerged));
+          const initialMap = new Map(INITIAL_MENU.map((m) => [m.id, m]));
+          const preserved = parsed.map((p: any) => {
+            const canonical = initialMap.get(p.id);
+            if (!canonical) return p;
+            return {
+              ...canonical,
+              ...p,
+              branchAvailability: { ...canonical.branchAvailability, ...(p.branchAvailability || {}) },
+              branchPriceOverrides: { ...canonical.branchPriceOverrides, ...(p.branchPriceOverrides || {}) },
+            };
+          });
+          setMenuItems(preserved);
+          localStorage.setItem('foodies_menu_items', JSON.stringify(preserved));
         }
-      } catch (e) {}
+      } catch (e) { }
     } else {
+      setMenuItems(INITIAL_MENU);
       localStorage.setItem('foodies_menu_items', JSON.stringify(INITIAL_MENU));
     }
+
+    // Always fetch latest menu catalog from backend on mount to ensure 100% database parity
+    fetch('/api/menu')
+      .then((res) => (res.ok ? res.json() : null))
+      .then((data) => {
+        if (data && Array.isArray(data.menuItems) && data.menuItems.length > 0) {
+          setMenuItems(data.menuItems);
+          try {
+            localStorage.setItem('foodies_menu_items', JSON.stringify(data.menuItems));
+          } catch (e) { }
+        }
+        if (data && Array.isArray(data.categories) && data.categories.length > 0) {
+          setCategories(data.categories);
+          try {
+            localStorage.setItem('foodies_categories', JSON.stringify(data.categories));
+          } catch (e) { }
+        }
+      })
+      .catch(() => { });
 
     const savedCats = localStorage.getItem('foodies_categories');
     if (savedCats) {
       try {
         const parsed = JSON.parse(savedCats);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const unionCats = Array.from(new Set([...INITIAL_CATEGORIES, ...parsed]));
-          setCategories(unionCats);
-          localStorage.setItem('foodies_categories', JSON.stringify(unionCats));
+          setCategories(parsed);
+          localStorage.setItem('foodies_categories', JSON.stringify(parsed));
         }
-      } catch (e) {}
+      } catch (e) { }
     } else {
       localStorage.setItem('foodies_categories', JSON.stringify(INITIAL_CATEGORIES));
     }
@@ -1027,7 +1746,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           }));
           setTables(cleaned);
         }
-      } catch (e) {}
+      } catch (e) { }
     }
 
     // Load persisted user on first mount with strict staff vs customer isolation
@@ -1047,17 +1766,33 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                 setCurrentRole(parsedStaff.role);
               }
             }
-          } catch (e) {}
+          } catch (e) { }
         }
       } else {
         const savedUser = localStorage.getItem('foodies_customer_user');
+        const loginTimeStr = localStorage.getItem('foodies_customer_login_time');
         if (savedUser) {
           try {
             const parsedUser = JSON.parse(savedUser);
             if (parsedUser && parsedUser.name && parsedUser.name !== 'Guest Customer' && parsedUser.role === 'customer') {
-              setCurrentUser(parsedUser);
+              const loginTime = loginTimeStr ? Number(loginTimeStr) : null;
+              if (loginTime && !isNaN(loginTime) && Date.now() - loginTime > 24 * 60 * 60 * 1000) {
+                localStorage.removeItem('foodies_customer_user');
+                localStorage.removeItem('foodies_customer_session');
+                localStorage.removeItem('foodies_customer_login_time');
+                localStorage.removeItem('foodies_customer_order_ids');
+                localStorage.removeItem('foodies_customer_history_cache');
+                setCurrentUser(GUEST_CUSTOMER);
+                store.dispatch(setReduxUser(GUEST_CUSTOMER));
+              } else {
+                if (!loginTime || isNaN(loginTime)) {
+                  localStorage.setItem('foodies_customer_login_time', Date.now().toString());
+                }
+                setCurrentUser(parsedUser);
+                store.dispatch(setReduxUser(parsedUser));
+              }
             }
-          } catch (e) {}
+          } catch (e) { }
         }
       }
     }
@@ -1076,9 +1811,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const a =
           Math.sin(dLat / 2) * Math.sin(dLat / 2) +
           Math.cos((userLat * Math.PI) / 180) *
-            Math.cos((bLat * Math.PI) / 180) *
-            Math.sin(dLon / 2) *
-            Math.sin(dLon / 2);
+          Math.cos((bLat * Math.PI) / 180) *
+          Math.sin(dLon / 2) *
+          Math.sin(dLon / 2);
         const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
         const dist = R * c;
         if (dist < minDistance) {
@@ -1093,11 +1828,26 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
     };
 
-    if ('geolocation' in navigator) {
+    const hasStoredCoords =
+      typeof window !== 'undefined' && Boolean(localStorage.getItem('foodies_customer_coordinates'));
+
+    if (hasStoredCoords) {
+      try {
+        const stored = JSON.parse(localStorage.getItem('foodies_customer_coordinates') || '');
+        if (stored && typeof stored.lat === 'number' && typeof stored.lng === 'number') {
+          setCustomerCoordinates(stored);
+          selectNearest(stored.lat, stored.lng);
+        }
+      } catch (e) { }
+    } else if ('geolocation' in navigator) {
       navigator.geolocation.getCurrentPosition(
         (pos) => {
-          setCustomerCoordinates({ lat: pos.coords.latitude, lng: pos.coords.longitude });
-          selectNearest(pos.coords.latitude, pos.coords.longitude);
+          const detected = {
+            lat: Number(pos.coords.latitude.toFixed(6)),
+            lng: Number(pos.coords.longitude.toFixed(6)),
+          };
+          setCustomerCoordinates(detected);
+          selectNearest(detected.lat, detected.lng);
         },
         () => {
           setCustomerCoordinates({ lat: 31.5204, lng: 74.3587 });
@@ -1121,16 +1871,103 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setBranches(event.data.payload);
         }
         if (event.data?.type === 'SYNC_ORDERS' && Array.isArray(event.data.payload)) {
-          setOrders(event.data.payload);
+          setOrders((prev) => {
+            const map = new Map<string, Order>();
+            prev.forEach((o) => map.set(o.id, o));
+            const now = Date.now();
+            event.data.payload.forEach((inc: Order) => {
+              const existing = map.get(inc.id) || (inc.orderNumber ? map.get(inc.orderNumber) : undefined);
+              if (existing) {
+                const existingRank = STATUS_RANK[existing.status] || 0;
+                const incomingRank = STATUS_RANK[inc.status] || 0;
+                const inFlight = inFlightStatusRef.current.get(inc.id) || inFlightStatusRef.current.get(inc.orderNumber);
+                const isRecentInFlight = inFlight && (now - inFlight.timestamp < 15000);
+
+                const isLocalCancelled = existing.status === 'cancelled' || (isRecentInFlight && inFlight?.status === 'cancelled');
+                const preserveLocal =
+                  isLocalCancelled ||
+                  (existing.status !== 'cancelled' && inc.status !== 'cancelled' && existingRank > incomingRank) ||
+                  (isRecentInFlight && inFlight?.status !== inc.status && (inFlight?.status ? (STATUS_RANK[inFlight.status] || 0) : 0) >= incomingRank);
+
+                const isDeliveryFinished =
+                  inc.status === 'delivered' ||
+                  inc.status === 'completed' ||
+                  inc.riderStatus === 'delivered' ||
+                  inFlight?.riderStatus === 'delivered' ||
+                  inFlight?.status === 'completed' ||
+                  inFlight?.status === 'delivered' ||
+                  ((inc.type === 'delivery' || existing.type === 'delivery') &&
+                    (inc.paymentStatus === 'paid' ||
+                      Boolean(inc.paymentCollected) ||
+                      inFlight?.paymentStatus === 'paid' ||
+                      Boolean(inFlight?.paymentCollected) ||
+                      existing.paymentStatus === 'paid' ||
+                      Boolean(existing.paymentCollected)));
+
+                const resolvedStatus = isLocalCancelled
+                  ? 'cancelled'
+                  : isDeliveryFinished
+                    ? 'completed'
+                    : preserveLocal
+                      ? (isRecentInFlight && inFlight?.status ? inFlight.status : existing.status)
+                      : inc.status;
+
+                map.set(inc.id, {
+                  ...inc,
+                  status: resolvedStatus,
+                  paymentStatus: isDeliveryFinished ? 'paid' : (inc.paymentStatus || existing.paymentStatus),
+                  paymentCollected: isDeliveryFinished ? true : Boolean(inc.paymentCollected || existing.paymentCollected),
+                  sentToKitchen: existing.sentToKitchen || inc.sentToKitchen || inFlight?.sentToKitchen,
+                  sentToKitchenAt: inc.sentToKitchenAt || existing.sentToKitchenAt,
+                  preparationStartedAt: inc.preparationStartedAt || existing.preparationStartedAt,
+                  completedAt: isDeliveryFinished ? (inc.completedAt || new Date().toISOString()) : (inc.completedAt || existing.completedAt),
+                  deliveredAt: isDeliveryFinished ? (inc.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
+                  assignedRiderId: inc.assignedRiderId || existing.assignedRiderId || inFlight?.assignedRiderId,
+                  assignedRiderName: inc.assignedRiderName || existing.assignedRiderName || inFlight?.assignedRiderName,
+                  riderStatus: isDeliveryFinished ? 'delivered' : (inc.riderStatus || existing.riderStatus || inFlight?.riderStatus),
+                });
+              } else {
+                const isDeliveryFinished =
+                  inc.status === 'delivered' ||
+                  inc.status === 'completed' ||
+                  inc.riderStatus === 'delivered';
+                map.set(inc.id, isDeliveryFinished ? {
+                  ...inc,
+                  status: 'completed',
+                  riderStatus: 'delivered',
+                  paymentStatus: 'paid',
+                  paymentCollected: true,
+                  completedAt: inc.completedAt || new Date().toISOString(),
+                  deliveredAt: inc.deliveredAt || new Date().toISOString(),
+                } : inc);
+              }
+            });
+            return Array.from(map.values()).sort(
+              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            );
+          });
+        }
+        if (event.data?.type === 'SYNC_BRANCHES' && Array.isArray(event.data.payload)) {
+          setBranches(event.data.payload);
+          store.dispatch(setReduxBranches(event.data.payload));
+        }
+        if (event.data?.type === 'BRANCH_UPDATED' && event.data.payload) {
+          const b = event.data.payload;
+          setBranches((prev) => {
+            const next = prev.map((item) =>
+              item.id === b.id || normalizeBranchId(item.id) === normalizeBranchId(b.id)
+                ? { ...item, ...b }
+                : item
+            );
+            store.dispatch(setReduxBranches(next));
+            return next;
+          });
         }
         if (event.data?.type === 'SYNC_TABLES' && Array.isArray(event.data.payload)) {
           setTables(event.data.payload);
         }
         if (event.data?.type === 'SYNC_MENU' && Array.isArray(event.data.payload)) {
           setMenuItems(event.data.payload);
-        }
-        if (event.data?.type === 'SYNC_COMPLAINTS' && Array.isArray(event.data.payload)) {
-          setComplaints(event.data.payload);
         }
         if (event.data?.type === 'SYNC_SHIFTS' && Array.isArray(event.data.payload)) {
           setShifts(event.data.payload);
@@ -1157,6 +1994,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (p.footerSettings) setFooterSettings(p.footerSettings);
           if (Array.isArray(p.categories)) setCategories(p.categories);
         }
+        if (event.data?.type === 'SYNC_NOTIFICATION_SETTINGS' && event.data.payload) {
+          const p = event.data.payload;
+          const merged = mergeNotificationSettings(DEFAULT_NOTIFICATION_SETTINGS, p);
+          setNotificationSettings(merged);
+          store.dispatch(setReduxNotificationSettings(merged));
+        }
       };
     }
 
@@ -1168,7 +2011,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (Array.isArray(parsed)) {
             setBranches(parsed);
           }
-        } catch (err) {}
+        } catch (err) { }
       }
       if (e.key === 'foodies_orders_live' && e.newValue) {
         try {
@@ -1176,13 +2019,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (Array.isArray(parsed)) {
             setOrders(parsed);
           }
-        } catch (err) {}
+        } catch (err) { }
       }
       if (e.key === 'foodies_manager_access_requests' && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
           if (parsed) setManagerAccessRequests(parsed);
-        } catch (err) {}
+        } catch (err) { }
       }
       if (e.key === 'foodies_tables_live' && e.newValue) {
         try {
@@ -1190,7 +2033,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (Array.isArray(parsed)) {
             setTables(parsed);
           }
-        } catch (err) {}
+        } catch (err) { }
       }
       if (e.key === 'foodies_menu_items' && e.newValue) {
         try {
@@ -1198,66 +2041,296 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           if (Array.isArray(parsed)) {
             setMenuItems(parsed);
           }
-        } catch (err) {}
-      }
-      if (e.key === 'foodies_complaints' && e.newValue) {
-        try {
-          const parsed = JSON.parse(e.newValue);
-          if (Array.isArray(parsed)) {
-            setComplaints(parsed);
-          }
-        } catch (err) {}
+        } catch (err) { }
       }
       if (e.key === 'foodies_shifts_live' && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
           if (Array.isArray(parsed)) setShifts(parsed);
-        } catch (err) {}
+        } catch (err) { }
       }
       if (e.key === 'foodies_refunds_live' && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
           if (Array.isArray(parsed)) setRefundRequests(parsed);
-        } catch (err) {}
+        } catch (err) { }
       }
       if (e.key === 'foodies_table_sessions_live' && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
           if (Array.isArray(parsed)) setTableSessions(parsed);
-        } catch (err) {}
+        } catch (err) { }
       }
       if (e.key === 'foodies_users_live' && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
           if (Array.isArray(parsed)) setUsers(parsed);
-        } catch (err) {}
+        } catch (err) { }
       }
       if (e.key === 'foodies_hero_banners' && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
           if (Array.isArray(parsed)) setHeroBanners(parsed);
-        } catch (err) {}
+        } catch (err) { }
       }
       if (e.key === 'foodies_deal_card' && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
           if (parsed) setDealCard(parsed);
-        } catch (err) {}
+        } catch (err) { }
       }
       if (e.key === 'foodies_footer_settings' && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
           if (parsed) setFooterSettings(parsed);
-        } catch (err) {}
+        } catch (err) { }
       }
       if (e.key === 'foodies_categories' && e.newValue) {
         try {
           const parsed = JSON.parse(e.newValue);
           if (Array.isArray(parsed)) setCategories(parsed);
-        } catch (err) {}
+        } catch (err) { }
+      }
+      if (e.key === 'foodies_notification_settings' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed && typeof parsed === 'object') {
+            const merged = mergeNotificationSettings(DEFAULT_NOTIFICATION_SETTINGS, parsed);
+            setNotificationSettings(merged);
+            store.dispatch(setReduxNotificationSettings(merged));
+          }
+        } catch (err) { }
+      }
+      if (e.key === 'foodies_receiver_notif_settings_map' && e.newValue) {
+        try {
+          const parsed = JSON.parse(e.newValue);
+          if (parsed && typeof parsed === 'object') {
+            setReceiverNotificationSettingsMap(parsed);
+          }
+        } catch { }
       }
     };
     window.addEventListener('storage', handleStorage);
+
+    // Fallback Backend Polling (2.5s fast interval + SSE for sub-second updates)
+    let lastLocalEtag = '';
+    const syncWithBackend = async () => {
+      try {
+        const bId = currentRole === 'platform_owner' ? 'all' : normalizeBranchId(currentBranchId);
+        let custId = '';
+        let custPhone = '';
+        let orderIdsQuery = '';
+        if (currentRole === 'customer') {
+          if (currentUser?.id && currentUser.id !== 'user-guest') {
+            custId = `&customerId=${encodeURIComponent(currentUser.id)}`;
+          }
+          if (currentUser?.phone) {
+            custPhone = `&customerPhone=${encodeURIComponent(currentUser.phone)}`;
+          }
+          if (typeof window !== 'undefined') {
+            try {
+              const myIds = JSON.parse(localStorage.getItem('foodies_customer_order_ids') || '[]');
+              if (Array.isArray(myIds) && myIds.length > 0) {
+                orderIdsQuery = `&orderIds=${encodeURIComponent(myIds.slice(0, 30).join(','))}`;
+              }
+            } catch { }
+          }
+        }
+        const headers: Record<string, string> = {
+          ...getClientAuthHeaders(),
+        };
+        if (lastLocalEtag) {
+          headers['If-None-Match'] = lastLocalEtag;
+        }
+        const res = await fetch(
+          `/api/sync?scope=live&role=${encodeURIComponent(currentRole)}&branchId=${encodeURIComponent(bId)}${custId}${custPhone}${orderIdsQuery}&since=1`,
+          { headers }
+        );
+        if (res.status === 304) return;
+        if (res.ok) {
+          const etag = res.headers.get('ETag');
+          if (etag) lastLocalEtag = etag;
+          const data = await res.json();
+          if (Array.isArray(data.orders)) {
+            // Clean up stale in-flight entries (> 20s)
+            const now = Date.now();
+            for (const [key, val] of inFlightStatusRef.current.entries()) {
+              if (now - val.timestamp > 20000) {
+                inFlightStatusRef.current.delete(key);
+              }
+            }
+
+            // Only update orders when sync payload contains order records.
+            // Never blank out active orders on empty poll response to prevent orders temporarily vanishing.
+            if (data.orders.length > 0) {
+              setOrders((prev) => {
+                const map = new Map<string, Order>();
+                const orderNumToId = new Map<string, string>();
+                prev.forEach((o) => {
+                  map.set(o.id, o);
+                  if (o.orderNumber) orderNumToId.set(o.orderNumber, o.id);
+                });
+
+                data.orders.forEach((inc: Order) => {
+                  const matchedId = map.has(inc.id)
+                    ? inc.id
+                    : (inc.orderNumber && orderNumToId.get(inc.orderNumber)) || undefined;
+                  const existing = matchedId ? map.get(matchedId) : undefined;
+                  if (existing) {
+                    const existingRank = STATUS_RANK[existing.status] || 0;
+                    const incomingRank = STATUS_RANK[inc.status] || 0;
+                    const inFlight = inFlightStatusRef.current.get(inc.id) || inFlightStatusRef.current.get(inc.orderNumber);
+                    const isRecentInFlight = inFlight && (now - inFlight.timestamp < 15000);
+
+                    const isLocalCancelled = existing.status === 'cancelled' || (isRecentInFlight && inFlight?.status === 'cancelled');
+                    const preserveLocalStatus =
+                      isLocalCancelled ||
+                      (existing.status !== 'cancelled' && inc.status !== 'cancelled' && existingRank > incomingRank) ||
+                      (isRecentInFlight && inFlight?.status !== inc.status && (inFlight?.status ? (STATUS_RANK[inFlight.status] || 0) : 0) >= incomingRank);
+
+                    const isDeliveryFinished =
+                      inc.status === 'delivered' ||
+                      inc.status === 'completed' ||
+                      inc.riderStatus === 'delivered' ||
+                      inFlight?.riderStatus === 'delivered' ||
+                      inFlight?.status === 'completed' ||
+                      inFlight?.status === 'delivered' ||
+                      ((inc.type === 'delivery' || existing.type === 'delivery') &&
+                        (inc.paymentStatus === 'paid' ||
+                          Boolean(inc.paymentCollected) ||
+                          inFlight?.paymentStatus === 'paid' ||
+                          Boolean(inFlight?.paymentCollected) ||
+                          existing.paymentStatus === 'paid' ||
+                          Boolean(existing.paymentCollected)));
+
+                    const resolvedStatus = isLocalCancelled
+                      ? 'cancelled'
+                      : isDeliveryFinished
+                        ? 'completed'
+                        : preserveLocalStatus
+                          ? (isRecentInFlight && inFlight?.status ? inFlight.status : existing.status)
+                          : inc.status;
+                    const resolvedSentToKitchen = existing.sentToKitchen || inc.sentToKitchen || (inFlight?.sentToKitchen);
+
+                    const targetKey = inc.id || existing.id;
+                    if (matchedId && matchedId !== targetKey) {
+                      map.delete(matchedId);
+                    }
+                    map.set(targetKey, {
+                      ...inc,
+                      id: targetKey,
+                      status: resolvedStatus,
+                      paymentStatus: isDeliveryFinished
+                        ? 'paid'
+                        : (isRecentInFlight && inFlight?.paymentStatus)
+                          ? inFlight.paymentStatus
+                          : existing.paymentStatus === 'paid' || inc.paymentStatus === 'paid'
+                            ? 'paid'
+                            : inc.paymentStatus || existing.paymentStatus,
+                      paymentCollected: Boolean(
+                        isDeliveryFinished ||
+                        (isRecentInFlight && inFlight?.paymentCollected) ||
+                        existing.paymentCollected ||
+                        inc.paymentCollected ||
+                        (existing.paymentStatus === 'paid' || inc.paymentStatus === 'paid')
+                      ),
+                      sentToKitchen: resolvedSentToKitchen,
+                      sentToKitchenAt: inc.sentToKitchenAt || existing.sentToKitchenAt,
+                      preparationStartedAt: inc.preparationStartedAt || existing.preparationStartedAt,
+                      completedAt: isDeliveryFinished ? (inc.completedAt || new Date().toISOString()) : (inc.completedAt || existing.completedAt),
+                      deliveredAt: isDeliveryFinished ? (inc.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
+                      assignedRiderId: inc.assignedRiderId || existing.assignedRiderId || inFlight?.assignedRiderId,
+                      assignedRiderName: inc.assignedRiderName || existing.assignedRiderName || inFlight?.assignedRiderName,
+                      riderStatus: isDeliveryFinished ? 'delivered' : (inc.riderStatus || existing.riderStatus || inFlight?.riderStatus),
+                    });
+                  } else {
+                    const isDeliveryFinished =
+                      inc.status === 'delivered' ||
+                      inc.status === 'completed' ||
+                      inc.riderStatus === 'delivered';
+                    map.set(inc.id, isDeliveryFinished ? {
+                      ...inc,
+                      status: 'completed',
+                      riderStatus: 'delivered',
+                      paymentStatus: 'paid',
+                      paymentCollected: true,
+                      completedAt: inc.completedAt || new Date().toISOString(),
+                      deliveredAt: inc.deliveredAt || new Date().toISOString(),
+                    } : inc);
+                  }
+                });
+
+                const merged = Array.from(map.values()).sort(
+                  (a, b) => (new Date(b.createdAt).getTime() || 0) - (new Date(a.createdAt).getTime() || 0)
+                );
+                try {
+                  localStorage.setItem('foodies_orders_live', JSON.stringify(merged));
+                } catch (e) { }
+                return merged;
+              });
+            }
+          }
+          if (Array.isArray(data.tables) && data.tables.length > 0) {
+            setTables(data.tables);
+          }
+          if (Array.isArray(data.shifts) && data.shifts.length > 0) {
+            setShifts(data.shifts);
+          }
+          if (Array.isArray(data.refunds)) {
+            setRefundRequests(data.refunds);
+          }
+          if (Array.isArray(data.branches) && data.branches.length > 0) {
+            setBranches((prev) => {
+              const updated = prev.map((b) => {
+                const match = data.branches.find((dbB: Branch) => dbB.id === b.id || normalizeBranchId(dbB.id) === normalizeBranchId(b.id));
+                return match ? { ...b, ...match } : b;
+              });
+              try {
+                localStorage.setItem('foodies_branches_live', JSON.stringify(updated));
+              } catch (e) { }
+              store.dispatch(setReduxBranches(updated));
+              return updated;
+            });
+          }
+          if (Array.isArray(data.menuItems) && data.menuItems.length > 0) {
+            setMenuItems(data.menuItems);
+            try {
+              localStorage.setItem('foodies_menu_items', JSON.stringify(data.menuItems));
+            } catch (e) { }
+          }
+          if (Array.isArray(data.categories) && data.categories.length > 0) {
+            setCategories(data.categories);
+            try {
+              localStorage.setItem('foodies_categories', JSON.stringify(data.categories));
+            } catch (e) { }
+          }
+          if (Array.isArray(data.announcements)) {
+            setAnnouncements(data.announcements);
+            store.dispatch(setReduxAnnouncements(data.announcements));
+          }
+          if (data.notificationSettings && typeof data.notificationSettings === 'object') {
+            const merged = mergeNotificationSettings(DEFAULT_NOTIFICATION_SETTINGS, data.notificationSettings);
+            setNotificationSettings(merged);
+            store.dispatch(setReduxNotificationSettings(merged));
+            try {
+              localStorage.setItem('foodies_notification_settings', JSON.stringify(merged));
+            } catch (e) { }
+          }
+          if (data.receiverNotificationSettingsMap && typeof data.receiverNotificationSettingsMap === 'object') {
+            setReceiverNotificationSettingsMap((prev) => {
+              const mergedMap = { ...prev, ...data.receiverNotificationSettingsMap };
+              try {
+                localStorage.setItem('foodies_receiver_notif_settings_map', JSON.stringify(mergedMap));
+              } catch { }
+              return mergedMap;
+            });
+          }
+        }
+      } catch (err) { }
+    };
+
+    // Unified real-time updates are pushed via Redux RTK syncEngine (SSE + BroadcastChannel)
+    syncWithBackend();
 
     return () => {
       if (channel) {
@@ -1266,7 +2339,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       }
       window.removeEventListener('storage', handleStorage);
     };
-  }, []);
+  }, [currentRole, currentBranchId]);
 
   // High-performance Redux Toolkit store synchronization & background fast sync
   useEffect(() => {
@@ -1285,7 +2358,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setOrders(state.orders.orders);
       }
       if (state.cart.items !== prevReduxState.cart.items) {
-        setCart(state.cart.items);
+        setCart((current) => {
+          if (current === state.cart.items || JSON.stringify(current) === JSON.stringify(state.cart.items)) {
+            return current;
+          }
+          return state.cart.items;
+        });
       }
       if (state.cafe.branches !== prevReduxState.cafe.branches) {
         setBranches(state.cafe.branches);
@@ -1305,9 +2383,6 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (state.cafe.refundRequests !== prevReduxState.cafe.refundRequests) {
         setRefundRequests(state.cafe.refundRequests);
       }
-      if (state.cafe.complaints !== prevReduxState.cafe.complaints) {
-        setComplaints(state.cafe.complaints);
-      }
       if (state.cafe.tableSessions !== prevReduxState.cafe.tableSessions) {
         setTableSessions(state.cafe.tableSessions);
       }
@@ -1320,8 +2395,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (state.cafe.dealCard !== prevReduxState.cafe.dealCard) {
         setDealCard(state.cafe.dealCard);
       }
+      if (state.cafe.announcements !== prevReduxState.cafe.announcements) {
+        setAnnouncements(state.cafe.announcements);
+      }
+      if (state.cafe.notifications !== prevReduxState.cafe.notifications) {
+        setAllNotifications(state.cafe.notifications);
+      }
+      if (state.cafe.notificationSettings !== prevReduxState.cafe.notificationSettings) {
+        setNotificationSettings(state.cafe.notificationSettings);
+        try {
+          localStorage.setItem('foodies_notification_settings', JSON.stringify(state.cafe.notificationSettings));
+        } catch (e) { }
+      }
       if (state.cafe.footerSettings !== prevReduxState.cafe.footerSettings) {
         setFooterSettings(state.cafe.footerSettings);
+      }
+      if (state.cafe.currentBranchId !== prevReduxState.cafe.currentBranchId) {
+        setCurrentBranchIdState(state.cafe.currentBranchId);
+      }
+      if (state.ui.currentRole !== prevReduxState.ui.currentRole) {
+        setCurrentRole(state.ui.currentRole);
+      }
+      if (state.ui.currentUser !== prevReduxState.ui.currentUser) {
+        if (state.ui.currentUser?.name !== 'Guest Customer' || prevReduxState.ui.currentUser?.name === 'Guest Customer') {
+          setCurrentUser(state.ui.currentUser);
+        }
       }
 
       prevReduxState = state;
@@ -1340,7 +2438,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     if (typeof window === 'undefined') return;
     try {
       localStorage.setItem('foodies_cart', JSON.stringify(cart));
-    } catch (e) {}
+    } catch (e) { }
   }, [cart]);
 
   // Auto-forward timer effect for orders directed to Customer Services
@@ -1378,10 +2476,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
               try {
                 fetch('/api/orders', {
                   method: 'PATCH',
-                  headers: { 'Content-Type': 'application/json' },
+                  headers: getClientAuthHeaders(),
                   body: JSON.stringify({ id: matched.id, status: 'accepted', sentToKitchen: true }),
-                }).catch(() => {});
-              } catch (e) {}
+                }).catch(() => { });
+              } catch (e) { }
             }
           });
           addToast({
@@ -1395,6 +2493,34 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }, 1000);
 
+    return () => clearInterval(timer);
+  }, []);
+
+  // End-of-day cancelled orders auto-purge effect (deletes cancelled orders whose day has ended)
+  useEffect(() => {
+    const purgePastCancelled = async () => {
+      try {
+        fetch('/api/orders?purge=end_of_day', {
+          method: 'DELETE',
+          headers: getClientAuthHeaders(),
+        }).catch(() => { });
+      } catch (e) { }
+
+      setOrders((prev) => {
+        const remaining = prev.filter(
+          (o) => !((o.status === 'cancelled' || (o.status as string) === 'canceled') && isOrderDayEnded(o.createdAt))
+        );
+        if (remaining.length !== prev.length) {
+          try {
+            localStorage.setItem('foodies_orders_live', JSON.stringify(remaining));
+          } catch (e) { }
+        }
+        return remaining;
+      });
+    };
+
+    purgePastCancelled();
+    const timer = setInterval(purgePastCancelled, 10 * 60 * 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -1433,10 +2559,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           toast.type === 'error' || currentActive.type === 'error'
             ? 'error'
             : toast.type === 'warning' || currentActive.type === 'warning'
-            ? 'warning'
-            : toast.type === 'success' || currentActive.type === 'success'
-            ? 'success'
-            : toast.type;
+              ? 'warning'
+              : toast.type === 'success' || currentActive.type === 'success'
+                ? 'success'
+                : toast.type;
 
         lastToastRef.current = { title: preferredTitle, message: combinedMessage, timestamp: now };
 
@@ -1469,29 +2595,65 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   // Cart actions
   const addToCart = (item: OrderItem) => {
+    // Check branch availability of this item
+    const dish = menuItems.find(
+      (m) => m.id === item.menuItemId || m.name.toLowerCase() === item.name.toLowerCase()
+    );
+    if (hasSelectedBranch) {
+      const isAvailAtBranch = dish ? (dish.branchAvailability?.[currentBranchId] !== false && dish.isAvailable !== false) : true;
+      if (!isAvailAtBranch) {
+        setBranchUnavailableModal({
+          visible: true,
+          branchName: currentBranch?.name || 'this branch',
+          itemNames: [item.name],
+        });
+        return;
+      }
+    }
+
+    const itemQty = Number(item.quantity) > 0 ? Number(item.quantity) : 1;
+    let unitPrice = Number(item.unitPrice) || 0;
+    if (dish) {
+      const baseEffective = hasSelectedBranch
+        ? ((dish.branchPriceOverrides && dish.branchPriceOverrides[currentBranchId] !== undefined)
+          ? Number(dish.branchPriceOverrides[currentBranchId])
+          : Number(dish.basePrice) || 0)
+        : getItemMinPrice(dish);
+      let calculatedUnitPrice = baseEffective;
+      if (item.size && dish.sizes) {
+        const matchSize = dish.sizes.find((s) => s.name === item.size);
+        if (matchSize) calculatedUnitPrice += Number(matchSize.priceDelta) || 0;
+      }
+      if (item.extras && dish.extras) {
+        item.extras.forEach((ext) => {
+          const matchExtra = dish.extras?.find((e) => e.name === ext);
+          if (matchExtra) calculatedUnitPrice += Number(matchExtra.price) || 0;
+        });
+      }
+      unitPrice = calculatedUnitPrice;
+    }
+
+    const itemWithPrice: OrderItem = { ...item, unitPrice, quantity: itemQty };
+
     setCart((prev) => {
       const existing = prev.find(
         (i) => i.menuItemId === item.menuItemId && i.size === item.size && JSON.stringify(i.extras) === JSON.stringify(item.extras)
       );
-      const nextCart = existing
-        ? prev.map((i) => (i === existing ? { ...i, quantity: i.quantity + item.quantity } : i))
-        : [...prev, item];
-      try {
-        localStorage.setItem('foodies_cart', JSON.stringify(nextCart));
-        store.dispatch(setReduxCart(nextCart));
-      } catch (e) {}
-      return nextCart;
+      if (existing) {
+        return prev.map((i) => (i === existing ? { ...i, unitPrice, quantity: i.quantity + itemQty } : i));
+      }
+      return [...prev, itemWithPrice];
     });
     addToast({
       type: 'success',
       title: 'Added to Cart',
-      message: `${item.name} (x${item.quantity}) added.`,
+      message: `${item.name} (x${itemQty}) added.`,
     });
   };
 
   const updateCartItemQty = (itemId: string, delta: number) => {
     setCart((prev) => {
-      const nextCart = prev
+      return prev
         .map((i) => {
           if (i.id === itemId) {
             const newQty = i.quantity + delta;
@@ -1500,31 +2662,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           return i;
         })
         .filter(Boolean) as OrderItem[];
-      try {
-        localStorage.setItem('foodies_cart', JSON.stringify(nextCart));
-        store.dispatch(setReduxCart(nextCart));
-      } catch (e) {}
-      return nextCart;
     });
   };
 
   const removeFromCart = (itemId: string) => {
-    setCart((prev) => {
-      const nextCart = prev.filter((i) => i.id !== itemId);
-      try {
-        localStorage.setItem('foodies_cart', JSON.stringify(nextCart));
-        store.dispatch(setReduxCart(nextCart));
-      } catch (e) {}
-      return nextCart;
-    });
+    setCart((prev) => prev.filter((i) => i.id !== itemId));
   };
 
   const clearCart = () => {
-    try {
-      localStorage.setItem('foodies_cart', JSON.stringify([]));
-      store.dispatch(setReduxCart([]));
-    } catch (e) {}
     setCart([]);
+    setOrderType(null);
+    setHasConfirmedOrderType(false);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('foodies_cart');
+        sessionStorage.removeItem('foodies_order_type');
+        sessionStorage.removeItem('foodies_order_type_confirmed');
+      } catch (e) { }
+    }
   };
 
   // Place Order
@@ -1546,139 +2701,63 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isWalkIn?: boolean;
       notes?: string;
       customerCoordinates?: { lat: number; lng: number };
+      paymentStatus?: PaymentStatus;
+      paymentCollected?: boolean;
+      assignedWaiterId?: string;
+      assignedWaiterName?: string;
     }
   ): Order => {
     const orderItems = customItems && customItems.length > 0 ? customItems : [...cart];
     const subtotal = orderItems.reduce((acc, item) => acc + Number(item.unitPrice) * Number(item.quantity), 0);
     const method = paymentMethod || 'COD';
+    const isDigitalPrepaid =
+      method !== 'COD' &&
+      method !== 'Cash on Delivery (COD)' &&
+      !method.toLowerCase().includes('cash') &&
+      !method.toLowerCase().includes('unpaid');
+    const initialPaymentStatus: PaymentStatus =
+      options?.paymentStatus || (isDigitalPrepaid ? 'paid' : 'unpaid');
+    const isCollected = Boolean(options?.paymentCollected || initialPaymentStatus === 'paid');
     const routeToSupportFirst = footerSettings.orderRoutingSupportFirst ?? true;
     const autoMin = footerSettings.autoForwardKitchenMin ?? 3;
-    const isTimed = (footerSettings.autoForwardMode ?? 'timed') === 'timed';
-    const forwardTime = routeToSupportFirst && isTimed && autoMin > 0
-      ? new Date(Date.now() + autoMin * 60 * 1000).toISOString()
-      : undefined;
+    const forwardTime = new Date(Date.now() + Math.max(1, autoMin) * 60 * 1000).toISOString();
 
     const isStaffOrCashier = currentRole === 'cashier' || currentRole === 'branch_manager' || Boolean(options?.cashierId) || Boolean(options?.isWalkIn);
     const cashierId = options?.cashierId || (currentRole === 'cashier' ? (currentUser.id || 'user-cashier') : undefined);
     const cashierName = options?.cashierName || (currentRole === 'cashier' ? (currentUser.name || 'Bilal Farooq') : undefined);
     const isWalkIn = options?.isWalkIn ?? (currentRole === 'cashier' || Boolean(cashierId));
-    const targetCustomerId = options?.customerId || (isStaffOrCashier ? 'cust-walkin' : currentUser.id);
-    const targetCustomerPhone = options?.customerPhone || (isStaffOrCashier ? '+92 300 0000000' : currentUser.phone);
-    const cleanTargetPhone = targetCustomerPhone?.replace(/\s+/g, '');
-
-    // Look for existing active order from same account for the same fulfillment type
-    let existingActiveOrder: Order | undefined = undefined;
-
-    if (!isWalkIn && (cleanTargetPhone || targetCustomerId)) {
-      if (type === 'dine_in') {
-        // While the first order is still pending for dine-in, add to same order
-        existingActiveOrder = orders.find((o) => {
-          if (o.type !== 'dine_in') return false;
-          if (o.status === 'completed' || o.status === 'cancelled') return false;
-          if (o.branchId !== currentBranchId) return false;
-          const oPhone = o.customerPhone?.replace(/\s+/g, '');
-          if (cleanTargetPhone && oPhone && oPhone === cleanTargetPhone) return true;
-          if (targetCustomerId && o.customerId && o.customerId === targetCustomerId) return true;
-          return false;
-        });
-      } else if (type === 'takeaway' || type === 'delivery') {
-        // For takeaway or delivery, while first order not handed over (not completed), add to same order
-        existingActiveOrder = orders.find((o) => {
-          if (o.type !== type) return false;
-          if (o.status === 'completed' || o.status === 'cancelled') return false;
-          if (o.branchId !== currentBranchId) return false;
-          const oPhone = o.customerPhone?.replace(/\s+/g, '');
-          if (cleanTargetPhone && oPhone && oPhone === cleanTargetPhone) return true;
-          if (targetCustomerId && o.customerId && o.customerId === targetCustomerId) return true;
-          return false;
-        });
-      }
-    }
-
-    if (existingActiveOrder) {
-      const mergedItems = [...existingActiveOrder.items];
-      orderItems.forEach((newItem) => {
-        const existingIdx = mergedItems.findIndex(
-          (it) =>
-            it.name === newItem.name &&
-            (it.size || 'Standard') === (newItem.size || 'Standard') &&
-            JSON.stringify(it.extras || []) === JSON.stringify(newItem.extras || [])
-        );
-
-        if (existingIdx >= 0) {
-          mergedItems[existingIdx] = {
-            ...mergedItems[existingIdx],
-            quantity: mergedItems[existingIdx].quantity + newItem.quantity,
-          };
-        } else {
-          mergedItems.push({
-            ...newItem,
-            id: newItem.id || `item-add-${Date.now()}-${Math.random().toString(36).substring(2, 6)}`,
-            isAddOn: true,
-            addedAtStage: 'stage2',
-          });
-        }
-      });
-
-      const addedAmount = orderItems.reduce((acc, it) => acc + Number(it.unitPrice) * Number(it.quantity), 0);
-      const newAddOnSubtotal = Number(existingActiveOrder.addOnSubtotal || 0) + addedAmount;
-      const newTotal = Number(existingActiveOrder.originalSubtotal || 0) + newAddOnSubtotal;
-      const nextVersion = (Number(existingActiveOrder.version) || 1) + 1;
-
-      const updatedOrder: Order = {
-        ...existingActiveOrder,
-        items: mergedItems,
-        addOnSubtotal: newAddOnSubtotal,
-        total: newTotal,
-        version: nextVersion,
-      };
-
-      setOrders((prev) => {
-        const updated = prev.map((o) => (o.id === existingActiveOrder!.id ? updatedOrder : o));
-        broadcastOrders(updated);
-        return updated;
-      });
-      clearCart();
-
-      // Persist update to PostgreSQL
-      try {
-        fetch('/api/orders', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            orderId: existingActiveOrder.id,
-            items: mergedItems,
-            addOnSubtotal: newAddOnSubtotal,
-            total: newTotal,
-            version: nextVersion,
-          }),
-        }).catch(() => {});
-      } catch (e) {}
-
-      const typeLabel =
-        existingActiveOrder.type === 'dine_in'
-          ? `Dine-In (Table ${existingActiveOrder.tableNumber || 'Seated'})`
-          : existingActiveOrder.type === 'takeaway'
-          ? 'Takeaway'
-          : 'Delivery';
-
-      addToast({
-        type: 'success',
-        title: 'Items Added to Existing Order! 🎉',
-        message: `${orderItems.length} new item(s) added to your ${typeLabel} Order #${existingActiveOrder.orderNumber}. Total: Rs. ${newTotal.toLocaleString()}.`,
-      });
-
-      return updatedOrder;
-    }
-
+    const targetCustomerId = options?.customerId || (isStaffOrCashier ? 'cust-walkin' : (currentUser.id || 'user-guest'));
+    const targetCustomerPhone = options?.customerPhone || (isStaffOrCashier ? '+92 300 0000000' : (currentUser.phone || '+92 300 0000000'));
     const targetCustomerEmail = options?.customerEmail || (!isStaffOrCashier ? currentUser.email : undefined);
+
+    const matchingTable = tables.find(
+      (t) =>
+        (t.number === tableNumber || t.id === tableNumber) &&
+        (!t.branchId || normalizeBranchId(t.branchId) === normalizeBranchId(currentBranchId))
+    );
+    const assignedWaiterId =
+      options?.assignedWaiterId ||
+      matchingTable?.assignedWaiterId ||
+      (currentRole === 'floor_staff' ? currentUser.id : undefined);
+    const assignedWaiterName =
+      options?.assignedWaiterName ||
+      matchingTable?.assignedWaiterName ||
+      (currentRole === 'floor_staff' ? currentUser.name : undefined);
+
+    const sanitizedItems = orderItems.map((it, idx) => ({
+      ...it,
+      id: it.id || `item-${Date.now()}-${idx}-${Math.random().toString(36).slice(2, 6)}`,
+      menuItemId: it.menuItemId || (it as any).id || `m-${idx}`,
+      unitPrice: Number(it.unitPrice) || 0,
+      quantity: Number(it.quantity) || 1,
+    }));
 
     const newOrder: Order = {
       id: `ord-${Date.now()}`,
       orderNumber: `FC-${Math.floor(1000 + Math.random() * 9000)}`,
-      branchId: currentBranchId,
+      branchId: normalizeBranchId(currentBranchId),
       customerId: targetCustomerId,
-      customerName: options?.customerName || (isStaffOrCashier ? 'Walk-in Guest' : currentUser.name),
+      customerName: options?.customerName || (isStaffOrCashier ? 'Walk-in Guest' : (currentUser.name || 'Guest Customer')),
       customerPhone: targetCustomerPhone,
       customerEmail: targetCustomerEmail,
       type,
@@ -1687,24 +2766,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       pickupTime: type === 'takeaway' ? (pickupTime || 'Immediate walk-in counter collection') : undefined,
       deliveryAddress: type === 'delivery' ? (deliveryAddress || currentUser.address) : undefined,
       status: 'placed',
-      paymentStatus: 'unpaid',
-      items: orderItems,
+      paymentStatus: initialPaymentStatus,
+      paymentCollected: isCollected,
+      items: sanitizedItems,
       originalSubtotal: subtotal,
       addOnSubtotal: 0,
       tax: 0,
       total: subtotal,
       notes: options?.notes,
-      createdAt: `${new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })}, ${new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true })}`,
+      createdAt: new Date().toISOString(),
       readyTimeEstimated: `in ${currentBranch.prepTimeEstimateMin} mins`,
       version: 1,
       paymentMethod: method,
-      sentToKitchen: !routeToSupportFirst,
-      sentToKitchenAt: !routeToSupportFirst ? new Date().toISOString() : undefined,
+      sentToKitchen: false,
+      sentToKitchenAt: undefined,
       forwardToKitchenAt: forwardTime,
       cashierId,
       cashierName,
       isWalkIn,
       customerCoordinates: options?.customerCoordinates || customerCoordinates || undefined,
+      assignedWaiterId,
+      assignedWaiterName,
     };
 
     // Guarantee that this customer's order is immediately remembered on this device/account
@@ -1713,12 +2795,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const myIds = JSON.parse(localStorage.getItem('foodies_customer_order_ids') || '[]');
         if (!myIds.includes(newOrder.id)) {
           myIds.unshift(newOrder.id);
-          localStorage.setItem('foodies_customer_order_ids', JSON.stringify(myIds));
         }
+        if (newOrder.orderNumber && !myIds.includes(newOrder.orderNumber)) {
+          myIds.unshift(newOrder.orderNumber);
+        }
+        localStorage.setItem('foodies_customer_order_ids', JSON.stringify(myIds));
         const cache = JSON.parse(localStorage.getItem('foodies_customer_history_cache') || '[]');
-        const updatedCache = [newOrder, ...cache.filter((o: any) => o.id !== newOrder.id)];
+        const updatedCache = [newOrder, ...cache.filter((o: any) => o.id !== newOrder.id && o.orderNumber !== newOrder.orderNumber)];
         localStorage.setItem('foodies_customer_history_cache', JSON.stringify(updatedCache));
-      } catch (e) {}
+        setMyPlacedOrderIds((prev) => {
+          const next = new Set(prev);
+          if (newOrder.id) next.add(newOrder.id);
+          if (newOrder.orderNumber) next.add(String(newOrder.orderNumber));
+          try {
+            localStorage.setItem('foodies_my_placed_order_ids', JSON.stringify(Array.from(next)));
+          } catch { }
+          return next;
+        });
+      } catch (e) { }
     }
 
     setOrders((prev) => {
@@ -1727,11 +2821,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return updated;
     });
     clearCart();
+    setHasSelectedBranch(false);
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.removeItem('foodies_customer_selected_branch');
+      } catch (e) { }
+    }
 
     if (type === 'dine_in' && tableNumber) {
       setTables((prev) => {
         const updated = prev.map((t) =>
-          t.number === tableNumber && t.branchId === currentBranchId
+          t.number === tableNumber && (!t.branchId || normalizeBranchId(t.branchId) === normalizeBranchId(currentBranchId))
             ? { ...t, status: 'occupied' as const, currentOrderId: newOrder.id, seatedAt: 'Just now' }
             : t
         );
@@ -1743,15 +2843,49 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         fetch('/api/tables', {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getClientAuthHeaders(),
           body: JSON.stringify({
             tableNumber,
-            branchId: currentBranchId,
+            branchId: normalizeBranchId(currentBranchId),
             status: 'occupied',
             currentOrderId: newOrder.id,
           }),
-        }).catch(() => {});
-      } catch (e) {}
+        }).catch(() => { });
+      } catch (e) { }
+    }
+
+    // Optimistic instant Order Placed notification (deduplicated with server by deterministic id)
+    if (notificationSettings.events.orderPlaced !== false) {
+      const orderTypeLabel = type === 'takeaway' ? 'Takeaway' : type === 'delivery' ? 'Delivery' : 'Dine-In';
+      const localPlacedNotif: AppNotification = {
+        id: `notif-placed-${newOrder.id}`,
+        title: `Order Confirmed • ${orderTypeLabel} #${newOrder.orderNumber}`,
+        message: `Your ${orderTypeLabel} order #${newOrder.orderNumber} is confirmed (${sanitizedItems.length} items • Rs. ${subtotal}). Sent to kitchen!`,
+        type: 'success',
+        category: type === 'takeaway' ? 'takeaway' : type === 'delivery' ? 'delivery' : 'dine_in',
+        branchId: newOrder.branchId,
+        orderId: newOrder.id,
+        orderNumber: newOrder.orderNumber,
+        orderType: type,
+        senderId: newOrder.cashierId || newOrder.customerId,
+        senderName: newOrder.cashierName || newOrder.customerName,
+        senderRole: isWalkIn ? 'cashier' : 'customer',
+        targetRoles: buildWebOrderNotificationRoles(type, notificationSettings),
+        targetPlatform: notificationSettings.defaultPlatform || 'all',
+        targetUserId: newOrder.customerId,
+        targetCustomerPhone: newOrder.customerPhone,
+        targetCustomerName: newOrder.customerName,
+        targetWaiterId: newOrder.assignedWaiterId,
+        targetWaiterName: newOrder.assignedWaiterName,
+        targetRiderId: newOrder.assignedRiderId,
+        targetRiderName: newOrder.assignedRiderName,
+        eventKey: 'orderPlaced',
+        readBy: [],
+        createdAt: new Date().toISOString(),
+      };
+      seenNotifIdsRef.current.add(localPlacedNotif.id);
+      setAllNotifications((prev) => [localPlacedNotif, ...prev.filter((n) => n.id !== localPlacedNotif.id)]);
+      store.dispatch(addReduxNotification(localPlacedNotif));
     }
 
     if (routeToSupportFirst) {
@@ -1768,12 +2902,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
     }
 
-    // Persist order to PostgreSQL database and safely broadcast once confirmed in DB
+    // Persist order to PostgreSQL database with Idempotency-Key and safely broadcast once confirmed in DB
+    const idempotencyKey = `idem-${newOrder.id}-${newOrder.orderNumber}`;
     try {
       fetch('/api/orders', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newOrder),
+        headers: {
+          ...getClientAuthHeaders(),
+          'Idempotency-Key': idempotencyKey,
+        },
+        body: JSON.stringify({ ...newOrder, idempotencyKey }),
       })
         .then((res) => res.json())
         .then((data) => {
@@ -1782,18 +2920,36 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             broadcastStateMutation('SYNC_ORDERS', [data.order]);
           }
         })
-        .catch(() => {});
-    } catch (e) {}
+        .catch(() => { });
+    } catch (e) { }
 
     return newOrder;
   };
 
   const sendOrderToKitchen = (orderId: string) => {
     let orderNum = '';
+    inFlightStatusRef.current.set(orderId, {
+      status: 'accepted',
+      sentToKitchen: true,
+      timestamp: Date.now(),
+    });
+
     setOrders((prev) => {
       const updated = prev.map((ord) => {
         if (ord.id === orderId || ord.orderNumber === orderId) {
           orderNum = ord.orderNumber;
+          inFlightStatusRef.current.set(ord.id, {
+            status: 'accepted',
+            sentToKitchen: true,
+            timestamp: Date.now(),
+          });
+          if (ord.orderNumber) {
+            inFlightStatusRef.current.set(ord.orderNumber, {
+              status: 'accepted',
+              sentToKitchen: true,
+              timestamp: Date.now(),
+            });
+          }
           return {
             ...ord,
             status: 'accepted' as OrderStatus,
@@ -1811,10 +2967,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/orders', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId, status: 'accepted', sentToKitchen: true }),
-      }).catch(() => {});
-    } catch (e) {}
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify({
+          orderId,
+          status: 'accepted',
+          sentToKitchen: true,
+          sentToKitchenAt: new Date().toISOString(),
+        }),
+      }).catch(() => { });
+    } catch (e) { }
 
     addToast({
       type: 'success',
@@ -1845,15 +3006,68 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/orders', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({ orderId, autoForwardCustomMin: customMinutes, forwardToKitchenAt: targetIso }),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
 
     addToast({
       type: 'info',
       title: 'Auto-Forward Time Set ⏱️',
       message: `Order #${orderNum || orderId} will automatically advance to kitchen in ${customMinutes} min${customMinutes > 1 ? 's' : ''}.`,
+    });
+  };
+
+  const setAllOrdersKitchenForwardTime = (customMinutes: number) => {
+    const targetIso = new Date(Date.now() + customMinutes * 60 * 1000).toISOString();
+    let count = 0;
+    const orderIdsToPatch: string[] = [];
+
+    setOrders((prev) => {
+      const updated = prev.map((ord) => {
+        // Apply strictly to active orders that have not yet been sent to kitchen
+        if (
+          !ord.sentToKitchen &&
+          ord.status !== 'ready' &&
+          ord.status !== 'completed' &&
+          ord.status !== 'cancelled' &&
+          ord.status !== 'delivered' &&
+          ord.status !== 'served' &&
+          ord.status !== 'out_for_delivery'
+        ) {
+          count++;
+          orderIdsToPatch.push(ord.id);
+          return {
+            ...ord,
+            autoForwardCustomMin: customMinutes,
+            forwardToKitchenAt: targetIso,
+          };
+        }
+        return ord;
+      });
+      broadcastOrders(updated);
+      return updated;
+    });
+
+    orderIdsToPatch.forEach((id) => {
+      try {
+        fetch('/api/orders', {
+          method: 'PATCH',
+          headers: getClientAuthHeaders(),
+          body: JSON.stringify({ orderId: id, autoForwardCustomMin: customMinutes, forwardToKitchenAt: targetIso }),
+        }).catch(() => { });
+      } catch (e) { }
+    });
+
+    updateFooterSettings({
+      autoForwardMode: 'timed',
+      autoForwardKitchenMin: customMinutes,
+    });
+
+    addToast({
+      type: 'success',
+      title: 'Forwarding Timer Set for All Orders ⏱️',
+      message: `Set to ${customMinutes} min${customMinutes > 1 ? 's' : ''} for active orders and all upcoming orders.`,
     });
   };
 
@@ -1864,11 +3078,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     customNotification?: { title: string; message: string; type?: 'info' | 'success' | 'warning' }
   ) => {
     let orderNum = '';
+    const inKitchen = newStatus === 'accepted' || newStatus === 'preparing' || newStatus === 'ready' || newStatus === 'served';
+
+    // Optimistically record in-flight status so stale backend sync polls don't downgrade it
+    inFlightStatusRef.current.set(orderId, {
+      status: newStatus,
+      sentToKitchen: inKitchen ? true : undefined,
+      timestamp: Date.now(),
+    });
+
     setOrders((prev) => {
       const updated = prev.map((ord) => {
         if (ord.id === orderId || ord.orderNumber === orderId) {
           orderNum = ord.orderNumber;
-          const inKitchen = newStatus === 'accepted' || newStatus === 'preparing' || newStatus === 'ready' || newStatus === 'served';
+          inFlightStatusRef.current.set(ord.id, {
+            status: newStatus,
+            sentToKitchen: inKitchen ? true : ord.sentToKitchen,
+            timestamp: Date.now(),
+          });
+          if (ord.orderNumber) {
+            inFlightStatusRef.current.set(ord.orderNumber, {
+              status: newStatus,
+              sentToKitchen: inKitchen ? true : ord.sentToKitchen,
+              timestamp: Date.now(),
+            });
+          }
           return {
             ...ord,
             status: newStatus,
@@ -1882,24 +3116,148 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return ord;
       });
       broadcastOrders(updated);
+      if (typeof window !== 'undefined') {
+        try {
+          const cacheStr = localStorage.getItem('foodies_customer_history_cache');
+          if (cacheStr) {
+            const cache = JSON.parse(cacheStr);
+            if (Array.isArray(cache)) {
+              const updatedCache = cache.map((co: Order) => {
+                if (co.id === orderId || co.orderNumber === orderId) {
+                  return {
+                    ...co,
+                    status: newStatus,
+                    sentToKitchen: inKitchen ? true : co.sentToKitchen,
+                    preparationStartedAt: newStatus === 'preparing' ? 'Just now' : co.preparationStartedAt,
+                    completedAt: newStatus === 'completed' ? 'Just now' : co.completedAt,
+                  };
+                }
+                return co;
+              });
+              localStorage.setItem('foodies_customer_history_cache', JSON.stringify(updatedCache));
+            }
+          }
+        } catch (e) { }
+      }
       return updated;
     });
 
     // Asynchronously sync status update to PostgreSQL database
+    const existingOrdForStatus = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
+
+    if (existingOrdForStatus && existingOrdForStatus.status !== newStatus) {
+      const eventKey: NotificationEventKey =
+        newStatus === 'preparing'
+          ? 'cooking'
+          : newStatus === 'ready'
+            ? 'orderReady'
+            : newStatus === 'out_for_delivery'
+              ? 'outForDelivery'
+              : newStatus === 'served'
+                ? 'orderServed'
+                : newStatus === 'completed' || newStatus === 'delivered' || newStatus === 'taken'
+                  ? 'orderCompleted'
+                  : newStatus === 'cancelled'
+                    ? 'orderCancelled'
+                    : 'sentToKitchen';
+
+      if (notificationSettings.events[eventKey] !== false) {
+        const oType = existingOrdForStatus.type || 'takeaway';
+        const oNum = existingOrdForStatus.orderNumber || orderId;
+        let sTitle = `Order #${oNum} • ${newStatus.toUpperCase()}`;
+        let sMsg = `Order #${oNum} status updated to ${newStatus}.`;
+        let sType: AppNotification['type'] = 'info';
+        let sCat: NotificationCategory = oType === 'takeaway' ? 'takeaway' : oType === 'delivery' ? 'delivery' : 'dine_in';
+
+        if (newStatus === 'preparing') {
+          sTitle = `Order #${oNum} • Cooking in Kitchen 👨‍🍳`;
+          sMsg = `Our chefs are actively preparing your fresh order #${oNum}.`;
+          sCat = 'kitchen';
+        } else if (newStatus === 'ready') {
+          sType = 'success';
+          if (oType === 'takeaway') {
+            sTitle = `Order #${oNum} • Ready for Pickup! 🛍️`;
+            sMsg = `Your Takeaway order #${oNum} is hot, packed, and ready at the counter!`;
+          } else if (oType === 'dine_in') {
+            sTitle = `Order #${oNum} • Ready to Serve 🍽️`;
+            sMsg = `Your Dine-In order #${oNum}${existingOrdForStatus.tableNumber ? ` (Table ${existingOrdForStatus.tableNumber})` : ''} is ready and being served to your table!`;
+          } else {
+            sTitle = `Order #${oNum} • Packed & Ready 🛵`;
+            sMsg = `Your Delivery order #${oNum} is packed and ready for rider dispatch.`;
+          }
+        } else if (newStatus === 'out_for_delivery') {
+          sTitle = `Order #${oNum} • Out for Delivery 🛵`;
+          sMsg = `Your rider is on the way with your order #${oNum}!`;
+        } else if (newStatus === 'served') {
+          sType = 'success';
+          sTitle = `Order #${oNum} • Served 🍽️`;
+          sMsg = `Your order #${oNum} has been served at Table ${existingOrdForStatus.tableNumber || '-'}. Enjoy your meal!`;
+        } else if (newStatus === 'completed' || newStatus === 'delivered' || newStatus === 'taken') {
+          sType = 'success';
+          sTitle = `Order #${oNum} • Delivered & Completed ✓`;
+          sMsg = `Your order #${oNum} has been completed. Thank you for dining with Foodies Cafe!`;
+        } else if (newStatus === 'cancelled') {
+          sType = 'error';
+          sTitle = `Order #${oNum} • Cancelled`;
+          sMsg = `Order #${oNum} was cancelled.`;
+        }
+
+        const optimisticStatusNotif: AppNotification = {
+          id: `notif-status-${existingOrdForStatus.id}-${newStatus}-${Date.now()}`,
+          title: sTitle,
+          message: sMsg,
+          type: sType,
+          category: sCat,
+          branchId: existingOrdForStatus.branchId || currentBranchId,
+          orderId: existingOrdForStatus.id,
+          orderNumber: oNum,
+          orderType: oType,
+          senderId: currentUser?.id || 'system',
+          senderName: currentUser?.name || 'Staff',
+          senderRole: currentRole || 'cashier',
+          targetRoles: buildWebOrderNotificationRoles(oType, notificationSettings),
+          targetPlatform: notificationSettings.defaultPlatform || 'all',
+          targetUserId: existingOrdForStatus.customerId,
+          targetCustomerPhone: existingOrdForStatus.customerPhone,
+          targetCustomerName: existingOrdForStatus.customerName,
+          targetWaiterId: existingOrdForStatus.assignedWaiterId,
+          targetWaiterName: existingOrdForStatus.assignedWaiterName,
+          targetRiderId: existingOrdForStatus.assignedRiderId,
+          targetRiderName: existingOrdForStatus.assignedRiderName,
+          eventKey,
+          readBy: currentUser?.id ? [currentUser.id] : [],
+          createdAt: new Date().toISOString(),
+        };
+        seenNotifIdsRef.current.add(optimisticStatusNotif.id);
+        setAllNotifications((prev) => [optimisticStatusNotif, ...prev.filter((n) => n.id !== optimisticStatusNotif.id)]);
+        store.dispatch(addReduxNotification(optimisticStatusNotif));
+      }
+    }
     try {
       fetch('/api/orders', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId, status: newStatus }),
-      }).catch(() => {});
-    } catch (e) {}
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify({
+          orderId,
+          status: newStatus,
+          expectedVersion: existingOrdForStatus?.version,
+          actorId: currentUser?.id,
+          actorName: currentUser?.name,
+          actorRole: currentRole,
+          sentToKitchen: inKitchen ? true : undefined,
+          sentToKitchenAt: inKitchen ? new Date().toISOString() : undefined,
+          preparationStartedAt: newStatus === 'preparing' ? new Date().toISOString() : undefined,
+          completedAt: newStatus === 'completed' ? new Date().toISOString() : undefined,
+        }),
+      }).catch(() => { });
+    } catch (e) { }
 
-    if (newStatus === 'completed' || newStatus === 'cancelled') {
+    if (newStatus === 'completed' || newStatus === 'cancelled' || newStatus === 'delivered' || newStatus === 'taken') {
       const targetOrd = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
       if (targetOrd?.tableNumber) {
         setTables((prev) => {
           const updated = prev.map((t) =>
-            t.number === targetOrd.tableNumber && t.branchId === (targetOrd.branchId || currentBranchId)
+            String(t.number) === String(targetOrd.tableNumber) || String(t.id) === String(targetOrd.tableNumber)
               ? { ...t, status: 'available' as const, currentOrderId: undefined, seatedAt: undefined }
               : t
           );
@@ -1910,14 +3268,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         try {
           fetch('/api/tables', {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getClientAuthHeaders(),
             body: JSON.stringify({
               tableNumber: targetOrd.tableNumber,
               branchId: targetOrd.branchId || currentBranchId,
               status: 'available',
             }),
-          }).catch(() => {});
-        } catch (e) {}
+          }).catch(() => { });
+        } catch (e) { }
       }
     }
 
@@ -1932,14 +3290,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         newStatus === 'completed'
           ? 'Order Completed ✓'
           : newStatus === 'ready'
-          ? 'Order Kitchen Ready 🍽️'
-          : newStatus === 'served'
-          ? 'Order Sent to Waiter 🍽️'
-          : newStatus === 'out_for_delivery'
-          ? 'Order Out for Delivery 🛵'
-          : newStatus === 'preparing'
-          ? 'Cooking in Kitchen 👨‍🍳'
-          : 'Order Status Updated';
+            ? 'Order Kitchen Ready 🍽️'
+            : newStatus === 'served'
+              ? 'Order Sent to Waiter 🍽️'
+              : newStatus === 'out_for_delivery'
+                ? 'Order Out for Delivery 🛵'
+                : newStatus === 'preparing'
+                  ? 'Cooking in Kitchen 👨‍🍳'
+                  : 'Order Status Updated';
 
       addToast({
         type: newStatus === 'completed' ? 'success' : 'info',
@@ -1955,10 +3313,38 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const riderName = rider?.name || 'Assigned Rider';
     let orderNum = '';
 
+    const prevInFlight = inFlightStatusRef.current.get(orderId);
+    inFlightStatusRef.current.set(orderId, {
+      status: prevInFlight?.status || 'placed',
+      sentToKitchen: prevInFlight?.sentToKitchen,
+      assignedRiderId: riderId,
+      assignedRiderName: riderName,
+      riderStatus: 'assigned',
+      timestamp: Date.now(),
+    });
+
     setOrders((prev) => {
       const updated = prev.map((ord) => {
         if (ord.id === orderId || ord.orderNumber === orderId) {
           orderNum = ord.orderNumber;
+          inFlightStatusRef.current.set(ord.id, {
+            status: ord.status,
+            sentToKitchen: ord.sentToKitchen,
+            assignedRiderId: riderId,
+            assignedRiderName: riderName,
+            riderStatus: 'assigned',
+            timestamp: Date.now(),
+          });
+          if (ord.orderNumber) {
+            inFlightStatusRef.current.set(ord.orderNumber, {
+              status: ord.status,
+              sentToKitchen: ord.sentToKitchen,
+              assignedRiderId: riderId,
+              assignedRiderName: riderName,
+              riderStatus: 'assigned',
+              timestamp: Date.now(),
+            });
+          }
           return {
             ...ord,
             assignedRiderId: riderId,
@@ -1970,7 +3356,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
       try {
         localStorage.setItem('foodies_orders_live', JSON.stringify(updated));
-      } catch (e) {}
+      } catch (e) { }
       broadcastOrders(updated);
       return updated;
     });
@@ -1984,7 +3370,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
       try {
         localStorage.setItem('foodies_users_live', JSON.stringify(updated));
-      } catch (e) {}
+      } catch (e) { }
       return updated;
     });
 
@@ -1993,7 +3379,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const updated = { ...prev, riderActiveOrderId: prev.riderActiveOrderId || orderId };
         try {
           localStorage.setItem('foodies_current_user', JSON.stringify(updated));
-        } catch (e) {}
+        } catch (e) { }
         return updated;
       }
       return prev;
@@ -2003,15 +3389,15 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/orders', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({
           orderId,
           assignedRiderId: riderId,
           assignedRiderName: riderName,
           riderStatus: 'assigned',
         }),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
 
     if (!silent) {
       addToast({
@@ -2020,6 +3406,72 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         message: `Order #${orderNum || orderId} assigned to ${riderName}. You can assign more orders or change before departure.`,
       });
     }
+  };
+
+  const acceptRiderOrder = (orderId: string) => {
+    let orderNum = '';
+    const prevInFlight = inFlightStatusRef.current.get(orderId);
+    inFlightStatusRef.current.set(orderId, {
+      status: prevInFlight?.status || 'placed',
+      sentToKitchen: prevInFlight?.sentToKitchen,
+      assignedRiderId: prevInFlight?.assignedRiderId,
+      assignedRiderName: prevInFlight?.assignedRiderName,
+      riderStatus: 'accepted',
+      timestamp: Date.now(),
+    });
+
+    setOrders((prev) => {
+      const updated = prev.map((ord) => {
+        if (ord.id === orderId || ord.orderNumber === orderId) {
+          orderNum = ord.orderNumber;
+          inFlightStatusRef.current.set(ord.id, {
+            status: ord.status,
+            sentToKitchen: ord.sentToKitchen,
+            assignedRiderId: ord.assignedRiderId,
+            assignedRiderName: ord.assignedRiderName,
+            riderStatus: 'accepted',
+            timestamp: Date.now(),
+          });
+          if (ord.orderNumber) {
+            inFlightStatusRef.current.set(ord.orderNumber, {
+              status: ord.status,
+              sentToKitchen: ord.sentToKitchen,
+              assignedRiderId: ord.assignedRiderId,
+              assignedRiderName: ord.assignedRiderName,
+              riderStatus: 'accepted',
+              timestamp: Date.now(),
+            });
+          }
+          return {
+            ...ord,
+            riderStatus: 'accepted' as const,
+          };
+        }
+        return ord;
+      });
+      try {
+        localStorage.setItem('foodies_orders_live', JSON.stringify(updated));
+      } catch (e) { }
+      broadcastOrders(updated);
+      return updated;
+    });
+
+    try {
+      fetch('/api/orders', {
+        method: 'PATCH',
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify({
+          orderId,
+          riderStatus: 'accepted',
+        }),
+      }).catch(() => { });
+    } catch (e) { }
+
+    addToast({
+      type: 'success',
+      title: 'Order Accepted! 🛵',
+      message: `You have accepted delivery for Order #${orderNum || orderId}. Cashier cannot reassign this order.`,
+    });
   };
 
   const departRider = (riderId: string) => {
@@ -2055,7 +3507,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
       try {
         localStorage.setItem('foodies_orders_live', JSON.stringify(updated));
-      } catch (e) {}
+      } catch (e) { }
       broadcastOrders(updated);
       return updated;
     });
@@ -2067,7 +3519,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       );
       try {
         localStorage.setItem('foodies_users_live', JSON.stringify(updated));
-      } catch (e) {}
+      } catch (e) { }
       return updated;
     });
 
@@ -2076,7 +3528,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const updated = { ...prev, riderAvailability: 'busy' as const, riderActiveOrderId: orderIds[0] };
         try {
           localStorage.setItem('foodies_current_user', JSON.stringify(updated));
-        } catch (e) {}
+        } catch (e) { }
         return updated;
       }
       return prev;
@@ -2086,28 +3538,28 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/users', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({
           id: riderId,
           riderAvailability: 'busy',
           riderActiveOrderId: orderIds[0],
         }),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
 
     // 4. Persist orders status update to PostgreSQL
     orderIds.forEach((oId) => {
       try {
         fetch('/api/orders', {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getClientAuthHeaders(),
           body: JSON.stringify({
             orderId: oId,
             status: 'out_for_delivery',
             riderStatus: 'en_route',
           }),
-        }).catch(() => {});
-      } catch (e) {}
+        }).catch(() => { });
+      } catch (e) { }
     });
 
     addToast({
@@ -2137,7 +3589,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       });
       try {
         localStorage.setItem('foodies_orders_live', JSON.stringify(updated));
-      } catch (e) {}
+      } catch (e) { }
       broadcastOrders(updated);
       return updated;
     });
@@ -2154,7 +3606,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           );
           try {
             localStorage.setItem('foodies_users_live', JSON.stringify(updated));
-          } catch (e) {}
+          } catch (e) { }
           return updated;
         });
 
@@ -2163,7 +3615,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             const updated = { ...prev, riderAvailability: 'available' as const, riderActiveOrderId: undefined };
             try {
               localStorage.setItem('foodies_current_user', JSON.stringify(updated));
-            } catch (e) {}
+            } catch (e) { }
             return updated;
           }
           return prev;
@@ -2172,29 +3624,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         try {
           fetch('/api/users', {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
+            headers: getClientAuthHeaders(),
             body: JSON.stringify({
               id: prevRiderId,
               riderAvailability: 'available',
               riderActiveOrderId: null,
             }),
-          }).catch(() => {});
-        } catch (e) {}
+          }).catch(() => { });
+        } catch (e) { }
       }
     }
 
     try {
       fetch('/api/orders', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({
           orderId,
           assignedRiderId: null,
           assignedRiderName: null,
           riderStatus: null,
         }),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
 
     addToast({
       type: 'info',
@@ -2219,7 +3671,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             status: 'completed' as OrderStatus,
             paymentStatus: (paymentCollected || ord.paymentMethod !== 'COD') ? ('paid' as PaymentStatus) : ord.paymentStatus,
             riderStatus: 'delivered' as const,
-            completedAt: new Date().toLocaleTimeString('en-US', { hour: '2-digit', minute: '2-digit', hour12: true }),
+            completedAt: new Date().toISOString(),
             deliveredAt: new Date().toISOString(),
             paymentCollected: paymentCollected ?? true,
           };
@@ -2235,7 +3687,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
       try {
         localStorage.setItem('foodies_orders_live', JSON.stringify(updated));
-      } catch (e) {}
+      } catch (e) { }
       broadcastOrders(updated);
       return updated;
     });
@@ -2259,7 +3711,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
         try {
           localStorage.setItem('foodies_users_live', JSON.stringify(updated));
-        } catch (e) {}
+        } catch (e) { }
         return updated;
       });
 
@@ -2273,7 +3725,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           };
           try {
             localStorage.setItem('foodies_current_user', JSON.stringify(updated));
-          } catch (e) {}
+          } catch (e) { }
           return updated;
         }
         return prev;
@@ -2282,31 +3734,32 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         fetch('/api/users', {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getClientAuthHeaders(),
           body: JSON.stringify({
             id: riderIdToFree,
             riderAvailability: nextAvailability,
             riderActiveOrderId: shouldBeAvailable ? null : undefined,
             riderTotalDeliveries: newDeliveries,
           }),
-        }).catch(() => {});
-      } catch (e) {}
+        }).catch(() => { });
+      } catch (e) { }
     }
 
     try {
       fetch('/api/orders', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({
           orderId,
           status: 'completed',
-          paymentStatus: paymentCollected ? 'paid' : undefined,
+          paymentStatus: paymentCollected ? 'paid' : 'paid',
           riderStatus: 'delivered',
           deliveredAt: new Date().toISOString(),
+          completedAt: new Date().toISOString(),
           paymentCollected: paymentCollected ?? true,
         }),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
 
     addToast({
       type: 'success',
@@ -2320,7 +3773,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = prev.map((u) => (u.id === riderId ? { ...u, riderAvailability: status } : u));
       try {
         localStorage.setItem('foodies_users_live', JSON.stringify(updated));
-      } catch (e) {}
+      } catch (e) { }
       return updated;
     });
 
@@ -2329,7 +3782,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const updated = { ...prev, riderAvailability: status };
         try {
           localStorage.setItem('foodies_current_user', JSON.stringify(updated));
-        } catch (e) {}
+        } catch (e) { }
         return updated;
       }
       return prev;
@@ -2338,13 +3791,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/users', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({
           id: riderId,
           riderAvailability: status,
         }),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
 
     addToast({
       type: 'info',
@@ -2356,26 +3809,83 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   const recordCashPayment = (orderId: string, amountReceived: number) => {
     let change = 0;
     const ord = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
+    const addedAmount = ord ? Number(ord.total) : amountReceived;
+
+    const targetBranch = normalizeBranchId(ord?.branchId || currentBranchId);
+    const targetShift =
+      (currentShift && currentShift.status === 'open' ? currentShift : null) ||
+      shifts.find(
+        (sh) =>
+          sh.cashierId === currentUser.id &&
+          sh.status === 'open' &&
+          (normalizeBranchId(sh.branchId) === targetBranch || sh.branchId === targetBranch)
+      ) ||
+      shifts.find(
+        (sh) =>
+          sh.status === 'open' &&
+          (normalizeBranchId(sh.branchId) === targetBranch || sh.branchId === targetBranch)
+      ) ||
+      shifts[0] ||
+      DEFAULT_OPEN_SHIFT;
+
+    const targetShiftId = targetShift.id || 'sh-today-1';
+
+    // 1. Immediately record in-flight payment lock to prevent race conditions from background polling
+    inFlightStatusRef.current.set(orderId, {
+      paymentStatus: 'paid',
+      paymentCollected: true,
+      timestamp: Date.now(),
+    });
+    if (ord?.orderNumber) {
+      inFlightStatusRef.current.set(ord.orderNumber, {
+        paymentStatus: 'paid',
+        paymentCollected: true,
+        timestamp: Date.now(),
+      });
+    }
+
     setOrders((prev) => {
       const updated = prev.map((item) => {
         if (item.id === orderId || item.orderNumber === orderId) {
           change = Math.max(0, amountReceived - Number(item.total));
-          return { ...item, paymentStatus: 'paid' as const, status: 'completed' as const };
+          return {
+            ...item,
+            paymentStatus: 'paid' as const,
+            paymentCollected: true,
+            status: 'completed' as const,
+            cashierId: currentUser.id,
+            cashierName: currentUser.name,
+            shiftId: targetShiftId,
+          };
         }
         return item;
       });
       broadcastOrders(updated);
+      try {
+        localStorage.setItem('foodies_orders_live', JSON.stringify(updated));
+      } catch (e) { }
       return updated;
     });
 
-    // Asynchronously sync payment status and completion to PostgreSQL database
+    // Asynchronously sync payment status, cashier attribution, and completion to PostgreSQL database
     try {
       fetch('/api/orders', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId, paymentStatus: 'paid', status: 'completed' }),
-      }).catch(() => {});
-    } catch (e) {}
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify({
+          orderId,
+          paymentStatus: 'paid',
+          paymentCollected: true,
+          status: 'completed',
+          cashierId: currentUser.id,
+          cashierName: currentUser.name,
+          actorId: currentUser.id,
+          actorName: currentUser.name,
+          actorRole: currentRole || 'cashier',
+          shiftId: targetShiftId,
+        }),
+      }).catch(() => { });
+    } catch (e) { }
 
     // When cashier/customer proceeds order of cash after eating/leaving, automatically mark table free!
     if (ord?.tableNumber) {
@@ -2400,40 +3910,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         fetch('/api/tables', {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getClientAuthHeaders(),
           body: JSON.stringify({
             tableNumber: ord.tableNumber,
             status: 'available',
           }),
-        }).catch(() => {});
-      } catch (e) {}
+        }).catch(() => { });
+      } catch (e) { }
     }
-
-    const addedAmount = ord ? Number(ord.total) : amountReceived;
-
-    const targetShift =
-      shifts.find(
-        (sh) =>
-          sh.status === 'open' &&
-          (sh.branchId === currentBranchId || sh.branchId === currentBranch.id || !sh.branchId || sh.id === 'sh-today-1')
-      ) ||
-      shifts.find((sh) => sh.status === 'open') ||
-      shifts[0] ||
-      DEFAULT_OPEN_SHIFT;
 
     const currentCollected = Number(targetShift.cashCollected || 0);
     const currentExpected = Number(targetShift.expectedCash || (targetShift.openingFloat || 0));
     const nextCashCollected = currentCollected + addedAmount;
     const nextExpectedCash = currentExpected + addedAmount;
-    const targetShiftId = targetShift.id || 'sh-today-1';
 
     setShifts((prev) => {
       let found = false;
       const updated = prev.map((sh) => {
-        if (
-          sh.id === targetShiftId ||
-          (sh.status === 'open' && (sh.branchId === currentBranchId || sh.branchId === currentBranch.id))
-        ) {
+        if (sh.id === targetShiftId) {
           found = true;
           return {
             ...sh,
@@ -2447,24 +3941,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const finalShifts = found
         ? updated
         : [
-            ...prev,
-            {
-              id: targetShiftId,
-              cashierId: currentUser.id || 'user-cashier',
-              cashierName: currentUser.name || 'Bilal Farooq',
-              branchId: currentBranchId,
-              openingFloat: 0,
-              cashCollected: nextCashCollected,
-              expectedCash: nextExpectedCash,
-              status: 'open' as const,
-              openedAt: new Date().toISOString(),
-            },
-          ];
+          ...prev,
+          {
+            id: targetShiftId,
+            cashierId: currentUser.id || 'user-cashier',
+            cashierName: currentUser.name || 'Bilal Farooq',
+            branchId: currentBranchId,
+            openingFloat: 0,
+            cashCollected: nextCashCollected,
+            expectedCash: nextExpectedCash,
+            status: 'open' as const,
+            openedAt: new Date().toISOString(),
+          },
+        ];
 
       broadcastShifts(finalShifts);
       try {
         localStorage.setItem('foodies_shifts_live', JSON.stringify(finalShifts));
-      } catch (e) {}
+      } catch (e) { }
       return finalShifts;
     });
 
@@ -2472,14 +3966,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/shifts', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({
           shiftId: targetShiftId,
           cashCollected: nextCashCollected,
           expectedCash: nextExpectedCash,
         }),
       }).catch((err) => console.error('Failed to sync shift to DB:', err));
-    } catch (e) {}
+    } catch (e) { }
 
     const tableInfo = ord?.tableNumber ? ` · Table #${ord.tableNumber} is now free` : '';
     addToast({
@@ -2491,16 +3985,101 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return { change, success: true };
   };
 
+  const updateOrderPayment = (orderId: string, paymentStatus: PaymentStatus) => {
+    const targetOrder = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
+    const isDeliveryOrder = targetOrder?.type === 'delivery' || targetOrder?.status === 'out_for_delivery' || targetOrder?.status === 'delivered';
+    const shouldCompleteDelivery = paymentStatus === 'paid' && isDeliveryOrder;
+
+    inFlightStatusRef.current.set(orderId, {
+      paymentStatus,
+      paymentCollected: paymentStatus === 'paid',
+      status: shouldCompleteDelivery ? 'completed' : undefined,
+      riderStatus: shouldCompleteDelivery ? 'delivered' : undefined,
+      timestamp: Date.now(),
+    });
+    if (targetOrder?.orderNumber) {
+      inFlightStatusRef.current.set(targetOrder.orderNumber, {
+        paymentStatus,
+        paymentCollected: paymentStatus === 'paid',
+        status: shouldCompleteDelivery ? 'completed' : undefined,
+        riderStatus: shouldCompleteDelivery ? 'delivered' : undefined,
+        timestamp: Date.now(),
+      });
+    }
+
+    setOrders((prev) => {
+      const updated = prev.map((o) =>
+        o.id === orderId || o.orderNumber === orderId
+          ? {
+            ...o,
+            paymentStatus,
+            paymentCollected: paymentStatus === 'paid',
+            status:
+              paymentStatus === 'paid' && (o.type === 'delivery' || o.status === 'out_for_delivery' || o.status === 'delivered')
+                ? ('completed' as OrderStatus)
+                : paymentStatus === 'paid' && o.status === 'placed'
+                  ? ('accepted' as OrderStatus)
+                  : o.status,
+            riderStatus:
+              paymentStatus === 'paid' && (o.type === 'delivery' || o.status === 'out_for_delivery' || o.status === 'delivered')
+                ? ('delivered' as const)
+                : o.riderStatus,
+            completedAt:
+              paymentStatus === 'paid' && (o.type === 'delivery' || o.status === 'out_for_delivery' || o.status === 'delivered')
+                ? new Date().toISOString()
+                : o.completedAt,
+            deliveredAt:
+              paymentStatus === 'paid' && (o.type === 'delivery' || o.status === 'out_for_delivery' || o.status === 'delivered')
+                ? new Date().toISOString()
+                : o.deliveredAt,
+          }
+          : o
+      );
+      broadcastOrders(updated);
+      try {
+        localStorage.setItem('foodies_orders_live', JSON.stringify(updated));
+      } catch (e) { }
+      return updated;
+    });
+
+    try {
+      fetch('/api/orders', {
+        method: 'PATCH',
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify({
+          orderId,
+          paymentStatus,
+          paymentCollected: paymentStatus === 'paid',
+          status: shouldCompleteDelivery ? 'completed' : undefined,
+          riderStatus: shouldCompleteDelivery ? 'delivered' : undefined,
+          completedAt: shouldCompleteDelivery ? new Date().toISOString() : undefined,
+          deliveredAt: shouldCompleteDelivery ? new Date().toISOString() : undefined,
+          actorId: currentUser?.id,
+          actorName: currentUser?.name,
+          actorRole: currentRole,
+        }),
+      }).catch(() => { });
+    } catch (e) { }
+
+    addToast({
+      type: 'success',
+      title: 'Payment Status Updated',
+      message: `Order #${orderId} payment marked as ${paymentStatus.toUpperCase()}.`,
+    });
+  };
+
   const editOrderStage1 = (orderId: string, updatedItems: OrderItem[]) => {
     const newSubtotal = updatedItems.reduce((acc, i) => acc + Number(i.unitPrice) * Number(i.quantity), 0);
     let updatedTotal = newSubtotal;
+    let prevVersion = 1;
     let nextVersion = 2;
 
     setOrders((prev) => {
       const updated = prev.map((ord) => {
         if (ord.id === orderId || ord.orderNumber === orderId) {
           updatedTotal = newSubtotal + Number(ord.addOnSubtotal || 0);
-          nextVersion = (Number(ord.version) || 1) + 1;
+          prevVersion = Number(ord.version) || 1;
+          nextVersion = prevVersion + 1;
           return {
             ...ord,
             items: updatedItems,
@@ -2519,16 +4098,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/orders', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({
           orderId,
           items: updatedItems,
           originalSubtotal: newSubtotal,
           total: updatedTotal,
+          expectedVersion: prevVersion,
           version: nextVersion,
+          actorId: currentUser?.id,
+          actorName: currentUser?.name,
+          actorRole: currentRole,
         }),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
 
     addToast({
       type: 'success',
@@ -2542,6 +4125,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     let combinedItems: OrderItem[] = [];
     let newAddOnSubtotal = 0;
     let updatedTotal = 0;
+    let prevVersion = 1;
     let nextVersion = 2;
 
     setOrders((prev) => {
@@ -2555,7 +4139,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           combinedItems = [...ord.items, ...markedAddOns];
           newAddOnSubtotal = Number(ord.addOnSubtotal || 0) + addOnTotal;
           updatedTotal = Number(ord.originalSubtotal || 0) + newAddOnSubtotal;
-          nextVersion = (Number(ord.version) || 1) + 1;
+          prevVersion = Number(ord.version) || 1;
+          nextVersion = prevVersion + 1;
           return {
             ...ord,
             items: combinedItems,
@@ -2574,16 +4159,20 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/orders', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({
           orderId,
           items: combinedItems,
           addOnSubtotal: newAddOnSubtotal,
           total: updatedTotal,
+          expectedVersion: prevVersion,
           version: nextVersion,
+          actorId: currentUser?.id,
+          actorName: currentUser?.name,
+          actorRole: currentRole,
         }),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
 
     addToast({
       type: 'success',
@@ -2594,6 +4183,84 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const cancelOrder = (orderId: string, reason: string) => {
     const targetOrd = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
+
+    // Rule: Customer cannot cancel once support accepts or kitchen starts
+    if (currentRole === 'customer') {
+      if (targetOrd && (targetOrd.status !== 'placed' || targetOrd.sentToKitchen)) {
+        addToast({
+          type: 'error',
+          title: 'Order Cannot Be Cancelled',
+          message: 'This order has already been accepted by customer support / kitchen and cannot be cancelled.',
+        });
+        return;
+      }
+    }
+
+    // 1. Immediately record in-flight cancellation lock
+    inFlightStatusRef.current.set(orderId, { status: 'cancelled', timestamp: Date.now() });
+
+    if (targetOrd?.orderNumber) {
+      inFlightStatusRef.current.set(targetOrd.orderNumber, { status: 'cancelled', timestamp: Date.now() });
+    }
+
+    // 2. If delivery rider was assigned, free the rider back to available status
+    if (targetOrd?.assignedRiderId) {
+      const riderId = targetOrd.assignedRiderId;
+      setUsers((prev) => {
+        const remainingForRider = orders.filter(
+          (o) =>
+            o.assignedRiderId === riderId &&
+            o.id !== targetOrd.id &&
+            o.orderNumber !== targetOrd.orderNumber &&
+            o.status !== 'completed' &&
+            o.status !== 'cancelled'
+        ).length;
+        const shouldBeAvailable = remainingForRider === 0;
+        const updated = prev.map((u) => {
+          if (u.id === riderId) {
+            return {
+              ...u,
+              riderAvailability: shouldBeAvailable ? ('available' as const) : u.riderAvailability,
+              riderActiveOrderId: shouldBeAvailable ? undefined : u.riderActiveOrderId,
+            };
+          }
+          return u;
+        });
+        try {
+          localStorage.setItem('foodies_users_live', JSON.stringify(updated));
+        } catch (e) { }
+        return updated;
+      });
+
+      setCurrentUser((prev) => {
+        if (prev && prev.id === riderId) {
+          const updated = {
+            ...prev,
+            riderAvailability: 'available' as const,
+            riderActiveOrderId: undefined,
+          };
+          try {
+            localStorage.setItem('foodies_current_user', JSON.stringify(updated));
+          } catch (e) { }
+          return updated;
+        }
+        return prev;
+      });
+
+      try {
+        fetch('/api/users', {
+          method: 'PATCH',
+          headers: getClientAuthHeaders(),
+          body: JSON.stringify({
+            id: riderId,
+            riderAvailability: 'available',
+            riderActiveOrderId: null,
+          }),
+        }).catch(() => { });
+      } catch (e) { }
+    }
+
+    // 3. Release table if dine-in
     if (targetOrd?.tableNumber) {
       setTables((prev) => {
         const updated = prev.map((t) =>
@@ -2608,34 +4275,157 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         fetch('/api/tables', {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getClientAuthHeaders(),
           body: JSON.stringify({
             tableNumber: targetOrd.tableNumber,
             branchId: targetOrd.branchId || currentBranchId,
             status: 'available',
           }),
-        }).catch(() => {});
-      } catch (e) {}
+        }).catch(() => { });
+      } catch (e) { }
     }
 
+    // 3.5 Determine cancellation actor and explicit attribution
+    const cancelActor: 'customer' | 'staff' | 'branch_offline' =
+      (reason && (reason.toLowerCase().includes('branch closed') || reason.toLowerCase().includes('shutdown') || reason.toLowerCase().includes('offline')))
+        ? 'branch_offline'
+        : (reason && (reason.toLowerCase().includes('customer') || reason.toLowerCase().includes('deselected') || reason.toLowerCase().includes('user')))
+          ? 'customer'
+          : (currentRole === 'customer')
+            ? 'customer'
+            : 'staff';
+    const defaultReason = cancelActor === 'customer'
+      ? 'Cancelled by customer'
+      : (cancelActor === 'branch_offline' ? 'Branch Closed Offline by Manager / Owner' : 'Cancelled by Cashier');
+    const cancelNotes = reason || defaultReason;
+
+    // 4. Immediately update localStorage customer history cache
+    if (typeof window !== 'undefined') {
+      try {
+        const rawCache = localStorage.getItem('foodies_customer_history_cache');
+        if (rawCache) {
+          const cacheList: Order[] = JSON.parse(rawCache);
+          const updatedCache = cacheList.map((ord) =>
+            ord.id === orderId || ord.orderNumber === orderId
+              ? {
+                ...ord,
+                status: 'cancelled' as const,
+                notes: cancelNotes,
+                cancellationReason: cancelNotes,
+                cancelledBy: cancelActor,
+                assignedRiderId: undefined,
+                assignedRiderName: undefined,
+                riderStatus: undefined,
+              }
+              : ord
+          );
+          localStorage.setItem('foodies_customer_history_cache', JSON.stringify(updatedCache));
+        }
+      } catch (e) { }
+    }
+
+    // 5. Update local React state with fallback to cache if not yet in state
     setOrders((prev) => {
-      const updated = prev.map((ord) =>
-        ord.id === orderId || ord.orderNumber === orderId
-          ? { ...ord, status: 'cancelled' as const, notes: reason, forwardToKitchenAt: undefined }
-          : ord
-      );
+      const exists = prev.some((ord) => ord.id === orderId || ord.orderNumber === orderId);
+      let updated: Order[];
+      if (exists) {
+        updated = prev.map((ord) =>
+          ord.id === orderId || ord.orderNumber === orderId
+            ? {
+              ...ord,
+              status: 'cancelled' as const,
+              notes: cancelNotes,
+              cancellationReason: cancelNotes,
+              cancelledBy: cancelActor,
+              forwardToKitchenAt: undefined,
+              assignedRiderId: undefined,
+              assignedRiderName: undefined,
+              riderStatus: undefined,
+            }
+            : ord
+        );
+      } else if (targetOrd) {
+        updated = [
+          {
+            ...targetOrd,
+            status: 'cancelled' as const,
+            notes: cancelNotes,
+            cancellationReason: cancelNotes,
+            cancelledBy: cancelActor,
+            forwardToKitchenAt: undefined,
+            assignedRiderId: undefined,
+            assignedRiderName: undefined,
+            riderStatus: undefined,
+          },
+          ...prev,
+        ];
+      } else {
+        let fromCache: Order | undefined;
+        if (typeof window !== 'undefined') {
+          try {
+            const raw = localStorage.getItem('foodies_customer_history_cache');
+            if (raw) {
+              const list: Order[] = JSON.parse(raw);
+              fromCache = list.find((o) => o.id === orderId || o.orderNumber === orderId);
+            }
+          } catch { }
+        }
+        if (fromCache) {
+          updated = [
+            {
+              ...fromCache,
+              status: 'cancelled' as const,
+              notes: cancelNotes,
+              cancellationReason: cancelNotes,
+              cancelledBy: cancelActor,
+              forwardToKitchenAt: undefined,
+              assignedRiderId: undefined,
+              assignedRiderName: undefined,
+              riderStatus: undefined,
+            },
+            ...prev,
+          ];
+        } else {
+          updated = prev;
+        }
+      }
       broadcastOrders(updated);
       return updated;
     });
 
-    // Asynchronously sync cancellation to PostgreSQL database
+    // 6. Asynchronously sync cancellation to PostgreSQL database with fallback
     try {
-      fetch('/api/orders', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ orderId, status: 'cancelled', notes: reason }),
-      }).catch(() => {});
-    } catch (e) {}
+      const sendCancellation = (useVersion: boolean) => {
+        return fetch('/api/orders', {
+          method: 'PATCH',
+          headers: getClientAuthHeaders(),
+          body: JSON.stringify({
+            orderId: targetOrd?.id || orderId,
+            status: 'cancelled',
+            notes: cancelNotes,
+            cancellationReason: cancelNotes,
+            cancelledBy: cancelActor,
+            reason: cancelNotes,
+            assignedRiderId: null,
+            assignedRiderName: null,
+            riderStatus: null,
+            actorId: currentUser?.id || (cancelActor === 'customer' ? 'customer' : 'cashier'),
+            actorName: currentUser?.name || (cancelActor === 'customer' ? 'Customer' : 'Cashier'),
+            actorRole: currentRole || (cancelActor === 'customer' ? 'customer' : 'cashier'),
+          }),
+        });
+      };
+
+      sendCancellation(true)
+        .then((res) => {
+          if (!res.ok && res.status === 409) {
+            sendCancellation(false).catch(() => { });
+          }
+        })
+        .catch(() => {
+          sendCancellation(false).catch(() => { });
+        });
+    } catch (e) { }
 
     addToast({
       type: 'warning',
@@ -2697,7 +4487,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       await fetch('/api/tables', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({
           tableId,
           qrCode: qrToken,
@@ -2705,7 +4495,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           allowQrOrderOnReserved: allowOnReserved,
         }),
       });
-    } catch (e) {}
+    } catch (e) { }
 
     addToast({
       type: 'success',
@@ -2729,13 +4519,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       await fetch('/api/tables', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({
           tableId,
           allowQrOrderOnReserved: allow,
         }),
       });
-    } catch (e) {}
+    } catch (e) { }
 
     addToast({
       type: 'info',
@@ -2756,14 +4546,165 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       await fetch('/api/orders', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({
           orderId,
           assignedWaiterId: waiterId,
           assignedWaiterName: waiterName,
         }),
       });
-    } catch (e) {}
+    } catch (e) { }
+  };
+
+  const markOrderDeliveredToTable = (orderId: string) => {
+    const target = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
+    const targetOrderId = target?.id || orderId;
+    const nowIso = new Date().toISOString();
+
+    inFlightStatusRef.current.set(targetOrderId, {
+      status: 'served',
+      sentToKitchen: true,
+      timestamp: Date.now(),
+    });
+    if (target?.orderNumber) {
+      inFlightStatusRef.current.set(target.orderNumber, {
+        status: 'served',
+        sentToKitchen: true,
+        timestamp: Date.now(),
+      });
+    }
+
+    setOrders((prev) => {
+      const next = prev.map((o) =>
+        o.id === targetOrderId || o.orderNumber === targetOrderId || o.id === orderId || o.orderNumber === orderId
+          ? {
+            ...o,
+            status: 'served' as OrderStatus,
+            deliveredAt: nowIso,
+            sentToKitchen: true,
+            assignedWaiterId: o.assignedWaiterId || (currentUser?.role === 'floor_staff' ? currentUser.id : undefined),
+            assignedWaiterName: o.assignedWaiterName || (currentUser?.role === 'floor_staff' ? currentUser.name : undefined),
+          }
+          : o
+      );
+      broadcastOrders(next);
+      return next;
+    });
+
+    addToast({
+      type: 'success',
+      title: 'Order Delivered to Table 🍽️',
+      message: `Order #${target?.orderNumber || orderId} served at Table ${target?.tableNumber || ''}. Guests are dining.`,
+    });
+
+    try {
+      fetch('/api/orders', {
+        method: 'PATCH',
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify({
+          orderId: targetOrderId,
+          status: 'served',
+          deliveredAt: nowIso,
+          actorId: currentUser?.id,
+          actorName: currentUser?.name,
+          actorRole: currentRole,
+        }),
+      }).catch(() => { });
+    } catch (e) { }
+  };
+
+  const markOrderDoneAndCollected = (orderId: string, cashCollected = true) => {
+    const target = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
+    const targetOrderId = target?.id || orderId;
+    const nowIso = new Date().toISOString();
+
+    inFlightStatusRef.current.set(targetOrderId, {
+      status: 'completed',
+      sentToKitchen: true,
+      timestamp: Date.now(),
+    });
+    if (target?.orderNumber) {
+      inFlightStatusRef.current.set(target.orderNumber, {
+        status: 'completed',
+        sentToKitchen: true,
+        timestamp: Date.now(),
+      });
+    }
+
+    setOrders((prev) => {
+      const next = prev.map((o) =>
+        o.id === targetOrderId || o.orderNumber === targetOrderId || o.id === orderId || o.orderNumber === orderId
+          ? {
+            ...o,
+            status: 'completed' as OrderStatus,
+            completedAt: nowIso,
+            deliveredAt: o.deliveredAt || nowIso,
+            paymentStatus: (cashCollected ? 'paid' : o.paymentStatus) as PaymentStatus,
+            paymentCollected: cashCollected ? true : o.paymentCollected,
+            assignedWaiterId: o.assignedWaiterId || (currentUser?.role === 'floor_staff' ? currentUser.id : undefined),
+            assignedWaiterName: o.assignedWaiterName || (currentUser?.role === 'floor_staff' ? currentUser.name : undefined),
+          }
+          : o
+      );
+      broadcastOrders(next);
+      return next;
+    });
+
+    if (target?.tableNumber) {
+      setTables((prev) => {
+        const next = prev.map((t) =>
+          String(t.number) === String(target.tableNumber) || String(t.id) === String(target.tableNumber)
+            ? { ...t, status: 'available' as const, reservedFor: undefined, currentOrderId: undefined, seatedAt: undefined }
+            : t
+        );
+        broadcastTables(next);
+        return next;
+      });
+
+      setActiveTableSessionState((prev) => {
+        if (prev && (prev.tableNumber === target.tableNumber || prev.tableId === target.tableNumber || prev.orderId === target.id)) {
+          if (typeof window !== 'undefined') localStorage.removeItem('foodies_active_table_session');
+          return null;
+        }
+        return prev;
+      });
+
+      try {
+        fetch('/api/tables', {
+          method: 'PATCH',
+          headers: getClientAuthHeaders(),
+          body: JSON.stringify({
+            tableNumber: target.tableNumber,
+            branchId: target.branchId || currentBranchId,
+            status: 'available',
+          }),
+        }).catch(() => { });
+      } catch (e) { }
+    }
+
+    addToast({
+      type: 'success',
+      title: 'Order Done & Collected ✓',
+      message: `Order #${target?.orderNumber || orderId} settled${target?.tableNumber ? ` & Table #${target.tableNumber} marked free` : ''}.`,
+    });
+
+    try {
+      fetch('/api/orders', {
+        method: 'PATCH',
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify({
+          orderId: targetOrderId,
+          status: 'completed',
+          paymentStatus: cashCollected ? 'paid' : target?.paymentStatus,
+          paymentCollected: cashCollected,
+          completedAt: nowIso,
+          deliveredAt: target?.deliveredAt || nowIso,
+          actorId: currentUser?.id,
+          actorName: currentUser?.name,
+          actorRole: currentRole,
+        }),
+      }).catch(() => { });
+    } catch (e) { }
   };
 
   const cancelDineInOrder = async (orderId: string, reason: string = 'Customer cancelled at table') => {
@@ -2774,10 +4715,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const next = prev.map((o) =>
         o.id === orderId
           ? {
-              ...o,
-              status: 'cancelled' as OrderStatus,
-              notes: `${o.notes ? `${o.notes} · ` : ''}Cancelled: ${reason}`,
-            }
+            ...o,
+            status: 'cancelled' as OrderStatus,
+            notes: `${o.notes ? `${o.notes} · ` : ''}Cancelled: ${reason}`,
+          }
           : o
       );
       broadcastOrders(next);
@@ -2796,14 +4737,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       await fetch('/api/orders', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({
           orderId,
           status: 'cancelled',
           notes: `${targetOrder.notes ? `${targetOrder.notes} · ` : ''}Cancelled: ${reason}`,
         }),
       });
-    } catch (e) {}
+    } catch (e) { }
 
     addToast({
       type: 'warning',
@@ -2829,13 +4770,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const next = prev.map((o) =>
         o.id === orderId
           ? {
-              ...o,
-              items: updatedItems,
-              addOnSubtotal: newAddOnSubtotal,
-              total: newTotal,
-              version: newVersion,
-              sentToKitchen: true,
-            }
+            ...o,
+            items: updatedItems,
+            addOnSubtotal: newAddOnSubtotal,
+            total: newTotal,
+            version: newVersion,
+            sentToKitchen: true,
+          }
           : o
       );
       broadcastOrders(next);
@@ -2845,7 +4786,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       await fetch('/api/orders', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({
           orderId,
           items: updatedItems,
@@ -2855,7 +4796,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           sentToKitchen: true,
         }),
       });
-    } catch (e) {}
+    } catch (e) { }
 
     addToast({
       type: 'success',
@@ -2887,10 +4828,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       status === 'available'
         ? 'Table Free ✓'
         : status === 'occupied'
-        ? 'Table Seated 🍽️'
-        : status === 'cleaning'
-        ? 'Table Cleaning 🧹'
-        : 'Table Reserved 📅';
+          ? 'Table Seated 🍽️'
+          : status === 'cleaning'
+            ? 'Table Cleaning 🧹'
+            : 'Table Reserved 📅';
 
     const statusMsg =
       customMessage || `Table ${tableNum || tableId} is now ${status === 'available' ? 'free and available' : status}.`;
@@ -2905,14 +4846,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/tables', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({
           tableId,
           status,
           reservedFor: status === 'reserved' ? reservationName || 'Reserved Guest' : undefined,
         }),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
   };
 
   const markTableFree = (tableIdOrNumber: string) => {
@@ -2937,13 +4878,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/tables', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({
           tableNumber: tableIdOrNumber,
           status: 'available',
         }),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
 
     addToast({
       type: 'success',
@@ -2957,8 +4898,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setMenuItems((prev) => {
       const updated = prev.map((item) => {
         if (item.id === itemId) {
-          const current = item.branchAvailability[branchId] ?? true;
-          updatedAvailability = { ...item.branchAvailability, [branchId]: !current };
+          const current = (item.branchAvailability && item.branchAvailability[branchId] !== undefined)
+            ? Boolean(item.branchAvailability[branchId])
+            : (item.isAvailable ?? true);
+          updatedAvailability = { ...(item.branchAvailability || {}), [branchId]: !current };
           return {
             ...item,
             branchAvailability: updatedAvailability,
@@ -2974,13 +4917,71 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/menu', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({ itemId, branchAvailability: updatedAvailability }),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
   };
 
-  const updateMenuItemPrice = (itemId: string, newBasePrice: number) => {
+  const updateMenuItemBranchPrice = (itemId: string, branchId: string, overridePrice: number) => {
+    const numPrice = Number(overridePrice) || 0;
+    let updatedOverrides: Record<string, number> = {};
+    setMenuItems((prev) => {
+      const updated = prev.map((item) => {
+        if (item.id === itemId) {
+          updatedOverrides = { ...(item.branchPriceOverrides || {}), [branchId]: numPrice };
+          return {
+            ...item,
+            branchPriceOverrides: updatedOverrides,
+          };
+        }
+        return item;
+      });
+      broadcastMenu(updated);
+      return updated;
+    });
+
+    // Recalculate any matching cart item
+    setCart((prevCart) => {
+      if (!prevCart || prevCart.length === 0) return prevCart;
+      const targetDish = menuItems.find((m) => m.id === itemId);
+      if (!targetDish) return prevCart;
+      const updated = prevCart.map((ci) => {
+        if (ci.menuItemId !== itemId) return ci;
+        let newUnitPrice = hasSelectedBranch
+          ? (currentBranchId === branchId ? numPrice : (targetDish.branchPriceOverrides?.[currentBranchId] ?? targetDish.basePrice))
+          : getItemMinPrice(targetDish);
+        if (ci.size && targetDish.sizes) {
+          const matchSize = targetDish.sizes.find((s) => s.name === ci.size);
+          if (matchSize) newUnitPrice += Number(matchSize.priceDelta) || 0;
+        }
+        if (ci.extras && targetDish.extras) {
+          ci.extras.forEach((ext) => {
+            const matchExtra = targetDish.extras?.find((e) => e.name === ext);
+            if (matchExtra) newUnitPrice += Number(matchExtra.price) || 0;
+          });
+        }
+        return { ...ci, unitPrice: newUnitPrice };
+      });
+      store.dispatch(setReduxCart(updated));
+      return updated;
+    });
+
+    // Asynchronously sync price override change to PostgreSQL database
+    try {
+      fetch('/api/menu', {
+        method: 'PATCH',
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify({ itemId, branchPriceOverrides: updatedOverrides }),
+      }).catch(() => { });
+    } catch (e) { }
+  };
+
+  const updateMenuItemPrice = (itemId: string, newBasePrice: number, branchOverride?: { branchId: string; price: number }) => {
+    if (branchOverride) {
+      updateMenuItemBranchPrice(itemId, branchOverride.branchId, branchOverride.price);
+      return;
+    }
     const numPrice = Number(newBasePrice) || 0;
     setMenuItems((prev) => {
       const updated = prev.map((item) => (item.id === itemId ? { ...item, basePrice: numPrice } : item));
@@ -2988,14 +4989,43 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return updated;
     });
 
+    // Recalculate any matching cart item
+    setCart((prevCart) => {
+      if (!prevCart || prevCart.length === 0) return prevCart;
+      const targetDish = menuItems.find((m) => m.id === itemId);
+      if (!targetDish) return prevCart;
+      const dish = { ...targetDish, basePrice: numPrice };
+      const updated = prevCart.map((ci) => {
+        if (ci.menuItemId !== itemId) return ci;
+        let newUnitPrice = hasSelectedBranch
+          ? ((dish.branchPriceOverrides && dish.branchPriceOverrides[currentBranchId] !== undefined)
+            ? Number(dish.branchPriceOverrides[currentBranchId])
+            : numPrice)
+          : getItemMinPrice(dish);
+        if (ci.size && dish.sizes) {
+          const matchSize = dish.sizes.find((s) => s.name === ci.size);
+          if (matchSize) newUnitPrice += Number(matchSize.priceDelta) || 0;
+        }
+        if (ci.extras && dish.extras) {
+          ci.extras.forEach((ext) => {
+            const matchExtra = dish.extras?.find((e) => e.name === ext);
+            if (matchExtra) newUnitPrice += Number(matchExtra.price) || 0;
+          });
+        }
+        return { ...ci, unitPrice: newUnitPrice };
+      });
+      store.dispatch(setReduxCart(updated));
+      return updated;
+    });
+
     // Asynchronously sync price change to PostgreSQL database
     try {
       fetch('/api/menu', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({ itemId, basePrice: numPrice }),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
 
     setAuditLogs((prev) => [
       {
@@ -3013,7 +5043,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const updateBranchSettings = (branchId: string, settings: Partial<Branch>) => {
     setBranches((prev) => {
-      const updated = prev.map((b) => (b.id === branchId ? { ...b, ...settings } : b));
+      const updated = prev.map((b) => (b.id === branchId || normalizeBranchId(b.id) === normalizeBranchId(branchId) ? { ...b, ...settings } : b));
       broadcastBranches(updated);
       return updated;
     });
@@ -3022,10 +5052,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/branches', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({ branchId, settings }),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
     setAuditLogs((prev) => [
       {
         id: `aud-${Date.now()}`,
@@ -3046,9 +5076,143 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
+  // Branch Shutdown Confirmation Modal State (When setting offline with pending orders)
+  const [shutdownModalState, setShutdownModalState] = useState<{
+    isOpen: boolean;
+    branch: Branch | null;
+    pendingOrders: Order[];
+  }>({
+    isOpen: false,
+    branch: null,
+    pendingOrders: [],
+  });
+
+  const toggleBranchStatus = (branchId: string) => {
+    const target = branches.find(
+      (b) => b.id === branchId || normalizeBranchId(b.id) === normalizeBranchId(branchId)
+    );
+    if (!target) return;
+
+    // If currently OPEN and going to shut OFFLINE, check for pending in-progress orders
+    if (target.isOpen) {
+      const pending = orders.filter(
+        (o) =>
+          (o.branchId === target.id || normalizeBranchId(o.branchId) === normalizeBranchId(target.id)) &&
+          !['completed', 'delivered', 'served', 'taken', 'cancelled'].includes(o.status)
+      );
+
+      if (pending.length > 0) {
+        setShutdownModalState({
+          isOpen: true,
+          branch: target,
+          pendingOrders: pending,
+        });
+        return;
+      }
+    }
+
+    const nextState = !target.isOpen;
+    updateBranchSettings(target.id, { isOpen: nextState });
+    addToast({
+      type: nextState ? 'success' : 'warning',
+      title: nextState ? 'Branch Opened (Online) 🟢' : 'Branch Closed (Offline) 🔴',
+      message: `${target.name} storefront is now ${nextState ? 'ONLINE and accepting orders' : 'OFFLINE and customer ordering is paused'}.`,
+    });
+  };
+
+  const closeShutdownModal = () => {
+    setShutdownModalState({ isOpen: false, branch: null, pendingOrders: [] });
+  };
+
+  const confirmShutdownKeepProcessing = () => {
+    if (!shutdownModalState.branch) return;
+    const target = shutdownModalState.branch;
+    const pendingCount = shutdownModalState.pendingOrders.length;
+
+    updateBranchSettings(target.id, { isOpen: false });
+    addToast({
+      type: 'info',
+      title: 'Branch Offline (Processing Orders) 🟠',
+      message: `${target.name} is now OFFLINE for new orders. ${pendingCount} pending order(s) will continue processing.`,
+    });
+    setShutdownModalState({ isOpen: false, branch: null, pendingOrders: [] });
+  };
+
+  const confirmShutdownCancelOrders = () => {
+    if (!shutdownModalState.branch) return;
+    const target = shutdownModalState.branch;
+    const pending = shutdownModalState.pendingOrders;
+
+    // 1. Mark branch offline
+    updateBranchSettings(target.id, { isOpen: false });
+
+    // 2. Cancel each pending order for this branch
+    pending.forEach((ord) => {
+      cancelOrder(ord.id, 'Branch Closed Offline by Manager / Owner');
+    });
+
+    addToast({
+      type: 'warning',
+      title: 'Branch Closed & Orders Cancelled 🔴',
+      message: `${target.name} is now OFFLINE. ${pending.length} pending order(s) have been cancelled and moved to Order History.`,
+    });
+    setShutdownModalState({ isOpen: false, branch: null, pendingOrders: [] });
+  };
+
+  const createBranch = async (branchData: Partial<Branch>): Promise<boolean> => {
+    const id = branchData.id || `branch-${branchData.city?.toLowerCase().replace(/\s+/g, '-') || 'cafe'}-${Date.now()}`;
+    const newBranch: Branch = {
+      id,
+      name: branchData.name || 'New Branch',
+      city: branchData.city || 'Lahore',
+      address: branchData.address || '',
+      phone: branchData.phone || '+92 300 0000000',
+      openingHours: branchData.openingHours || '11:00 AM - 1:00 AM',
+      isOpen: branchData.isOpen !== false,
+      isBusy: Boolean(branchData.isBusy),
+      prepTimeEstimateMin: Number(branchData.prepTimeEstimateMin) || 20,
+      fullEditWindowMin: Number(branchData.fullEditWindowMin) || 5,
+      stopAddOnsMinBeforeReady: Number(branchData.stopAddOnsMinBeforeReady) || 5,
+      deliveryEnabled: branchData.deliveryEnabled !== false,
+      latitude: Number(branchData.latitude) || 31.5204,
+      longitude: Number(branchData.longitude) || 74.3587,
+      maxOrderDistanceKm: Number(branchData.maxOrderDistanceKm) || 50,
+      tableQrMaxDistanceMeters: Number(branchData.tableQrMaxDistanceMeters) || 300,
+    };
+
+    setBranches((prev) => {
+      const updated = [...prev.filter((b) => b.id !== id), newBranch];
+      broadcastBranches(updated);
+      return updated;
+    });
+
+    try {
+      const res = await fetch('/api/branches', {
+        method: 'POST',
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify(newBranch),
+      });
+      if (res.ok) {
+        addToast({
+          type: 'success',
+          title: 'Branch Created! 🏢',
+          message: `${newBranch.name} added to platform network.`,
+        });
+        return true;
+      }
+    } catch (_err) { }
+
+    addToast({
+      type: 'success',
+      title: 'Branch Added',
+      message: `${newBranch.name} recorded.`,
+    });
+    return true;
+  };
+
   const updateBranchPaymentSettings = (branchId: string, settings: BranchPaymentSettings) => {
     setBranches((prev) => {
-      const updated = prev.map((b) => (b.id === branchId ? { ...b, paymentSettings: settings } : b));
+      const updated = prev.map((b) => (b.id === branchId || normalizeBranchId(b.id) === normalizeBranchId(branchId) ? { ...b, paymentSettings: settings } : b));
       broadcastBranches(updated);
       return updated;
     });
@@ -3057,119 +5221,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/branches', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({ branchId, settings: { paymentSettings: settings } }),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
 
     addToast({
       type: 'success',
       title: 'Payment Settings Saved! 💳',
       message: 'Branch payment options updated.',
     });
-  };
-
-  const submitComplaint = (subject: string, message: string, orderId?: string) => {
-    const order = orders.find((o) => o.id === orderId);
-    const newComplaint: Complaint = {
-      id: `cmp-${Date.now()}`,
-      ticketNumber: `TKT-${Math.floor(1000 + Math.random() * 9000)}`,
-      customerId: currentUser.id || 'user-guest',
-      customerName: currentUser.name || 'Guest Customer',
-      customerPhone: currentUser.phone || '+923000000000',
-      branchId: currentBranchId,
-      orderId,
-      orderNumber: order?.orderNumber,
-      subject,
-      status: 'new',
-      createdAt: new Date().toISOString(),
-      messages: [
-        {
-          id: `msg-${Date.now()}`,
-          sender: 'customer',
-          senderName: currentUser.name || 'Customer',
-          text: message,
-          timestamp: new Date().toISOString(),
-        },
-      ],
-    };
-
-    setComplaints((prev) => {
-      const updated = [newComplaint, ...prev];
-      broadcastComplaints(updated);
-      return updated;
-    });
-
-    // Asynchronously save complaint to PostgreSQL
-    try {
-      fetch('/api/complaints', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(newComplaint),
-      }).catch(() => {});
-    } catch (e) {}
-
-    addToast({
-      type: 'success',
-      title: 'Complaint / Query Submitted',
-      message: `Ticket #${newComplaint.ticketNumber} created. Branch representative will reply shortly.`,
-    });
-  };
-
-  const sendComplaintReply = (complaintId: string, text: string) => {
-    const senderType: 'customer' | 'representative' = currentRole === 'customer' ? 'customer' : 'representative';
-    const newMessage: ComplaintMessage = {
-      id: `msg-${Date.now()}`,
-      sender: senderType,
-      senderName: currentUser.name || (currentRole === 'customer' ? 'Customer' : 'Zara Noor (Branch Rep)'),
-      text,
-      timestamp: new Date().toISOString(),
-    };
-
-    setComplaints((prev) => {
-      const updated = prev.map((cmp) => {
-        if (cmp.id === complaintId) {
-          return {
-            ...cmp,
-            status: cmp.status === 'new' ? ('in_progress' as const) : cmp.status,
-            messages: [...cmp.messages, newMessage],
-          };
-        }
-        return cmp;
-      });
-      broadcastComplaints(updated);
-      return updated;
-    });
-
-    // Asynchronously update complaint in PostgreSQL
-    try {
-      fetch('/api/complaints', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          id: complaintId,
-          message: newMessage,
-          status: 'in_progress',
-        }),
-      }).catch(() => {});
-    } catch (e) {}
-  };
-
-  const updateComplaintStatus = (complaintId: string, status: 'new' | 'in_progress' | 'resolved' | 'closed') => {
-    setComplaints((prev) => {
-      const updated = prev.map((c) => (c.id === complaintId ? { ...c, status } : c));
-      broadcastComplaints(updated);
-      return updated;
-    });
-
-    // Asynchronously update status in PostgreSQL
-    try {
-      fetch('/api/complaints', {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ id: complaintId, status }),
-      }).catch(() => {});
-    } catch (e) {}
   };
 
   const addTableSession = (sessionData: Omit<TableSession, 'id'>) => {
@@ -3186,10 +5247,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/tables/sessions', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify(newSession),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
   };
 
   const completeTableSession = (tableIdOrNumber: string) => {
@@ -3212,10 +5273,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/tables/sessions', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({ tableId: tableIdOrNumber, branchId: currentBranchId, status: 'completed' }),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
   };
 
   const openShift = (openingFloat: number) => {
@@ -3239,15 +5300,54 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/shifts', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify(newShift),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
 
     addToast({
       type: 'success',
       title: 'Shift Opened',
       message: `Starting float of Rs. ${openingFloat.toLocaleString()} recorded.`,
+    });
+  };
+
+  const updateShiftOpeningBalance = (shiftId: string, newOpeningFloat: number) => {
+    const cleanOpening = Math.max(0, Number(newOpeningFloat) || 0);
+    setShifts((prev) => {
+      const updated = prev.map((sh) => {
+        if (sh.id !== shiftId) return sh;
+        const nextExpected = cleanOpening + (Number(sh.cashCollected) || 0);
+        const nextDiff =
+          sh.countedCash !== undefined && sh.countedCash !== null
+            ? Number(sh.countedCash) - nextExpected
+            : sh.difference;
+        return {
+          ...sh,
+          openingFloat: cleanOpening,
+          expectedCash: nextExpected,
+          difference: nextDiff,
+        };
+      });
+      broadcastShifts(updated);
+      return updated;
+    });
+
+    try {
+      fetch('/api/shifts', {
+        method: 'PATCH',
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify({
+          shiftId,
+          openingFloat: cleanOpening,
+        }),
+      }).catch(() => { });
+    } catch (e) { }
+
+    addToast({
+      type: 'success',
+      title: 'Opening Balance Updated',
+      message: `Cashier opening balance saved as Rs. ${cleanOpening.toLocaleString()}.`,
     });
   };
 
@@ -3277,7 +5377,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         fetch('/api/shifts', {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getClientAuthHeaders(),
           body: JSON.stringify({
             shiftId: (closedShift as CashShift).id,
             countedCash,
@@ -3285,9 +5385,31 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             differenceReason,
             status: 'closed',
           }),
-        }).catch(() => {});
-      } catch (e) {}
+        }).catch(() => { });
+      } catch (e) { }
     }
+
+    // End of day / shift reconciliation: purge cancelled orders from database and local state
+    try {
+      fetch('/api/orders?purge=end_of_day', {
+        method: 'DELETE',
+        headers: getClientAuthHeaders(),
+      }).catch(() => { });
+      setOrders((prev) => {
+        const withoutCancelled = prev.filter(
+          (o) => o.status !== 'cancelled' && (o.status as string) !== 'canceled'
+        );
+        try {
+          localStorage.setItem('foodies_orders_live', JSON.stringify(withoutCancelled));
+          const cache = JSON.parse(localStorage.getItem('foodies_customer_history_cache') || '[]');
+          if (Array.isArray(cache)) {
+            const cleanCache = cache.filter((o: any) => o.status !== 'cancelled' && o.status !== 'canceled');
+            localStorage.setItem('foodies_customer_history_cache', JSON.stringify(cleanCache));
+          }
+        } catch (e) { }
+        return withoutCancelled;
+      });
+    } catch (e) { }
 
     addToast({
       type: 'info',
@@ -3300,7 +5422,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     shifts.find(
       (sh) =>
         sh.status === 'open' &&
-        (sh.branchId === currentBranchId || sh.branchId === currentBranch.id || !sh.branchId || sh.id === 'sh-today-1')
+        (sh.branchId === currentBranchId ||
+          sh.branchId === currentBranch.id ||
+          normalizeBranchId(sh.branchId) === normalizeBranchId(currentBranch.id))
     ) ||
     shifts.find((sh) => sh.status === 'open') ||
     DEFAULT_OPEN_SHIFT;
@@ -3327,10 +5451,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/refunds', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify(newReq),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
 
     addToast({
       type: 'warning',
@@ -3345,11 +5469,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       const updated = prev.map((r) =>
         r.id === refundId
           ? {
-              ...r,
-              status: approved ? ('approved' as const) : ('rejected' as const),
-              approvedBy: currentUser.name,
-              approvedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            }
+            ...r,
+            status: approved ? ('approved' as const) : ('rejected' as const),
+            approvedBy: currentUser.name,
+            approvedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          }
           : r
       );
       broadcastRefunds(updated);
@@ -3359,14 +5483,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/refunds', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({
           refundId,
           status: approved ? 'approved' : 'rejected',
           approvedBy: currentUser.name,
         }),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
 
     if (approved && req) {
       setOrders((prev) => {
@@ -3383,10 +5507,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         fetch('/api/orders', {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getClientAuthHeaders(),
           body: JSON.stringify({ orderId: req.orderId, paymentStatus: 'refunded' }),
-        }).catch(() => {});
-      } catch (e) {}
+        }).catch(() => { });
+      } catch (e) { }
     }
 
     setAuditLogs((prev) => [
@@ -3418,6 +5542,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       broadcastUsers(next);
       return next;
     });
+    // Active session revocation if targeted user is currently signed in
+    if (currentUser.id === userId && currentUser.role !== 'platform_owner') {
+      if (status !== 'active') {
+        setCurrentRole('customer');
+        setCurrentUser({
+          id: 'user-guest',
+          name: 'Guest Customer',
+          phone: '',
+          email: '',
+          role: 'customer',
+          status: 'active',
+        });
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('foodies_staff_user');
+          localStorage.removeItem('foodies_staff_session');
+          localStorage.setItem('foodies_staff_role', 'customer');
+        }
+        addToast({
+          type: 'error',
+          title: `Account Access Revoked (${status.toUpperCase()}) 🚫`,
+          message: `Your staff account has been ${status.toUpperCase()} by management. Access is revoked.`,
+        });
+      }
+    }
     setAuditLogs((prev) => [
       {
         id: `aud-${Date.now()}`,
@@ -3432,9 +5580,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ]);
     fetch('/api/users', {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getClientAuthHeaders(),
       body: JSON.stringify({ id: userId, status }),
-    }).catch(() => {});
+    }).catch(() => { });
   };
 
   const createUser = (userData: Omit<User, 'id'> & { id?: string }) => {
@@ -3459,9 +5607,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ]);
     fetch('/api/users', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getClientAuthHeaders(),
       body: JSON.stringify(newUser),
-    }).catch(() => {});
+    }).catch(() => { });
   };
 
   const deleteUser = (userId: string) => {
@@ -3471,6 +5619,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       broadcastUsers(next);
       return next;
     });
+    if (currentUser.id === userId && currentUser.role !== 'platform_owner') {
+      setCurrentRole('customer');
+      setCurrentUser({
+        id: 'user-guest',
+        name: 'Guest Customer',
+        phone: '',
+        email: '',
+        role: 'customer',
+        status: 'active',
+      });
+      if (typeof window !== 'undefined') {
+        localStorage.removeItem('foodies_staff_user');
+        localStorage.removeItem('foodies_staff_session');
+        localStorage.setItem('foodies_staff_role', 'customer');
+      }
+    }
     setAuditLogs((prev) => [
       {
         id: `aud-${Date.now()}`,
@@ -3485,7 +5649,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ]);
     fetch(`/api/users?id=${encodeURIComponent(userId)}`, {
       method: 'DELETE',
-    }).catch(() => {});
+      headers: getClientAuthHeaders(),
+    }).catch(() => { });
   };
 
   const updateUser = (userId: string, updates: Partial<User>) => {
@@ -3494,6 +5659,44 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       broadcastUsers(next);
       return next;
     });
+    // Active session update/revocation if targeted user is currently signed in
+    if (currentUser.id === userId && currentUser.role !== 'platform_owner') {
+      if (updates.status && updates.status !== 'active') {
+        setCurrentRole('customer');
+        setCurrentUser({
+          id: 'user-guest',
+          name: 'Guest Customer',
+          phone: '',
+          email: '',
+          role: 'customer',
+          status: 'active',
+        });
+        if (typeof window !== 'undefined') {
+          localStorage.removeItem('foodies_staff_user');
+          localStorage.removeItem('foodies_staff_session');
+          localStorage.setItem('foodies_staff_role', 'customer');
+        }
+        addToast({
+          type: 'error',
+          title: `Account Access Revoked (${updates.status.toUpperCase()}) 🚫`,
+          message: `Your staff account has been ${updates.status.toUpperCase()} by management. Access is revoked.`,
+        });
+      } else {
+        const updatedSelf = { ...currentUser, ...updates };
+        setCurrentUser(updatedSelf);
+        if (updates.role) {
+          setCurrentRole(updates.role);
+          store.dispatch(setReduxRole(updates.role));
+        }
+        if (updates.branchId) {
+          setCurrentBranchId(updates.branchId);
+        }
+        if (typeof window !== 'undefined') {
+          localStorage.setItem('foodies_staff_user', JSON.stringify(updatedSelf));
+          if (updates.role) localStorage.setItem('foodies_staff_role', updates.role);
+        }
+      }
+    }
     setAuditLogs((prev) => [
       {
         id: `aud-${Date.now()}`,
@@ -3508,9 +5711,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     ]);
     fetch('/api/users', {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getClientAuthHeaders(),
       body: JSON.stringify({ id: userId, ...updates }),
-    }).catch(() => {});
+    }).catch(() => { });
   };
 
   // Floor & Seating Actions
@@ -3533,7 +5736,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       pin: Math.floor(1000 + Math.random() * 9000).toString(),
       chairs: tableData.chairs || tableData.capacity,
     };
-    setTables((prev) => [...prev, newTable]);
+    setTables((prev) => {
+      const next = [...prev, newTable];
+      broadcastTables(next);
+      return next;
+    });
+    try {
+      fetch('/api/tables', {
+        method: 'POST',
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify(newTable),
+      }).catch(() => { });
+    } catch (e) { }
     addToast({
       type: 'success',
       title: 'Table Added',
@@ -3542,23 +5756,46 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const updateTable = (tableId: string, updates: Partial<Table>) => {
-    setTables((prev) =>
-      prev.map((t) =>
+    setTables((prev) => {
+      const next = prev.map((t) =>
         t.id === tableId
           ? {
-              ...t,
-              ...updates,
-              capacity: updates.chairs !== undefined ? updates.chairs : updates.capacity !== undefined ? updates.capacity : t.capacity,
-              chairs: updates.chairs !== undefined ? updates.chairs : updates.capacity !== undefined ? updates.capacity : t.chairs || t.capacity,
-            }
+            ...t,
+            ...updates,
+            capacity: updates.chairs !== undefined ? updates.chairs : updates.capacity !== undefined ? updates.capacity : t.capacity,
+            chairs: updates.chairs !== undefined ? updates.chairs : updates.capacity !== undefined ? updates.capacity : t.chairs || t.capacity,
+          }
           : t
-      )
-    );
+      );
+      broadcastTables(next);
+      return next;
+    });
+    try {
+      fetch('/api/tables', {
+        method: 'PATCH',
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify({
+          tableId,
+          ...updates,
+          tableNumber: updates.number,
+        }),
+      }).catch(() => { });
+    } catch (e) { }
     addToast({ type: 'success', title: 'Table Updated', message: 'Seating layout updated.' });
   };
 
   const deleteTable = (tableId: string) => {
-    setTables((prev) => prev.filter((t) => t.id !== tableId));
+    setTables((prev) => {
+      const next = prev.filter((t) => t.id !== tableId);
+      broadcastTables(next);
+      return next;
+    });
+    try {
+      fetch(`/api/tables?id=${encodeURIComponent(tableId)}`, {
+        method: 'DELETE',
+        headers: getClientAuthHeaders(),
+      }).catch(() => { });
+    } catch (e) { }
     addToast({ type: 'info', title: 'Table Deleted', message: 'Table removed from floor layout.' });
   };
 
@@ -3574,10 +5811,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         fetch('/api/marketing', {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getClientAuthHeaders(),
           body: JSON.stringify({ type: 'category', action: 'add', name: category }),
-        }).catch(() => {});
-      } catch (e) {}
+        }).catch(() => { });
+      } catch (e) { }
 
       addToast({ type: 'success', title: 'Category Created', message: `Added category: ${category}` });
     }
@@ -3597,10 +5834,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/marketing', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({ type: 'category', action: 'rename', oldName: oldCat, newName: newCat }),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
 
     addToast({ type: 'success', title: 'Category Renamed', message: `Updated to ${newCat}` });
   };
@@ -3615,10 +5852,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/marketing', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({ type: 'category', action: 'delete', name: category }),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
 
     addToast({ type: 'info', title: 'Category Removed', message: `Removed ${category}` });
   };
@@ -3634,14 +5871,40 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return updated;
     });
 
+    // Recalculate any matching cart item
+    setCart((prevCart) => {
+      if (!prevCart || prevCart.length === 0) return prevCart;
+      const updated = prevCart.map((ci) => {
+        if (ci.menuItemId !== normalizedItem.id) return ci;
+        let newUnitPrice = hasSelectedBranch
+          ? ((normalizedItem.branchPriceOverrides && normalizedItem.branchPriceOverrides[currentBranchId] !== undefined)
+            ? Number(normalizedItem.branchPriceOverrides[currentBranchId])
+            : Number(normalizedItem.basePrice) || 0)
+          : getItemMinPrice(normalizedItem);
+        if (ci.size && normalizedItem.sizes) {
+          const matchSize = normalizedItem.sizes.find((s) => s.name === ci.size);
+          if (matchSize) newUnitPrice += Number(matchSize.priceDelta) || 0;
+        }
+        if (ci.extras && normalizedItem.extras) {
+          ci.extras.forEach((ext) => {
+            const matchExtra = normalizedItem.extras?.find((e) => e.name === ext);
+            if (matchExtra) newUnitPrice += Number(matchExtra.price) || 0;
+          });
+        }
+        return { ...ci, unitPrice: newUnitPrice };
+      });
+      store.dispatch(setReduxCart(updated));
+      return updated;
+    });
+
     // Asynchronously sync item update to PostgreSQL database
     try {
       fetch('/api/menu', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({ itemId: normalizedItem.id, ...normalizedItem }),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
 
     addToast({ type: 'success', title: 'Menu Item Saved', message: `Updated details for ${normalizedItem.name}` });
   };
@@ -3661,10 +5924,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch('/api/menu', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify(normalizedItem),
-      }).catch(() => {});
-    } catch (e) {}
+      }).catch(() => { });
+    } catch (e) { }
 
     addToast({ type: 'success', title: 'Item Created', message: `Added ${normalizedItem.name} to menu` });
   };
@@ -3680,180 +5943,144 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     try {
       fetch(`/api/menu?id=${itemId}`, {
         method: 'DELETE',
-      }).catch(() => {});
-    } catch (e) {}
+        headers: getClientAuthHeaders(),
+      }).catch(() => { });
+    } catch (e) { }
 
     addToast({ type: 'info', title: 'Item Removed', message: 'Item deleted from menu.' });
   };
 
   // Footer Actions
   const updateFooterSettings = (settings: Partial<FooterSettings>) => {
+    const homeNotifKeys = [
+      'homeNotificationEnabled',
+      'homeNotificationBadge',
+      'homeNotificationTitle',
+      'homeNotificationMessage',
+      'homeNotificationType',
+      'homeNotificationUpdatedBy',
+      'homeNotificationUpdatedAt',
+    ];
+    const hasHomeNotifChange = homeNotifKeys.some((k) => k in settings);
+    const stampedSettings: Partial<FooterSettings> = hasHomeNotifChange
+      ? {
+        ...settings,
+        homeNotificationUpdatedBy:
+          settings.homeNotificationUpdatedBy || currentUser?.name || 'Branch Manager',
+        homeNotificationUpdatedAt:
+          settings.homeNotificationUpdatedAt || new Date().toISOString(),
+      }
+      : settings;
+
     setFooterSettings((prev) => {
-      const updated = { ...prev, ...settings };
+      const updated = { ...prev, ...stampedSettings };
       broadcastMarketing({ footerSettings: updated });
+      if (hasHomeNotifChange && typeof window !== 'undefined') {
+        try {
+          localStorage.setItem(
+            'foodies_web_home_notification',
+            JSON.stringify({
+              homeNotificationEnabled: updated.homeNotificationEnabled,
+              homeNotificationBadge: updated.homeNotificationBadge,
+              homeNotificationTitle: updated.homeNotificationTitle,
+              homeNotificationMessage: updated.homeNotificationMessage,
+              homeNotificationType: updated.homeNotificationType,
+              homeNotificationUpdatedBy: updated.homeNotificationUpdatedBy,
+              homeNotificationUpdatedAt: updated.homeNotificationUpdatedAt,
+            })
+          );
+        } catch { }
+      }
       return updated;
     });
 
     try {
       fetch('/api/marketing', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'footer', settings }),
-      }).catch(() => {});
-    } catch (e) {}
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify({ type: 'footer', settings: stampedSettings }),
+      }).catch(() => { });
+    } catch (e) { }
 
-    addToast({ type: 'success', title: 'Footer Updated', message: 'Cafe footer contact & addresses saved.' });
+    addToast({
+      type: 'success',
+      title: hasHomeNotifChange ? 'Web Home Notification Updated' : 'Footer Updated',
+      message: hasHomeNotifChange
+        ? 'Home notification banner saved & published to Web Home.'
+        : 'Cafe footer contact & addresses saved.',
+    });
   };
 
-  // Banner & Deal Actions with Representative Approval Flow
+  // Banner & Deal Actions: Go Live Immediately on Publish
   const updateHeroBanner = (banner: HeroBanner) => {
-    const isPrivileged = currentRole === 'branch_manager' || currentRole === 'platform_owner' || allowRepresentativeDirectPublish;
-    if (isPrivileged) {
-      setHeroBanners((prev) => {
-        const updated = prev.map((b) => (b.id === banner.id ? banner : b));
-        broadcastMarketing({ heroBanners: updated });
-        return updated;
-      });
+    setHeroBanners((prev) => {
+      const updated = prev.map((b) => (b.id === banner.id ? banner : b));
+      broadcastMarketing({ heroBanners: updated });
+      return updated;
+    });
 
-      try {
-        fetch('/api/marketing', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'banner', banner }),
-        }).catch(() => {});
-      } catch (e) {}
+    try {
+      fetch('/api/marketing', {
+        method: 'PATCH',
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify({ type: 'banner', banner }),
+      }).catch(() => { });
+    } catch (e) { }
 
-      addToast({ type: 'success', title: 'Banner Updated', message: 'Hero banner changes are now live on the customer home page.' });
-    } else {
-      const newRequest: BannerDealApprovalRequest = {
-        id: `req-${Date.now()}`,
-        type: 'banner',
-        action: 'update',
-        targetId: banner.id,
-        submittedBy: currentUser.name || 'Branch Representative',
-        submittedByRole: currentRole,
-        submittedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        status: 'pending',
-        bannerData: banner,
-      };
-      setPendingApprovalRequests((prev) => [newRequest, ...prev]);
-      addToast({
-        type: 'info',
-        title: 'Submitted for Manager Approval',
-        message: 'Your banner update was sent to the Branch Manager. It will display on customer screen once approved.',
-      });
-    }
+    addToast({ type: 'success', title: 'Banner Updated', message: 'Hero banner changes are now live on the customer home page.' });
   };
 
   const addHeroBanner = (bannerData: Omit<HeroBanner, 'id'>) => {
     const newId = `b-${Date.now()}`;
     const newBanner: HeroBanner = { ...bannerData, id: newId };
-    const isPrivileged = currentRole === 'branch_manager' || currentRole === 'platform_owner' || allowRepresentativeDirectPublish;
-    if (isPrivileged) {
-      setHeroBanners((prev) => {
-        const updated = [...prev, newBanner];
-        broadcastMarketing({ heroBanners: updated });
-        return updated;
-      });
+    setHeroBanners((prev) => {
+      const updated = [...prev, newBanner];
+      broadcastMarketing({ heroBanners: updated });
+      return updated;
+    });
 
-      try {
-        fetch('/api/marketing', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'banner', banner: newBanner }),
-        }).catch(() => {});
-      } catch (e) {}
+    try {
+      fetch('/api/marketing', {
+        method: 'PATCH',
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify({ type: 'banner', banner: newBanner }),
+      }).catch(() => { });
+    } catch (e) { }
 
-      addToast({ type: 'success', title: 'Banner Added', message: 'New banner added to customer carousel.' });
-    } else {
-      const newRequest: BannerDealApprovalRequest = {
-        id: `req-${Date.now()}`,
-        type: 'banner',
-        action: 'add',
-        submittedBy: currentUser.name || 'Branch Representative',
-        submittedByRole: currentRole,
-        submittedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        status: 'pending',
-        bannerData: newBanner,
-      };
-      setPendingApprovalRequests((prev) => [newRequest, ...prev]);
-      addToast({
-        type: 'info',
-        title: 'Submitted for Approval',
-        message: 'New banner proposal sent to Branch Manager for review.',
-      });
-    }
+    addToast({ type: 'success', title: 'Banner Added', message: 'New banner added to customer carousel and live.' });
   };
 
   const deleteHeroBanner = (id: string) => {
-    const isPrivileged = currentRole === 'branch_manager' || currentRole === 'platform_owner' || allowRepresentativeDirectPublish;
-    if (isPrivileged) {
-      setHeroBanners((prev) => {
-        const updated = prev.filter((b) => b.id !== id);
-        broadcastMarketing({ heroBanners: updated });
-        return updated;
-      });
+    setHeroBanners((prev) => {
+      const updated = prev.filter((b) => b.id !== id);
+      broadcastMarketing({ heroBanners: updated });
+      return updated;
+    });
 
-      try {
-        fetch('/api/marketing', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'delete_banner', id }),
-        }).catch(() => {});
-      } catch (e) {}
+    try {
+      fetch('/api/marketing', {
+        method: 'PATCH',
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify({ type: 'delete_banner', id }),
+      }).catch(() => { });
+    } catch (e) { }
 
-      addToast({ type: 'info', title: 'Banner Removed', message: 'Banner removed from carousel.' });
-    } else {
-      const target = heroBanners.find((b) => b.id === id);
-      const newRequest: BannerDealApprovalRequest = {
-        id: `req-${Date.now()}`,
-        type: 'banner',
-        action: 'delete',
-        targetId: id,
-        submittedBy: currentUser.name || 'Branch Representative',
-        submittedByRole: currentRole,
-        submittedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        status: 'pending',
-        bannerData: target,
-      };
-      setPendingApprovalRequests((prev) => [newRequest, ...prev]);
-      addToast({ type: 'info', title: 'Delete Request Sent', message: 'Banner deletion requires Branch Manager approval.' });
-    }
+    addToast({ type: 'info', title: 'Banner Removed', message: 'Banner removed from carousel.' });
   };
 
   const updateDealCard = (newDeal: DealCard) => {
-    const isPrivileged = currentRole === 'branch_manager' || currentRole === 'platform_owner' || allowRepresentativeDirectPublish;
-    if (isPrivileged) {
-      setDealCard(newDeal);
-      broadcastMarketing({ dealCard: newDeal });
+    setDealCard(newDeal);
+    broadcastMarketing({ dealCard: newDeal });
 
-      try {
-        fetch('/api/marketing', {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ type: 'deal', deal: newDeal }),
-        }).catch(() => {});
-      } catch (e) {}
+    try {
+      fetch('/api/marketing', {
+        method: 'PATCH',
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify({ type: 'deal', deal: newDeal }),
+      }).catch(() => { });
+    } catch (e) { }
 
-      addToast({ type: 'success', title: 'Chef Special Deal Updated', message: 'Customer special deal card is now live.' });
-    } else {
-      const newRequest: BannerDealApprovalRequest = {
-        id: `req-${Date.now()}`,
-        type: 'deal',
-        action: 'update',
-        submittedBy: currentUser.name || 'Branch Representative',
-        submittedByRole: currentRole,
-        submittedAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-        status: 'pending',
-        dealData: newDeal,
-      };
-      setPendingApprovalRequests((prev) => [newRequest, ...prev]);
-      addToast({
-        type: 'info',
-        title: 'Submitted for Manager Approval',
-        message: 'Deal card update submitted. It will display on customer screen once approved by manager.',
-      });
-    }
+    addToast({ type: 'success', title: 'Special Deal Live', message: 'Special deal has been published live to customer screens.' });
   };
 
   const approveRequest = (requestId: string) => {
@@ -3869,9 +6096,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
         fetch('/api/marketing', {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getClientAuthHeaders(),
           body: JSON.stringify({ type: 'banner', banner: req.bannerData }),
-        }).catch(() => {});
+        }).catch(() => { });
       } else if (req.action === 'update') {
         setHeroBanners((prev) => {
           const updated = prev.map((b) => (b.id === req.targetId ? req.bannerData! : b));
@@ -3880,9 +6107,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
         fetch('/api/marketing', {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getClientAuthHeaders(),
           body: JSON.stringify({ type: 'banner', banner: req.bannerData }),
-        }).catch(() => {});
+        }).catch(() => { });
       } else if (req.action === 'delete' && req.targetId) {
         setHeroBanners((prev) => {
           const updated = prev.filter((b) => b.id !== req.targetId);
@@ -3891,29 +6118,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         });
         fetch('/api/marketing', {
           method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
+          headers: getClientAuthHeaders(),
           body: JSON.stringify({ type: 'delete_banner', id: req.targetId }),
-        }).catch(() => {});
+        }).catch(() => { });
       }
     } else if (req.type === 'deal' && req.dealData) {
       setDealCard(req.dealData);
       broadcastMarketing({ dealCard: req.dealData });
       fetch('/api/marketing', {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
+        headers: getClientAuthHeaders(),
         body: JSON.stringify({ type: 'deal', deal: req.dealData }),
-      }).catch(() => {});
+      }).catch(() => { });
     }
 
     setPendingApprovalRequests((prev) =>
       prev.map((r) =>
         r.id === requestId
           ? {
-              ...r,
-              status: 'approved',
-              decisionBy: currentUser.name,
-              decisionAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            }
+            ...r,
+            status: 'approved',
+            decisionBy: currentUser.name,
+            decisionAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          }
           : r
       )
     );
@@ -3929,11 +6156,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       prev.map((r) =>
         r.id === requestId
           ? {
-              ...r,
-              status: 'rejected',
-              decisionBy: currentUser.name,
-              decisionAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
-            }
+            ...r,
+            status: 'rejected',
+            decisionBy: currentUser.name,
+            decisionAt: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+          }
           : r
       )
     );
@@ -3944,27 +6171,727 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  const fetchOlderOrders = async (branchId?: string, dateScope: string = 'all') => {
+  const addAnnouncement = async (a: Omit<Announcement, 'id'>) => {
+    const newA: Announcement = {
+      ...a,
+      id: `ann-${Date.now()}`,
+      createdAt: new Date().toISOString(),
+    };
+    setAnnouncements((prev) => [newA, ...prev.filter((item) => item.id !== newA.id)]);
+    store.dispatch(addReduxAnnouncement(newA));
+    addToast({
+      type: 'success',
+      title: 'Announcement Posted',
+      message: 'New announcement / info has been published.',
+    });
+    try {
+      await fetch('/api/announcements', {
+        method: 'POST',
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify(newA),
+      });
+      broadcastStateMutation('SYNC_ANNOUNCEMENTS', [newA]);
+    } catch (err) {
+      console.error('Failed to post announcement:', err);
+    }
+  };
+
+  const deleteAnnouncement = async (id: string) => {
+    setAnnouncements((prev) => prev.filter((a) => a.id !== id));
+    store.dispatch(deleteReduxAnnouncement(id));
+    addToast({
+      type: 'info',
+      title: 'Announcement Removed',
+      message: 'Announcement has been deleted.',
+    });
+    try {
+      await fetch(`/api/announcements?id=${encodeURIComponent(id)}`, {
+        method: 'DELETE',
+        headers: getClientAuthHeaders(),
+      });
+      broadcastStateMutation('SYNC_ANNOUNCEMENTS', { deletedId: id });
+    } catch (err) {
+      console.error('Failed to delete announcement:', err);
+    }
+  };
+
+  const actorKey = currentUser?.id || (currentRole === 'customer' ? 'user-guest' : `role-${currentRole}`);
+
+  // Placed orders tracked on this client device / session
+  const [myPlacedOrderIds, setMyPlacedOrderIds] = useState<Set<string>>(() => {
+    const s = new Set<string>();
+    if (typeof window !== 'undefined') {
+      try {
+        const orderIds = JSON.parse(localStorage.getItem('foodies_customer_order_ids') || '[]');
+        if (Array.isArray(orderIds)) orderIds.forEach((id: string) => s.add(String(id)));
+        const placedIds = JSON.parse(localStorage.getItem('foodies_my_placed_order_ids') || '[]');
+        if (Array.isArray(placedIds)) placedIds.forEach((id: string) => s.add(String(id)));
+        const cache = JSON.parse(localStorage.getItem('foodies_customer_history_cache') || '[]');
+        if (Array.isArray(cache)) {
+          cache.forEach((o: any) => {
+            if (o.id) s.add(o.id);
+            if (o.orderNumber) s.add(String(o.orderNumber));
+          });
+        }
+      } catch { }
+    }
+    return s;
+  });
+
+  // Calculate only the orders that legitimately belong to THIS customer
+  const myCustomerOrdersSet = React.useMemo(() => {
+    const s = new Set<string>(myPlacedOrderIds);
+    if (currentRole === 'customer') {
+      const myId = currentUser?.id && currentUser.id !== 'user-guest' && currentUser.id !== 'cust-walkin' ? currentUser.id : null;
+      const myPhone = currentUser?.phone ? currentUser.phone.replace(/\D/g, '').slice(-10) : null;
+      const myEmail = currentUser?.email ? currentUser.email.toLowerCase().trim() : null;
+
+      orders.forEach((o) => {
+        let isMine = false;
+        if (myId && o.customerId === myId) isMine = true;
+        if (myPhone && o.customerPhone && o.customerPhone.replace(/\D/g, '').slice(-10) === myPhone) isMine = true;
+        if (myEmail && o.customerEmail && o.customerEmail.toLowerCase().trim() === myEmail) isMine = true;
+        if (myPlacedOrderIds.has(o.id) || (o.orderNumber && myPlacedOrderIds.has(String(o.orderNumber)))) isMine = true;
+
+        if (isMine) {
+          if (o.id) s.add(o.id);
+          if (o.orderNumber) s.add(String(o.orderNumber));
+        }
+      });
+    }
+    return s;
+  }, [orders, currentRole, currentUser?.id, currentUser?.phone, currentUser?.email, myPlacedOrderIds]);
+
+  const activeReceiverKey = React.useMemo(() => {
+    if (currentRole === 'customer') {
+      if (currentUser?.id && currentUser.id !== 'user-guest' && currentUser.id !== 'cust-walkin') {
+        return `user:${currentUser.id}`;
+      }
+      if (currentUser?.phone) {
+        return `cust:${currentUser.phone.replace(/\D/g, '').slice(-10)}`;
+      }
+      return 'role:customer';
+    }
+    if (currentUser?.id && currentUser.id !== 'user-guest') {
+      return `user:${currentUser.id}`;
+    }
+    return `role:${currentRole}`;
+  }, [currentRole, currentUser?.id, currentUser?.phone]);
+
+  const myNotificationSettings = React.useMemo<ReceiverNotificationPreferences>(() => {
+    const saved =
+      receiverNotificationSettingsMap[activeReceiverKey] ||
+      receiverNotificationSettingsMap[`role:${currentRole}`];
+    if (!saved) {
+      return {
+        ...DEFAULT_RECEIVER_NOTIFICATION_PREFERENCES,
+        receiverKey: activeReceiverKey,
+        events: { ...DEFAULT_RECEIVER_NOTIFICATION_PREFERENCES.events },
+      };
+    }
+    return {
+      ...DEFAULT_RECEIVER_NOTIFICATION_PREFERENCES,
+      ...saved,
+      receiverKey: activeReceiverKey,
+      events: {
+        ...DEFAULT_RECEIVER_NOTIFICATION_PREFERENCES.events,
+        ...(saved.events || {}),
+      },
+    };
+  }, [activeReceiverKey, currentRole, receiverNotificationSettingsMap]);
+
+  const inferNotificationEventKey = React.useCallback(
+    (n: AppNotification): NotificationEventKey | null => {
+      if (n.eventKey && n.eventKey in DEFAULT_RECEIVER_NOTIFICATION_PREFERENCES.events) {
+        return n.eventKey as NotificationEventKey;
+      }
+      const text = `${n.title || ''} ${n.message || ''}`.toLowerCase();
+      if (text.includes('payment') || text.includes('paid')) return 'paymentReceived';
+      if (text.includes('assigned')) {
+        if (text.includes('rider') || text.includes('delivery')) return 'riderAssigned';
+        if (text.includes('waiter') || text.includes('table')) return 'waiterAssigned';
+      }
+      if (text.includes('cancelled') || text.includes('canceled')) return 'orderCancelled';
+      if (text.includes('completed') || text.includes('collected & closed')) return 'orderCompleted';
+      if (text.includes('served')) return 'orderServed';
+      if (text.includes('out for delivery') || text.includes('en route') || text.includes('picked up')) return 'outForDelivery';
+      if (text.includes('ready')) return 'orderReady';
+      if (text.includes('cooking') || text.includes('preparing')) return 'cooking';
+      if (text.includes('sent to kitchen') || text.includes('forwarded to kitchen') || text.includes('kitchen')) return 'sentToKitchen';
+      if (text.includes('new order') || text.includes('order placed')) return 'orderPlaced';
+      return null;
+    },
+    []
+  );
+
+  const isNotificationRelevant = React.useCallback(
+    (n: AppNotification) => {
+      // Per-Receiver Independent Rules Check (Only affects THIS receiver)
+      if (myNotificationSettings.receiveNotifications === false) {
+        return false;
+      }
+      if (
+        Array.isArray(myNotificationSettings.mutedCategories) &&
+        myNotificationSettings.mutedCategories.includes(n.category)
+      ) {
+        return false;
+      }
+      const evKey = inferNotificationEventKey(n);
+      if (evKey && myNotificationSettings.events?.[evKey] === false) {
+        return false;
+      }
+
+      const roles = Array.isArray(n.targetRoles) && n.targetRoles.length > 0 ? n.targetRoles : ['all'];
+      const normalizePhone = (p?: string) => (p || '').replace(/\D/g, '').slice(-10);
+      const myPhone = normalizePhone(currentUser?.phone);
+      const myId = currentUser?.id && currentUser.id !== 'user-guest' && currentUser.id !== 'cust-walkin' ? currentUser.id : null;
+      const isSender = Boolean(n.senderId && currentUser?.id && n.senderId === currentUser.id);
+
+      // Platform targeting check (Web portal hides 'app'-only notifications unless sender or platform_owner)
+      if (n.targetPlatform === 'app' && currentRole !== 'platform_owner' && !isSender) {
+        return false;
+      }
+
+      // -------------------------------------------------------------
+      // 1. CUSTOMER VIEW
+      // -------------------------------------------------------------
+      if (currentRole === 'customer') {
+        // A) If notification is associated with a specific ORDER:
+        // ONLY the customer who placed / owns this order may see it (and only when customer/all is targeted)!
+        if (n.orderId || n.orderNumber) {
+          if (!roles.includes('all') && !roles.includes('customer')) {
+            return false;
+          }
+          const idMatch = Boolean(n.targetUserId && myId && n.targetUserId === myId);
+          const phoneMatch = Boolean(n.targetCustomerPhone && myPhone && normalizePhone(n.targetCustomerPhone) === myPhone);
+          const orderMatch = Boolean(
+            (n.orderId && myCustomerOrdersSet.has(n.orderId)) ||
+            (n.orderNumber && myCustomerOrdersSet.has(String(n.orderNumber)))
+          );
+          // If it matches this customer, show it. If not, strictly hide (never show another customer's order)!
+          return idMatch || phoneMatch || orderMatch;
+        }
+
+        // B) If notification is targeted to a SPECIFIC SINGLE PERSON (and not an order):
+        if (n.targetUserId || n.targetCustomerPhone) {
+          const idMatch = Boolean(n.targetUserId && myId && n.targetUserId === myId);
+          const phoneMatch = Boolean(n.targetCustomerPhone && myPhone && normalizePhone(n.targetCustomerPhone) === myPhone);
+          return idMatch || phoneMatch;
+        }
+
+        // C) GENERAL BROADCAST NOTIFICATION (No order, no specific user targeted):
+        const roleMatches = roles.includes('all') || roles.includes('customer');
+        if (!roleMatches) return false;
+
+        const branchMatches = !n.branchId || n.branchId === 'all' || normalizeBranchId(n.branchId) === normalizeBranchId(currentBranchId);
+        return branchMatches;
+      }
+
+      // -------------------------------------------------------------
+      // 2. STAFF VIEW
+      // -------------------------------------------------------------
+      // Platform owner sees overall platform and branch operations
+      if (currentRole === 'platform_owner') {
+        // If it's a private 1-to-1 message targeted to someone else without owner or all in targetRoles:
+        if (n.targetUserId && currentUser?.id && n.targetUserId !== currentUser.id && n.senderId !== currentUser.id && !roles.includes('platform_owner') && !roles.includes('all')) {
+          return false;
+        }
+        return true;
+      }
+
+      // Staff must belong to the matching branch
+      const branchMatches = !n.branchId || n.branchId === 'all' || normalizeBranchId(n.branchId) === normalizeBranchId(currentBranchId);
+      if (!branchMatches) return false;
+
+      // Did I send it or was it specifically targeted to me (direct user, concerned rider, or concerned waiter)?
+      if (isSender) return true;
+      if (n.targetUserId && currentUser?.id && n.targetUserId === currentUser.id) return true;
+      if (n.targetRiderId && currentUser?.id && n.targetRiderId === currentUser.id) return true;
+      if (n.targetWaiterId && currentUser?.id && n.targetWaiterId === currentUser.id) return true;
+
+      // If targeted to a specific other user (without an orderId), it's private to them
+      if (n.targetUserId && (!currentUser?.id || n.targetUserId !== currentUser.id) && !n.orderId) {
+        return false;
+      }
+
+      // Check if current staff role is in targetRoles (or 'all')
+      const roleMatches = roles.includes('all') || roles.includes(currentRole);
+      if (!roleMatches) return false;
+
+      // If targetRoles ONLY targets 'customer' (e.g. ['customer']) and no staff role and not 'all':
+      if (roles.length === 1 && roles[0] === 'customer') {
+        return false;
+      }
+
+      // Rider filter: if notification is for rider assignment or assigned to a specific rider, ONLY that rider receives it
+      if (currentRole === 'delivery_staff') {
+        if (n.targetRiderId) {
+          if (!currentUser?.id || n.targetRiderId !== currentUser.id) {
+            return false;
+          }
+        }
+        if (n.orderId || n.orderNumber) {
+          const ord = orders.find(o => (n.orderId && o.id === n.orderId) || (n.orderNumber && o.orderNumber === n.orderNumber));
+          if (ord?.assignedRiderId) {
+            if (!currentUser?.id || ord.assignedRiderId !== currentUser.id) {
+              return false;
+            }
+          }
+        }
+        // Delivery staff should not see waiter assignments, dine-in ready to serve, or table notices
+        if (n.category === 'dine_in' && !n.targetRiderId) return false;
+        if (evKey === 'waiterAssigned' || evKey === 'orderServed') return false;
+      }
+
+      // Waiter filter: if notification or dine-in order is assigned to another specific waiter, do not show to this waiter
+      if (currentRole === 'floor_staff') {
+        if (n.targetWaiterId) {
+          if (!currentUser?.id || n.targetWaiterId !== currentUser.id) {
+            return false;
+          }
+        }
+        if (n.orderId || n.orderNumber) {
+          const ord = orders.find(o => (n.orderId && o.id === n.orderId) || (n.orderNumber && o.orderNumber === n.orderNumber));
+          if (ord?.assignedWaiterId) {
+            if (!currentUser?.id || ord.assignedWaiterId !== currentUser.id) {
+              return false;
+            }
+          }
+        }
+        // Floor staff should not see delivery rider assignments or out for delivery updates
+        if (n.category === 'delivery' && !n.targetWaiterId) return false;
+        if (evKey === 'riderAssigned' || evKey === 'outForDelivery') return false;
+      }
+
+      // Kitchen filter: kitchen chefs strictly receive notifications for new orders placed/sent to kitchen, cooking rush, and order cancellations
+      if (currentRole === 'kitchen_staff') {
+        if (
+          evKey === 'riderAssigned' ||
+          evKey === 'waiterAssigned' ||
+          evKey === 'outForDelivery' ||
+          evKey === 'orderServed' ||
+          evKey === 'paymentReceived'
+        ) {
+          return false;
+        }
+        const isKitchenCategory = n.category === 'kitchen' || n.category === 'order_placed';
+        const isKitchenEvent = evKey === 'orderPlaced' || evKey === 'sentToKitchen' || evKey === 'orderCancelled';
+        const isDirectKitchenRole = roles.includes('kitchen_staff');
+        if (!isKitchenCategory && !isKitchenEvent && !isDirectKitchenRole) {
+          return false;
+        }
+      }
+
+      return true;
+    },
+    [currentRole, currentUser?.id, currentUser?.phone, currentBranchId, myCustomerOrdersSet, orders, myNotificationSettings, inferNotificationEventKey]
+  );
+
+  const notifications = React.useMemo(
+    () => allNotifications.filter(isNotificationRelevant),
+    [allNotifications, isNotificationRelevant]
+  );
+
+  const unreadNotificationsCount = React.useMemo(
+    () => notifications.filter((n) => !(n.readBy || []).includes(actorKey)).length,
+    [notifications, actorKey]
+  );
+
+  // Request native browser desktop notification permissions
+  useEffect(() => {
+    if (typeof window !== 'undefined' && 'Notification' in window) {
+      if (Notification.permission === 'default') {
+        Notification.requestPermission().catch(() => { });
+      }
+    }
+  }, []);
+
+  const spawnDesktopNotification = useCallback((notif: AppNotification) => {
+    if (typeof window !== 'undefined' && 'Notification' in window && Notification.permission === 'granted') {
+      try {
+        const desktopNotif = new Notification(notif.title, {
+          body: notif.message,
+          tag: notif.id,
+          icon: '/favicon.ico',
+        });
+        desktopNotif.onclick = () => {
+          window.focus();
+          markNotificationRead(notif.id);
+          openNotificationModal('inbox');
+        };
+        activeBrowserNotificationsRef.current.set(notif.id, desktopNotif);
+      } catch { }
+    }
+  }, []);
+
+  // Trigger a live toast pop-up and native notification bar notification for each newly synced relevant notification
+  useEffect(() => {
+    for (const n of notifications) {
+      if (!seenNotifIdsRef.current.has(n.id)) {
+        seenNotifIdsRef.current.add(n.id);
+        const isUnread = !(n.readBy || []).includes(actorKey);
+        const isSelfSent = n.senderId && currentUser?.id && n.senderId === currentUser.id && n.senderRole === currentRole;
+        const ageMs = Date.now() - (new Date(n.createdAt).getTime() || Date.now());
+        if (
+          isUnread &&
+          !isSelfSent &&
+          ageMs < 2 * 60 * 1000 &&
+          myNotificationSettings.receiveNotifications !== false &&
+          myNotificationSettings.showLiveToast !== false
+        ) {
+          addToast({
+            type: n.type || 'info',
+            title: n.title,
+            message: n.message,
+          });
+          spawnDesktopNotification(n);
+        }
+      }
+    }
+  }, [notifications, actorKey, currentUser?.id, currentRole, spawnDesktopNotification, myNotificationSettings.receiveNotifications, myNotificationSettings.showLiveToast]);
+
+  const openNotificationModal = (tab: 'inbox' | 'send' | 'settings' = 'inbox', prefillOrder?: Order) => {
+    setNotificationModalDefaultTab(tab);
+    setPrefillNotificationOrder(prefillOrder || null);
+    setIsNotificationModalOpen(true);
+  };
+
+  const updateNotificationSettings = async (updates: Partial<NotificationSettings>): Promise<boolean> => {
+    const allowedRoles: Role[] = ['platform_owner', 'branch_manager', 'cashier'];
+    if (!allowedRoles.includes(currentRole)) {
+      addToast({
+        type: 'error',
+        title: 'Unauthorized',
+        message: 'Only Platform Owner, Branch Manager, or Cashier can update notification rules.',
+      });
+      return false;
+    }
+
+    const merged = mergeNotificationSettings(notificationSettings, {
+      ...updates,
+      updatedBy: currentUser?.name || currentRole,
+      updatedByRole: currentRole,
+      updatedAt: new Date().toISOString(),
+    });
+
+    setNotificationSettings(merged);
+    store.dispatch(setReduxNotificationSettings(merged));
+    if (typeof window !== 'undefined') {
+      try {
+        localStorage.setItem('foodies_notification_settings', JSON.stringify(merged));
+      } catch (e) { }
+      if (liveBroadcastChannelRef.current) {
+        liveBroadcastChannelRef.current.postMessage({
+          type: 'SYNC_NOTIFICATION_SETTINGS',
+          payload: merged,
+          senderId: tabIdRef.current,
+        });
+      }
+    }
+
+    try {
+      const res = await fetch('/api/notifications', {
+        method: 'POST',
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify({
+          action: 'update_settings',
+          settings: merged,
+          actorName: currentUser?.name || currentRole,
+        }),
+      });
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        addToast({
+          type: 'error',
+          title: 'Failed to Save Rules',
+          message: errData.error || 'Could not save notification rules to server.',
+        });
+        return false;
+      }
+      const data = await res.json().catch(() => ({}));
+      if (data?.notificationSettings) {
+        setNotificationSettings(data.notificationSettings);
+        store.dispatch(setReduxNotificationSettings(data.notificationSettings));
+        try {
+          localStorage.setItem('foodies_notification_settings', JSON.stringify(data.notificationSettings));
+        } catch (e) { }
+      }
+      broadcastStateMutation('SYNC_NOTIFICATION_SETTINGS', data?.notificationSettings || merged);
+      addToast({
+        type: 'success',
+        title: 'Notification Rules Saved',
+        message: 'Changes are saved permanently across Web & Mobile until updated by authorized staff.',
+      });
+      return true;
+    } catch (err) {
+      console.error('Failed to save notification settings:', err);
+      addToast({
+        type: 'error',
+        title: 'Save Error',
+        message: 'Saved locally, but server sync failed.',
+      });
+      return false;
+    }
+  };
+
+  const updateMyNotificationSettings = async (
+    updates: Partial<ReceiverNotificationPreferences>,
+    targetReceiverKey?: string
+  ): Promise<boolean> => {
+    const targetKey = targetReceiverKey || activeReceiverKey;
+    const existing =
+      receiverNotificationSettingsMap[targetKey] || {
+        ...DEFAULT_RECEIVER_NOTIFICATION_PREFERENCES,
+        receiverKey: targetKey,
+        events: { ...DEFAULT_RECEIVER_NOTIFICATION_PREFERENCES.events },
+      };
+
+    const nextPrefs: ReceiverNotificationPreferences = {
+      ...existing,
+      ...updates,
+      receiverKey: targetKey,
+      receiveNotifications:
+        updates.receiveNotifications ?? existing.receiveNotifications ?? true,
+      showLiveToast: updates.showLiveToast ?? existing.showLiveToast ?? true,
+      mutedCategories: Array.isArray(updates.mutedCategories)
+        ? updates.mutedCategories
+        : existing.mutedCategories || [],
+      events: {
+        ...DEFAULT_RECEIVER_NOTIFICATION_PREFERENCES.events,
+        ...(existing.events || {}),
+        ...(updates.events || {}),
+      },
+      updatedAt: new Date().toISOString(),
+    };
+
+    setReceiverNotificationSettingsMap((prev) => {
+      const nextMap = { ...prev, [targetKey]: nextPrefs };
+      try {
+        localStorage.setItem('foodies_receiver_notif_settings_map', JSON.stringify(nextMap));
+      } catch { }
+      return nextMap;
+    });
+
+    try {
+      const res = await fetch('/api/notifications', {
+        method: 'POST',
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify({
+          action: 'update_receiver_settings',
+          receiverKey: targetKey,
+          settings: nextPrefs,
+        }),
+      });
+      if (res.ok) {
+        const data = await res.json().catch(() => ({}));
+        if (data?.receiverSettingsMap) {
+          setReceiverNotificationSettingsMap(data.receiverSettingsMap);
+          try {
+            localStorage.setItem(
+              'foodies_receiver_notif_settings_map',
+              JSON.stringify(data.receiverSettingsMap)
+            );
+          } catch { }
+        }
+      }
+    } catch { }
+
+    addToast({
+      type: 'success',
+      title: 'Receiver Rules Saved',
+      message: 'Notification settings updated independently for this receiver only.',
+    });
+    return true;
+  };
+
+  const sendNotification = async (payload: {
+    id?: string;
+    title: string;
+    message: string;
+    type?: 'info' | 'success' | 'warning' | 'error';
+    category?: NotificationCategory;
+    branchId?: string;
+    orderId?: string;
+    orderNumber?: string;
+    orderType?: OrderType;
+    targetRoles: Array<Role | 'all'>;
+    targetPlatform?: NotificationTargetPlatform;
+    targetUserId?: string;
+    targetCustomerPhone?: string;
+    targetCustomerName?: string;
+    targetWaiterId?: string;
+    targetWaiterName?: string;
+    targetRiderId?: string;
+    targetRiderName?: string;
+    silentToast?: boolean;
+  }): Promise<AppNotification | null> => {
+    // Only platform_owner (all branches) and branch_manager / cashier (their specific branch) can send notifications
+    const canSendNotification =
+      currentRole === 'platform_owner' || currentRole === 'branch_manager' || currentRole === 'cashier';
+    if (!canSendNotification) {
+      addToast({
+        type: 'error',
+        title: 'Permission Denied',
+        message: 'Only Cashiers and Managers (for their branch) or Owner (all branches) can send notifications.',
+      });
+      return null;
+    }
+
+    const effectiveBranchId =
+      currentRole === 'platform_owner'
+        ? payload.branchId || 'all'
+        : normalizeBranchId(currentBranchId);
+
+    const newNotif: AppNotification = {
+      id: payload.id || `notif-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
+      title: payload.title.trim(),
+      message: payload.message.trim(),
+      type: payload.type || 'info',
+      category: payload.category || 'staff_alert',
+      branchId: effectiveBranchId,
+      orderId: payload.orderId,
+      orderNumber: payload.orderNumber,
+      orderType: payload.orderType,
+      senderId: currentUser?.id || actorKey,
+      senderName: currentUser?.name || currentRole,
+      senderRole: currentRole,
+      targetRoles: payload.targetRoles.length > 0 ? payload.targetRoles : ['all'],
+      targetPlatform: payload.targetPlatform || 'all',
+      targetUserId: payload.targetUserId,
+      targetCustomerPhone: payload.targetCustomerPhone,
+      targetCustomerName: payload.targetCustomerName,
+      targetWaiterId: payload.targetWaiterId,
+      targetWaiterName: payload.targetWaiterName,
+      targetRiderId: payload.targetRiderId,
+      targetRiderName: payload.targetRiderName,
+      readBy: [actorKey],
+      createdAt: new Date().toISOString(),
+    };
+
+    seenNotifIdsRef.current.add(newNotif.id);
+    setAllNotifications((prev) => [newNotif, ...prev.filter((item) => item.id !== newNotif.id)]);
+    store.dispatch(addReduxNotification(newNotif));
+    spawnDesktopNotification(newNotif);
+
+    if (!payload.silentToast) {
+      const targetDesc =
+        newNotif.targetPlatform === 'app'
+          ? 'Mobile App users'
+          : newNotif.targetPlatform === 'web'
+            ? 'Web users'
+            : 'concerned users on Web & Mobile';
+      addToast({
+        type: 'success',
+        title: 'Notification Sent',
+        message: `"${newNotif.title}" delivered to ${targetDesc}.`,
+      });
+    }
+
+    try {
+      await fetch('/api/notifications', {
+        method: 'POST',
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify(newNotif),
+      });
+      broadcastStateMutation('SYNC_NOTIFICATIONS', [newNotif]);
+    } catch (err) {
+      console.error('Failed to send notification:', err);
+    }
+
+    return newNotif;
+  };
+
+  const markNotificationRead = async (id: string) => {
+    const activeDesktop = activeBrowserNotificationsRef.current.get(id);
+    if (activeDesktop) {
+      try { activeDesktop.close(); } catch { }
+      activeBrowserNotificationsRef.current.delete(id);
+    }
+    setAllNotifications((prev) =>
+      prev.map((n) => (n.id === id && !n.readBy.includes(actorKey) ? { ...n, readBy: [...n.readBy, actorKey] } : n))
+    );
+    store.dispatch(markReduxNotificationRead({ id, userId: actorKey }));
+    try {
+      await fetch('/api/notifications', {
+        method: 'PATCH',
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify({ id, userId: actorKey }),
+      });
+    } catch { }
+  };
+
+  const markAllNotificationsRead = async () => {
+    activeBrowserNotificationsRef.current.forEach((n) => {
+      try { n.close(); } catch { }
+    });
+    activeBrowserNotificationsRef.current.clear();
+    setAllNotifications((prev) =>
+      prev.map((n) => (!n.readBy.includes(actorKey) ? { ...n, readBy: [...n.readBy, actorKey] } : n))
+    );
+    store.dispatch(markReduxNotificationRead({ userId: actorKey, markAll: true }));
+    try {
+      await fetch('/api/notifications', {
+        method: 'PATCH',
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify({ markAllRead: true, userId: actorKey }),
+      });
+    } catch { }
+  };
+
+  const clearNotifications = async () => {
+    activeBrowserNotificationsRef.current.forEach((n) => {
+      try { n.close(); } catch { }
+    });
+    activeBrowserNotificationsRef.current.clear();
+    setAllNotifications([]);
+    store.dispatch(clearReduxNotifications());
+    try {
+      const scopeBranch = currentRole === 'platform_owner' ? 'all' : normalizeBranchId(currentBranchId);
+      await fetch(`/api/notifications?branchId=${encodeURIComponent(scopeBranch)}`, {
+        method: 'DELETE',
+        headers: getClientAuthHeaders(),
+      });
+    } catch { }
+  };
+
+  const fetchOlderOrders = async (
+    branchId?: string,
+    dateScope: string = 'all',
+    startDate?: string,
+    endDate?: string
+  ) => {
     setIsFetchingOlderOrders(true);
     try {
       const bId = branchId !== undefined ? branchId : (currentRole === 'platform_owner' ? 'all' : currentBranchId);
+      const isCust = currentRole === 'customer';
+      const custQuery = isCust && currentUser?.id && currentUser.id !== 'user-guest'
+        ? `&customerId=${encodeURIComponent(currentUser.id)}&customerPhone=${encodeURIComponent(currentUser.phone || '')}`
+        : '';
+      const dateParams = startDate || endDate
+        ? `&startDate=${encodeURIComponent(startDate || '')}&endDate=${encodeURIComponent(endDate || '')}`
+        : `&dateScope=${encodeURIComponent(dateScope)}`;
+
       const url = bId && bId !== 'all'
-        ? `/api/orders?branchId=${bId}&dateScope=${dateScope}&older=true`
-        : `/api/orders?dateScope=${dateScope}&older=true`;
-      const res = await fetch(url);
+        ? `/api/orders?branchId=${encodeURIComponent(bId)}&older=true${dateParams}${custQuery}`
+        : `/api/orders?older=true${dateParams}${custQuery}`;
+
+      const res = await fetch(url, { headers: getClientAuthHeaders() });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.orders)) {
-          setOrders(data.orders);
+          setOrders((prev) => {
+            const map = new Map<string, Order>();
+            data.orders.forEach((o: Order) => map.set(o.id, o));
+            prev.forEach((o: Order) => map.set(o.id, o));
+            const combined = Array.from(map.values()).sort(
+              (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+            );
+            return combined;
+          });
           setHasLoadedOlderOrders(true);
           try {
             localStorage.setItem('foodies_orders_live', JSON.stringify(data.orders));
-          } catch (e) {}
-          addToast({
-            type: 'info',
-            title: 'Historical Data Loaded 📂',
-            message: `Fetched ${data.orders.length} total orders from database archive.`,
-          });
+          } catch (e) { }
         }
       }
     } catch (e) {
@@ -3989,11 +6916,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.orders)) {
-          setOrders(data.orders);
+          const cleanOrders = data.orders.filter(
+            (o: Order) => !((o.status === 'cancelled' || (o.status as string) === 'canceled') && isOrderDayEnded(o.createdAt))
+          );
+          setOrders(cleanOrders);
           setHasLoadedOlderOrders(false);
           try {
-            localStorage.setItem('foodies_orders_live', JSON.stringify(data.orders));
-          } catch (e) {}
+            localStorage.setItem('foodies_orders_live', JSON.stringify(cleanOrders));
+          } catch (e) { }
           addToast({
             type: 'success',
             title: "Showing Today's Data 📅",
@@ -4015,7 +6945,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           setAuditLogs(data.logs);
         }
       }
-    } catch (e) {}
+    } catch (e) { }
   };
 
   const requestManagerAccess = (branchId: string) => {
@@ -4046,9 +6976,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setAuditLogs((prev) => [logEntry, ...prev]);
     fetch('/api/audit-logs', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getClientAuthHeaders(),
       body: JSON.stringify(logEntry),
-    }).catch(() => {});
+    }).catch(() => { });
 
     addToast({
       type: 'info',
@@ -4088,9 +7018,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setAuditLogs((prev) => [logEntry, ...prev]);
     fetch('/api/audit-logs', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getClientAuthHeaders(),
       body: JSON.stringify(logEntry),
-    }).catch(() => {});
+    }).catch(() => { });
 
     addToast({
       type: accept ? 'success' : 'warning',
@@ -4128,9 +7058,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     setAuditLogs((prev) => [logEntry, ...prev]);
     fetch('/api/audit-logs', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: getClientAuthHeaders(),
       body: JSON.stringify(logEntry),
-    }).catch(() => {});
+    }).catch(() => { });
 
     addToast({
       type: 'info',
@@ -4150,6 +7080,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         setCurrentUser,
         currentBranchId,
         setCurrentBranchId,
+        repriceCartForBranch,
+        hasSelectedBranch,
+        setHasSelectedBranch,
         currentBranch,
         branches,
         menuItems,
@@ -4183,11 +7116,14 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateDealCard,
         approveRequest,
         rejectRequest,
-        complaints,
         shifts,
         refundRequests,
         auditLogs,
         cart,
+        orderType,
+        setOrderType,
+        hasConfirmedOrderType,
+        setHasConfirmedOrderType,
         menuSearchQuery,
         setMenuSearchQuery,
         toasts,
@@ -4201,17 +7137,27 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         updateOrderStatus,
         sendOrderToKitchen,
         setOrderKitchenForwardTime,
+        setAllOrdersKitchenForwardTime,
         recordCashPayment,
+        updateOrderPayment,
         editOrderStage1,
         addAddOnsToOrderStage2,
         cancelOrder,
         assignRiderToOrder,
         unassignRiderFromOrder,
+        acceptRiderOrder,
         finishRiderDelivery,
         updateRiderAvailability,
         departRider,
         customerCoordinates,
         setCustomerCoordinates,
+        selectedDeliveryAddress,
+        setSelectedDeliveryAddress,
+        savedAddresses,
+        addSavedAddress,
+        deleteSavedAddress,
+        detectAndStoreCurrentLocation,
+        calculateDistanceKm,
         tableSessions,
         addTableSession,
         completeTableSession,
@@ -4222,17 +7168,24 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         activeTableSession,
         setActiveTableSession,
         assignWaiterToOrder,
+        markOrderDeliveredToTable,
+        markOrderDoneAndCollected,
         cancelDineInOrder,
         addItemsToExistingOrder,
         toggleMenuItemBranchAvailability,
         updateMenuItemPrice,
+        updateMenuItemBranchPrice,
         updateBranchSettings,
         updateBranchPaymentSettings,
-        submitComplaint,
-        sendComplaintReply,
-        updateComplaintStatus,
+        createBranch,
+        toggleBranchStatus,
+        shutdownModalState,
+        closeShutdownModal,
+        confirmShutdownKeepProcessing,
+        confirmShutdownCancelOrders,
         openShift,
         closeShift,
+        updateShiftOpeningBalance,
         currentShift,
         requestRefund,
         decideRefund,
@@ -4250,6 +7203,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         respondManagerAccess,
         revokeManagerAccess,
         refreshAuditLogs,
+        branchUnavailableModal,
+        setBranchUnavailableModal,
+        closeBranchUnavailableModal,
+        announcements,
+        addAnnouncement,
+        deleteAnnouncement,
+        notifications,
+        allNotifications,
+        unreadNotificationsCount,
+        notificationSettings,
+        updateNotificationSettings,
+        activeReceiverKey,
+        myNotificationSettings,
+        receiverNotificationSettingsMap,
+        updateMyNotificationSettings,
+        isNotificationModalOpen,
+        setIsNotificationModalOpen,
+        notificationModalDefaultTab,
+        prefillNotificationOrder,
+        openNotificationModal,
+        sendNotification,
+        markNotificationRead,
+        markAllNotificationsRead,
+        clearNotifications,
       }}
     >
       {children}
@@ -4288,7 +7265,6 @@ export {
   selectCategories,
   selectTables,
   selectBranchTables,
-  selectComplaints,
   selectShifts,
   selectCurrentShift,
   selectRefundRequests,
@@ -4300,6 +7276,9 @@ export {
   selectTableSessions,
   selectActiveTableSession,
   selectCustomerCoordinates,
+  selectAnnouncements,
+  selectNotifications,
+  selectNotificationSettings,
 } from '@/redux/slices/cafeSlice';
 export {
   selectTheme,

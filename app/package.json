@@ -7,13 +7,18 @@
     "build": "next build --webpack",
     "start": "next start",
     "lint": "eslint",
-    "db:init": "node scripts/init-db.js"
+    "migrate:up": "node scripts/init-db.js up",
+    "migrate:down": "node scripts/init-db.js down",
+    "migrate:create": "node-pg-migrate create -m",
+    "db:seed": "node scripts/seed-dev.js",
+    "db:init": "node scripts/init-db.js up"
   },
   "dependencies": {
     "@reduxjs/toolkit": "^2.13.0",
     "@types/canvas-confetti": "^1.9.0",
     "@types/qrcode": "^1.5.6",
     "canvas-confetti": "^1.9.4",
+    "ioredis": "^6.0.0",
     "lucide-react": "^1.57.0",
     "next": "16.4.1",
     "nodemailer": "^10.2.1",
@@ -22,7 +27,8 @@
     "qrcode": "^1.5.4",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "react-redux": "^9.3.1"
+    "react-redux": "^9.3.1",
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@types/node": "^20",
@@ -34,6 +40,7 @@
     "eslint": "^9",
     "eslint-config-next": "16.4.1",
     "jsqr": "^1.4.0",
+    "node-pg-migrate": "^9.0.0",
     "pngjs": "^7.0.0",
     "typescript": "^5"
   }

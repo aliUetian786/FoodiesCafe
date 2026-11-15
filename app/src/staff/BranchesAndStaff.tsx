@@ -4,6 +4,7 @@ import React, { useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { Role, User, UserStatus, Branch } from '@/types/cafe';
 import { ModalConfirmation } from '@/components/common/ModalConfirmation';
+import { OpenStreetMapView } from '@/components/common/OpenStreetMapView';
 import {
   Building2,
   Users,
@@ -32,11 +33,31 @@ import {
   Receipt,
   Headphones,
   Bike,
+  Plus,
   X,
 } from 'lucide-react';
 
+export function getBranchEmailSlug(branchId?: string, branchName?: string, branchCity?: string): string {
+  if (!branchId && !branchName && !branchCity) return 'branch';
+  const id = (branchId || '').toLowerCase();
+  if (id.includes('gulberg')) return 'gulberg';
+  if (id.includes('islamabad') || id.includes('f7') || id.includes('f-7')) return 'islamabad';
+  if (id.includes('karachi') || id.includes('clifton')) return 'karachi';
+
+  if (branchCity) {
+    const cleanCity = branchCity.toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (cleanCity) return cleanCity;
+  }
+  if (branchName) {
+    const firstWord = branchName.toLowerCase().split(/[\s-_()]+/)[0].replace(/[^a-z0-9]/g, '');
+    if (firstWord) return firstWord;
+  }
+  const cleanId = id.split(/[-_]+/)[0].replace(/[^a-z0-9]/g, '');
+  return cleanId || 'branch';
+}
+
 export const BranchesStaffScreen: React.FC = () => {
-  const { branches, users, createUser, deleteUser, updateUser, updateUserStatus, updateBranchSettings, addToast } = useApp();
+  const { branches, users, createUser, deleteUser, updateUser, updateUserStatus, updateBranchSettings, createBranch, toggleBranchStatus, addToast } = useApp();
 
   // Branch Location Edit state (Owner & Manager)
   const [editingBranchLocation, setEditingBranchLocation] = useState<Branch | null>(null);
@@ -68,6 +89,7 @@ export const BranchesStaffScreen: React.FC = () => {
   const [newStaffRole, setNewStaffRole] = useState<Role>('cashier');
   const [newStaffBranch, setNewStaffBranch] = useState(branches[0]?.id || 'gulberg-lahore');
   const [newStaffPhone, setNewStaffPhone] = useState('+92 300 ');
+  const [newStaffInitial, setNewStaffInitial] = useState('');
   const [newStaffEmail, setNewStaffEmail] = useState('');
   const [newStaffPassword, setNewStaffPassword] = useState('password123');
   const [newStaffPin, setNewStaffPin] = useState('1234');
@@ -79,10 +101,54 @@ export const BranchesStaffScreen: React.FC = () => {
   const [editPhone, setEditPhone] = useState('');
   const [editEmail, setEditEmail] = useState('');
   const [editPassword, setEditPassword] = useState('password123');
+  const [editStatus, setEditStatus] = useState<UserStatus>('active');
 
   const [deleteStaffModal, setDeleteStaffModal] = useState<User | null>(null);
   const [resetPinModal, setResetPinModal] = useState<{ user: User; newPin: string } | null>(null);
   const [copiedPin, setCopiedPin] = useState(false);
+
+  // Create Branch Modal state
+  const [createBranchModalOpen, setCreateBranchModalOpen] = useState(false);
+  const [newBranchName, setNewBranchName] = useState('');
+  const [newBranchCity, setNewBranchCity] = useState('Lahore');
+  const [newBranchAddress, setNewBranchAddress] = useState('');
+  const [newBranchPhone, setNewBranchPhone] = useState('+92 42 ');
+  const [newBranchOpeningHours, setNewBranchOpeningHours] = useState('11:00 AM - 01:00 AM');
+  const [newBranchPrepTime, setNewBranchPrepTime] = useState(20);
+  const [newBranchDeliveryDistance, setNewBranchDeliveryDistance] = useState(50);
+
+  const handleCreateBranchSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!newBranchName.trim() || !newBranchAddress.trim()) {
+      addToast({
+        type: 'warning',
+        title: 'Fields Required',
+        message: 'Branch name and physical address are required.',
+      });
+      return;
+    }
+    const slug = newBranchCity.toLowerCase().replace(/\s+/g, '-');
+    const id = `branch-${slug}-${Date.now().toString().slice(-4)}`;
+    const success = await createBranch({
+      id,
+      name: newBranchName.trim(),
+      city: newBranchCity.trim(),
+      address: newBranchAddress.trim(),
+      phone: newBranchPhone.trim(),
+      openingHours: newBranchOpeningHours.trim(),
+      isOpen: true,
+      isBusy: false,
+      deliveryEnabled: true,
+      prepTimeEstimateMin: newBranchPrepTime,
+      maxOrderDistanceKm: newBranchDeliveryDistance,
+      tableQrMaxDistanceMeters: 300,
+    });
+    if (success) {
+      setCreateBranchModalOpen(false);
+      setNewBranchName('');
+      setNewBranchAddress('');
+    }
+  };
 
   // STRICT REQUIREMENT: Owner CANNOT see customers and CANNOT see platform_owner
   const staffOnly = users.filter((u) => u.role !== 'customer' && u.role !== 'platform_owner');
@@ -93,7 +159,6 @@ export const BranchesStaffScreen: React.FC = () => {
     { role: 'cashier', label: 'Cashier', icon: Receipt },
     { role: 'kitchen_staff', label: 'Kitchen Chef', icon: ChefHat },
     { role: 'floor_staff', label: 'Floor Waiter', icon: LayoutGrid },
-    { role: 'branch_representative', label: 'Customer Services', icon: Headphones },
     { role: 'delivery_staff', label: 'Delivery Rider', icon: Bike },
   ];
 
@@ -107,8 +172,6 @@ export const BranchesStaffScreen: React.FC = () => {
         return { color: '#EA580C', bg: 'rgba(234, 88, 12, 0.12)', label: 'Kitchen Chef' };
       case 'floor_staff':
         return { color: '#2563EB', bg: '#DBEAFE', label: 'Floor Waiter' };
-      case 'branch_representative':
-        return { color: '#9333EA', bg: '#F3E8FF', label: 'Customer Services' };
       case 'delivery_staff':
         return { color: '#0891B2', bg: '#CFFAFE', label: 'Delivery Rider' };
       default:
@@ -125,6 +188,7 @@ export const BranchesStaffScreen: React.FC = () => {
     setNewStaffId(`stf-${randCode}`);
     setNewStaffName('');
     setNewStaffPhone('+92 300 ');
+    setNewStaffInitial('');
     setNewStaffEmail('');
     setNewStaffPassword('password123');
     setNewStaffRole('cashier');
@@ -140,23 +204,28 @@ export const BranchesStaffScreen: React.FC = () => {
       return;
     }
     const staffId = newStaffId.trim() || `stf-${Date.now().toString().slice(-5)}`;
+    const targetBranch = branches.find((b) => b.id === newStaffBranch);
+    const branchSlug = getBranchEmailSlug(newStaffBranch, targetBranch?.name, targetBranch?.city);
+    const cleanInitial = newStaffInitial.trim().toLowerCase().replace(/[^a-z0-9._-]/g, '') || newStaffRole;
+    const finalEmail = `${cleanInitial}.${branchSlug}@foodiescafe.pk`;
+
     createUser({
       id: staffId,
       name: newStaffName.trim(),
       role: newStaffRole,
       branchId: newStaffBranch,
       phone: newStaffPhone.trim() || '+92 300 0000000',
-      email: newStaffEmail.trim() || `${staffId}@foodiescafe.pk`,
+      email: finalEmail,
       password: newStaffPassword.trim() || 'password123',
       pin: newStaffPin.trim() || '1234',
       status: 'active',
     });
 
-    const bName = branches.find((b) => b.id === newStaffBranch)?.name || 'Branch';
+    const bName = targetBranch?.name || 'Branch';
     addToast({
       type: 'success',
       title: 'Staff Login Provisioned ✓',
-      message: `Staff ID ${staffId} issued for ${newStaffName} (${newStaffRole.replace('_', ' ')}) at ${bName}.`,
+      message: `Staff ID ${staffId} issued for ${newStaffName} (${newStaffRole.replace('_', ' ')}) at ${bName} with reserved email ${finalEmail}.`,
     });
     setCreateStaffModalOpen(false);
   };
@@ -170,6 +239,7 @@ export const BranchesStaffScreen: React.FC = () => {
     setEditPhone(user.phone);
     setEditEmail(user.email || '');
     setEditPassword(user.password || 'password123');
+    setEditStatus(user.status || 'active');
   };
 
   const handleSaveEditSubmit = (e: React.FormEvent) => {
@@ -185,12 +255,13 @@ export const BranchesStaffScreen: React.FC = () => {
       branchId: editBranch,
       phone: editPhone.trim(),
       email: editEmail.trim(),
+      status: editStatus,
       password: editPassword.trim() || editStaffModal.password || 'password123',
     });
     addToast({
       type: 'success',
       title: 'Staff Account Updated',
-      message: `Updated profile details for ${editName} (${editStaffModal.id}).`,
+      message: `Updated profile details for ${editName} (${editStaffModal.id}) — Status: ${editStatus.toUpperCase()}.`,
     });
     setEditStaffModal(null);
   };
@@ -202,9 +273,8 @@ export const BranchesStaffScreen: React.FC = () => {
     addToast({
       type: nextStatus === 'suspended' ? 'warning' : 'success',
       title: nextStatus === 'suspended' ? 'Staff Login Suspended 🚫' : 'Staff Login Restored ✓',
-      message: `${user.name} (${user.id}) is now ${nextStatus.toUpperCase()}. ${
-        nextStatus === 'suspended' ? 'Branch login revoked immediately.' : 'Branch login access active.'
-      }`,
+      message: `${user.name} (${user.id}) is now ${nextStatus.toUpperCase()}. ${nextStatus === 'suspended' ? 'Branch login revoked immediately.' : 'Branch login access active.'
+        }`,
     });
   };
 
@@ -235,7 +305,7 @@ export const BranchesStaffScreen: React.FC = () => {
       setCopiedPin(true);
       setTimeout(() => setCopiedPin(false), 2000);
       addToast({ type: 'success', title: 'PIN Copied', message: `Copied access PIN ${pin} to clipboard.` });
-    } catch (e) {}
+    } catch (e) { }
   };
 
   // Filter staff based on selected branch tab, role, status, and search query
@@ -358,26 +428,49 @@ export const BranchesStaffScreen: React.FC = () => {
             </button>
           </div>
 
-          <button
-            onClick={() => handleOpenCreateStaff()}
-            style={{
-              padding: '9px 16px',
-              borderRadius: 'var(--radius-md)',
-              backgroundColor: 'var(--primary)',
-              color: '#FFFFFF',
-              fontWeight: 800,
-              fontSize: '13px',
-              cursor: 'pointer',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              border: 'none',
-              boxShadow: '0 2px 8px var(--primary-glow)',
-            }}
-          >
-            <UserPlus size={16} />
-            <span>+ Create Staff Member</span>
-          </button>
+          {activeTab === 'staff' ? (
+            <button
+              onClick={() => handleOpenCreateStaff()}
+              style={{
+                padding: '9px 16px',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'var(--primary)',
+                color: '#FFFFFF',
+                fontWeight: 800,
+                fontSize: '13px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                border: 'none',
+                boxShadow: '0 2px 8px var(--primary-glow)',
+              }}
+            >
+              <UserPlus size={16} />
+              <span>+ Create Staff Member</span>
+            </button>
+          ) : (
+            <button
+              onClick={() => setCreateBranchModalOpen(true)}
+              style={{
+                padding: '9px 16px',
+                borderRadius: 'var(--radius-md)',
+                backgroundColor: 'var(--primary)',
+                color: '#FFFFFF',
+                fontWeight: 800,
+                fontSize: '13px',
+                cursor: 'pointer',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                border: 'none',
+                boxShadow: '0 2px 8px var(--primary-glow)',
+              }}
+            >
+              <Plus size={16} />
+              <span>+ Add New Branch</span>
+            </button>
+          )}
         </div>
       </div>
 
@@ -398,38 +491,52 @@ export const BranchesStaffScreen: React.FC = () => {
               boxShadow: 'var(--shadow-sm)',
             }}
           >
-            <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
-              <span style={{ fontSize: '12.5px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', whiteSpace: 'nowrap' }}>
-                Select Branch:
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+              <span style={{ fontSize: '12px', fontWeight: 800, color: 'var(--text-muted)', textTransform: 'uppercase', marginRight: '4px' }}>
+                Branch:
               </span>
-
-              <select
-                id="branch-staff-select-branch"
-                value={selectedBranchTab}
-                onChange={(e) => setSelectedBranchTab(e.target.value)}
+              <button
+                type="button"
+                id="branch-staff-tab-all"
+                onClick={() => setSelectedBranchTab('all')}
                 style={{
-                  padding: '7px 12px',
-                  borderRadius: 'var(--radius-md)',
-                  border: '1px solid var(--border-color)',
-                  backgroundColor: 'var(--bg-input)',
-                  color: 'var(--text-main)',
-                  fontSize: '13px',
-                  fontWeight: 700,
+                  padding: '6px 14px',
+                  borderRadius: '9999px',
+                  fontSize: '12px',
+                  fontWeight: selectedBranchTab === 'all' ? 800 : 650,
+                  backgroundColor: selectedBranchTab === 'all' ? 'var(--primary)' : 'var(--bg-card-subtle)',
+                  color: selectedBranchTab === 'all' ? '#FFFFFF' : 'var(--text-secondary)',
+                  border: `1px solid ${selectedBranchTab === 'all' ? 'var(--primary)' : 'var(--border-color)'}`,
                   cursor: 'pointer',
-                  minWidth: '240px',
-                  outline: 'none',
+                  transition: 'all 0.15s ease',
                 }}
               >
-                <option value="all">All Branches ({staffOnly.length})</option>
-                {sortedBranchesForDropdown.map((b) => {
-                  const bStaffCount = staffOnly.filter((u) => u.branchId === b.id).length;
-                  return (
-                    <option key={b.id} value={b.id}>
-                      {b.name} {bStaffCount}
-                    </option>
-                  );
-                })}
-              </select>
+                All Branches ({staffOnly.length})
+              </button>
+              {sortedBranchesForDropdown.map((b) => {
+                const bStaffCount = staffOnly.filter((u) => u.branchId === b.id).length;
+                const isSelected = selectedBranchTab === b.id;
+                return (
+                  <button
+                    key={b.id}
+                    type="button"
+                    onClick={() => setSelectedBranchTab(b.id)}
+                    style={{
+                      padding: '6px 14px',
+                      borderRadius: '9999px',
+                      fontSize: '12px',
+                      fontWeight: isSelected ? 800 : 650,
+                      backgroundColor: isSelected ? 'var(--primary)' : 'var(--bg-card-subtle)',
+                      color: isSelected ? '#FFFFFF' : 'var(--text-secondary)',
+                      border: `1px solid ${isSelected ? 'var(--primary)' : 'var(--border-color)'}`,
+                      cursor: 'pointer',
+                      transition: 'all 0.15s ease',
+                    }}
+                  >
+                    {b.name} ({bStaffCount})
+                  </button>
+                );
+              })}
             </div>
 
             {/* View Mode Toggle: Cards | Table (In same line after dropdown) */}
@@ -573,6 +680,56 @@ export const BranchesStaffScreen: React.FC = () => {
             </select>
           </div>
 
+          {/* Role Category Pills Below Search */}
+          <div
+            style={{
+              display: 'flex',
+              gap: '6px',
+              overflowX: 'auto',
+              paddingBottom: '2px',
+              paddingTop: '2px',
+              alignItems: 'center',
+            }}
+          >
+            {[
+              { id: 'all', label: 'All Roles' },
+              { id: 'branch_manager', label: 'Managers' },
+              { id: 'cashier', label: 'Cashiers' },
+              { id: 'kitchen_staff', label: 'Kitchen' },
+              { id: 'floor_staff', label: 'Waiters' },
+              { id: 'delivery_staff', label: 'Riders' },
+            ].map(({ id, label }) => {
+              const active = staffRoleFilter === id;
+              return (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setStaffRoleFilter(id as any)}
+                  style={{
+                    padding: '0 12px',
+                    height: '30px',
+                    borderRadius: 'var(--radius-full)',
+                    border: active ? '1px solid var(--primary)' : '1px solid var(--border-color)',
+                    backgroundColor: active ? 'var(--primary)' : 'var(--bg-card)',
+                    color: active ? '#FFFFFF' : 'var(--text-secondary)',
+                    fontWeight: 700,
+                    fontSize: '11.5px',
+                    cursor: 'pointer',
+                    whiteSpace: 'nowrap',
+                    boxSizing: 'border-box',
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    flexShrink: 0,
+                    transition: 'all 0.15s ease',
+                  }}
+                >
+                  {label}
+                </button>
+              );
+            })}
+          </div>
+
           {/* BRANCH SECTIONS (Showing staff by their branch) */}
           {branches
             .filter((b) => selectedBranchTab === 'all' || selectedBranchTab === b.id)
@@ -624,8 +781,24 @@ export const BranchesStaffScreen: React.FC = () => {
                         <h3 style={{ fontSize: '17px', fontWeight: 800, margin: 0, color: 'var(--text-main)' }}>
                           {branch.name}
                         </h3>
-                        <span style={{ fontSize: '12px', color: 'var(--text-muted)' }}>
-                          {branch.city} · {branch.address}
+                        <span
+                          onClick={() => {
+                            setEditingBranchLocation(branch);
+                            setBranchEditForm({
+                              name: branch.name,
+                              city: branch.city,
+                              address: branch.address,
+                              phone: branch.phone,
+                              latitude: branch.latitude ?? (branch.city === 'Islamabad' ? 33.7215 : branch.city === 'Karachi' ? 24.8252 : 31.5126),
+                              longitude: branch.longitude ?? (branch.city === 'Islamabad' ? 73.0552 : branch.city === 'Karachi' ? 67.0305 : 74.3436),
+                              maxOrderDistanceKm: branch.maxOrderDistanceKm ?? 50,
+                              tableQrMaxDistanceMeters: branch.tableQrMaxDistanceMeters ?? 300,
+                            });
+                          }}
+                          title="Click to edit branch location & OpenStreetMap pin"
+                          style={{ fontSize: '12px', color: 'var(--text-muted)', cursor: 'pointer' }}
+                        >
+                          {branch.city} · {branch.address} 📍
                         </span>
                       </div>
                       <span
@@ -678,12 +851,13 @@ export const BranchesStaffScreen: React.FC = () => {
                       No staff members found for {branch.name} matching the selected filters.
                     </div>
                   ) : viewMode === 'cards' ? (
-                    /* CARDS ROSTER VIEW */
+                    /* CARDS ROSTER VIEW: Static width locked so cards never blow up across screen */
                     <div
                       style={{
                         display: 'grid',
-                        gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 1fr))',
+                        gridTemplateColumns: 'repeat(auto-fill, minmax(280px, 340px))',
                         gap: '14px',
+                        justifyContent: 'flex-start',
                         maxHeight: '440px',
                         overflowY: 'auto',
                         paddingRight: '4px',
@@ -705,6 +879,8 @@ export const BranchesStaffScreen: React.FC = () => {
                               flexDirection: 'column',
                               gap: '12px',
                               position: 'relative',
+                              maxWidth: '340px',
+                              width: '100%',
                               boxShadow: '0 1px 3px rgba(0,0,0,0.04)',
                             }}
                           >
@@ -718,19 +894,48 @@ export const BranchesStaffScreen: React.FC = () => {
                                 </span>
                               </div>
 
-                              <span
-                                style={{
-                                  fontSize: '11px',
-                                  fontWeight: 800,
-                                  padding: '3px 8px',
-                                  borderRadius: 'var(--radius-full)',
-                                  backgroundColor: roleStyle.bg,
-                                  color: roleStyle.color,
-                                  textTransform: 'uppercase',
-                                }}
-                              >
-                                {roleStyle.label}
-                              </span>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                <span
+                                  style={{
+                                    fontSize: '11px',
+                                    fontWeight: 800,
+                                    padding: '3px 8px',
+                                    borderRadius: 'var(--radius-full)',
+                                    backgroundColor: roleStyle.bg,
+                                    color: roleStyle.color,
+                                    textTransform: 'uppercase',
+                                  }}
+                                >
+                                  {roleStyle.label}
+                                </span>
+
+                                {u.role === 'delivery_staff' && (
+                                  <span
+                                    style={{
+                                      fontSize: '10px',
+                                      fontWeight: 800,
+                                      padding: '2px 7px',
+                                      borderRadius: 'var(--radius-full)',
+                                      backgroundColor: u.riderAvailability === 'offline' ? '#F1F5F9' : '#DCFCE7',
+                                      color: u.riderAvailability === 'offline' ? '#475569' : '#15803D',
+                                      border: `1px solid ${u.riderAvailability === 'offline' ? '#CBD5E1' : '#86EFAC'}`,
+                                      display: 'inline-flex',
+                                      alignItems: 'center',
+                                      gap: '3px',
+                                    }}
+                                  >
+                                    <span
+                                      style={{
+                                        width: '5px',
+                                        height: '5px',
+                                        borderRadius: '50%',
+                                        backgroundColor: u.riderAvailability === 'offline' ? '#64748B' : '#16A34A',
+                                      }}
+                                    />
+                                    {u.riderAvailability === 'offline' ? 'Offline' : 'Online'}
+                                  </span>
+                                )}
+                              </div>
                             </div>
 
                             <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', fontSize: '12px', color: 'var(--text-secondary)' }}>
@@ -888,19 +1093,48 @@ export const BranchesStaffScreen: React.FC = () => {
                                   </div>
                                 </td>
                                 <td style={{ padding: '12px 16px' }}>
-                                  <span
-                                    style={{
-                                      fontSize: '11px',
-                                      fontWeight: 800,
-                                      padding: '3px 8px',
-                                      borderRadius: 'var(--radius-full)',
-                                      backgroundColor: roleStyle.bg,
-                                      color: roleStyle.color,
-                                      textTransform: 'uppercase',
-                                    }}
-                                  >
-                                    {roleStyle.label}
-                                  </span>
+                                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                                    <span
+                                      style={{
+                                        fontSize: '11px',
+                                        fontWeight: 800,
+                                        padding: '3px 8px',
+                                        borderRadius: 'var(--radius-full)',
+                                        backgroundColor: roleStyle.bg,
+                                        color: roleStyle.color,
+                                        textTransform: 'uppercase',
+                                      }}
+                                    >
+                                      {roleStyle.label}
+                                    </span>
+
+                                    {u.role === 'delivery_staff' && (
+                                      <span
+                                        style={{
+                                          fontSize: '10px',
+                                          fontWeight: 800,
+                                          padding: '2px 7px',
+                                          borderRadius: 'var(--radius-full)',
+                                          backgroundColor: u.riderAvailability === 'offline' ? '#F1F5F9' : '#DCFCE7',
+                                          color: u.riderAvailability === 'offline' ? '#475569' : '#15803D',
+                                          border: `1px solid ${u.riderAvailability === 'offline' ? '#CBD5E1' : '#86EFAC'}`,
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: '3px',
+                                        }}
+                                      >
+                                        <span
+                                          style={{
+                                            width: '5px',
+                                            height: '5px',
+                                            borderRadius: '50%',
+                                            backgroundColor: u.riderAvailability === 'offline' ? '#64748B' : '#16A34A',
+                                          }}
+                                        />
+                                        {u.riderAvailability === 'offline' ? 'Offline' : 'Online'}
+                                      </span>
+                                    )}
+                                  </div>
                                 </td>
                                 <td style={{ padding: '12px 16px', color: 'var(--text-secondary)' }}>
                                   {u.phone}
@@ -1031,7 +1265,25 @@ export const BranchesStaffScreen: React.FC = () => {
                     {b.isOpen ? 'ACTIVE' : 'INACTIVE'}
                   </span>
                 </div>
-                <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>{b.address}</div>
+                <div
+                  onClick={() => {
+                    setEditingBranchLocation(b);
+                    setBranchEditForm({
+                      name: b.name,
+                      city: b.city,
+                      address: b.address,
+                      phone: b.phone,
+                      latitude: b.latitude ?? (b.city === 'Islamabad' ? 33.7215 : b.city === 'Karachi' ? 24.8252 : 31.5126),
+                      longitude: b.longitude ?? (b.city === 'Islamabad' ? 73.0552 : b.city === 'Karachi' ? 67.0305 : 74.3436),
+                      maxOrderDistanceKm: b.maxOrderDistanceKm ?? 50,
+                      tableQrMaxDistanceMeters: b.tableQrMaxDistanceMeters ?? 300,
+                    });
+                  }}
+                  title="Click to edit branch location & OpenStreetMap pin"
+                  style={{ fontSize: '13px', color: 'var(--text-secondary)', cursor: 'pointer' }}
+                >
+                  📍 {b.address}
+                </div>
                 <div style={{ fontSize: '12.5px', color: 'var(--text-muted)' }}>
                   Hours: {b.openingHours} · Phone: {b.phone}
                 </div>
@@ -1042,6 +1294,93 @@ export const BranchesStaffScreen: React.FC = () => {
                   <span style={{ color: 'var(--text-muted)' }}>
                     Prep: {b.prepTimeEstimateMin}m · Cutoff: {b.stopAddOnsMinBeforeReady}m
                   </span>
+                </div>
+
+                {/* Interactive Operational Overrides (Online/Offline, Rush Hour, Delivery) */}
+                <div style={{ display: 'flex', gap: '8px', flexWrap: 'wrap', paddingTop: '6px' }}>
+                  <button
+                    type="button"
+                    onClick={() => toggleBranchStatus(b.id)}
+                    style={{
+                      flex: 1,
+                      padding: '7px 10px',
+                      borderRadius: '6px',
+                      border: `1.5px solid ${b.isOpen ? '#16A34A' : '#DC2626'}`,
+                      backgroundColor: b.isOpen ? 'rgba(22, 163, 74, 0.08)' : 'rgba(220, 38, 38, 0.08)',
+                      color: b.isOpen ? '#15803D' : '#DC2626',
+                      fontWeight: 800,
+                      fontSize: '11.5px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '4px',
+                    }}
+                  >
+                    {b.isOpen ? <CheckCircle2 size={13} /> : <UserX size={13} />}
+                    <span>{b.isOpen ? 'Store: OPEN' : 'Store: CLOSED'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextBusy = !b.isBusy;
+                      updateBranchSettings(b.id, { isBusy: nextBusy });
+                      addToast({
+                        type: 'info',
+                        title: nextBusy ? 'Busy Mode On' : 'Busy Mode Off',
+                        message: `${b.name} rush hour status updated.`,
+                      });
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '7px 10px',
+                      borderRadius: '6px',
+                      border: `1.5px solid ${b.isBusy ? '#EA580C' : 'var(--border-color)'}`,
+                      backgroundColor: b.isBusy ? 'rgba(234, 88, 12, 0.1)' : 'var(--bg-card-subtle)',
+                      color: b.isBusy ? '#EA580C' : 'var(--text-muted)',
+                      fontWeight: 750,
+                      fontSize: '11.5px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '4px',
+                    }}
+                  >
+                    <span>{b.isBusy ? '⚠️ Rush (+15m)' : 'Rush Mode'}</span>
+                  </button>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const nextDelivery = b.deliveryEnabled === false;
+                      updateBranchSettings(b.id, { deliveryEnabled: nextDelivery });
+                      addToast({
+                        type: nextDelivery ? 'success' : 'warning',
+                        title: nextDelivery ? 'Delivery Active' : 'Delivery Paused',
+                        message: `${b.name} doorstep delivery ${nextDelivery ? 'enabled' : 'paused'}.`,
+                      });
+                    }}
+                    style={{
+                      flex: 1,
+                      padding: '7px 10px',
+                      borderRadius: '6px',
+                      border: `1.5px solid ${b.deliveryEnabled !== false ? '#2563EB' : 'var(--border-color)'}`,
+                      backgroundColor: b.deliveryEnabled !== false ? 'rgba(37, 99, 235, 0.08)' : 'var(--bg-card-subtle)',
+                      color: b.deliveryEnabled !== false ? '#2563EB' : 'var(--text-muted)',
+                      fontWeight: 750,
+                      fontSize: '11.5px',
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: '4px',
+                    }}
+                  >
+                    <Bike size={13} />
+                    <span>{b.deliveryEnabled !== false ? 'Delivery: ON' : 'Delivery: OFF'}</span>
+                  </button>
                 </div>
 
                 {/* Branch Coordinates & Location Edit Button */}
@@ -1154,6 +1493,114 @@ export const BranchesStaffScreen: React.FC = () => {
 
             {/* Modal Form */}
             <form onSubmit={handleCreateStaffSubmit} style={{ padding: '24px', display: 'flex', flexDirection: 'column', gap: '14px' }}>
+              {/* 2 Dropdowns in the same line: Role Selection and Branch Selection */}
+              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
+                    Role Selection *
+                  </label>
+                  <select
+                    value={newStaffRole}
+                    onChange={(e) => setNewStaffRole(e.target.value as Role)}
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'var(--bg-input)',
+                      color: 'var(--text-main)',
+                      fontSize: '13px',
+                      fontWeight: 650,
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    {availableRoles.map((r) => (
+                      <option key={r.role} value={r.role}>
+                        {r.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
+                    Branch Selection *
+                  </label>
+                  <select
+                    value={newStaffBranch}
+                    onChange={(e) => setNewStaffBranch(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'var(--bg-input)',
+                      color: 'var(--text-main)',
+                      fontSize: '13px',
+                      fontWeight: 650,
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    {branches.map((b) => (
+                      <option key={b.id} value={b.id}>
+                        {b.name} ({b.city})
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+
+              {/* Reserved Branch Email Generation */}
+              {(() => {
+                const curBranch = branches.find((b) => b.id === newStaffBranch);
+                const curSlug = getBranchEmailSlug(newStaffBranch, curBranch?.name, curBranch?.city);
+
+                return (
+                  <div>
+                    <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
+                      Email *
+                    </label>
+                    <div style={{ display: 'flex', alignItems: 'stretch' }}>
+                      <input
+                        type="text"
+                        value={newStaffInitial}
+                        onChange={(e) => setNewStaffInitial(e.target.value.toLowerCase().replace(/[^a-z0-9._-]/g, ''))}
+                        placeholder="Enter email (e.g. asad, chef, cashier)"
+                        required
+                        style={{
+                          flex: 1,
+                          padding: '9px 12px',
+                          borderRadius: '6px 0 0 6px',
+                          border: '1px solid var(--border-color)',
+                          borderRight: 'none',
+                          backgroundColor: 'var(--bg-input)',
+                          color: 'var(--text-main)',
+                          fontSize: '13px',
+                          boxSizing: 'border-box',
+                        }}
+                      />
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          padding: '0 12px',
+                          backgroundColor: 'var(--bg-card-subtle)',
+                          border: '1px solid var(--border-color)',
+                          borderRadius: '0 6px 6px 0',
+                          fontSize: '13px',
+                          fontWeight: 750,
+                          color: 'var(--primary)',
+                          whiteSpace: 'nowrap',
+                          userSelect: 'none',
+                        }}
+                      >
+                        .{curSlug}@foodiescafe.pk
+                      </div>
+                    </div>
+                  </div>
+                );
+              })()}
+
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
                 <div>
                   <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
@@ -1207,62 +1654,6 @@ export const BranchesStaffScreen: React.FC = () => {
               <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
                 <div>
                   <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
-                    Predefined Staff Role *
-                  </label>
-                  <select
-                    value={newStaffRole}
-                    onChange={(e) => setNewStaffRole(e.target.value as Role)}
-                    style={{
-                      width: '100%',
-                      padding: '9px 12px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--border-color)',
-                      backgroundColor: 'var(--bg-input)',
-                      color: 'var(--text-main)',
-                      fontSize: '13px',
-                      fontWeight: 600,
-                      boxSizing: 'border-box',
-                    }}
-                  >
-                    {availableRoles.map((r) => (
-                      <option key={r.role} value={r.role}>
-                        {r.label}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
-                    Assigned Branch *
-                  </label>
-                  <select
-                    value={newStaffBranch}
-                    onChange={(e) => setNewStaffBranch(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '9px 12px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--border-color)',
-                      backgroundColor: 'var(--bg-input)',
-                      color: 'var(--text-main)',
-                      fontSize: '13px',
-                      fontWeight: 600,
-                      boxSizing: 'border-box',
-                    }}
-                  >
-                    {branches.map((b) => (
-                      <option key={b.id} value={b.id}>
-                        {b.name} ({b.city})
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: 'repeat(2, 1fr)', gap: '12px' }}>
-                <div>
-                  <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
                     Mobile Number *
                   </label>
                   <input
@@ -1286,51 +1677,28 @@ export const BranchesStaffScreen: React.FC = () => {
 
                 <div>
                   <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
-                    Email Address
+                    Create Password *
                   </label>
-                  <input
-                    type="email"
-                    value={newStaffEmail}
-                    onChange={(e) => setNewStaffEmail(e.target.value)}
-                    placeholder="name@foodiescafe.pk"
-                    style={{
-                      width: '100%',
-                      padding: '9px 12px',
-                      borderRadius: '6px',
-                      border: '1px solid var(--border-color)',
-                      backgroundColor: 'var(--bg-input)',
-                      color: 'var(--text-main)',
-                      fontSize: '13px',
-                      boxSizing: 'border-box',
-                    }}
-                  />
-                </div>
-              </div>
-
-              {/* Create Password Option */}
-              <div>
-                <label style={{ fontSize: '12px', fontWeight: 750, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>
-                  Create Password *
-                </label>
-                <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0 10px' }}>
-                  <Lock size={15} color="var(--primary)" />
-                  <input
-                    type="text"
-                    required
-                    placeholder="Enter login password (e.g. password123)"
-                    value={newStaffPassword}
-                    onChange={(e) => setNewStaffPassword(e.target.value)}
-                    style={{
-                      width: '100%',
-                      padding: '9px 0',
-                      border: 'none',
-                      outline: 'none',
-                      backgroundColor: 'transparent',
-                      fontSize: '13px',
-                      color: 'var(--text-main)',
-                      fontWeight: 650,
-                    }}
-                  />
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', backgroundColor: 'var(--bg-input)', border: '1px solid var(--border-color)', borderRadius: '6px', padding: '0 10px' }}>
+                    <Lock size={15} color="var(--primary)" />
+                    <input
+                      type="text"
+                      required
+                      placeholder="Enter password"
+                      value={newStaffPassword}
+                      onChange={(e) => setNewStaffPassword(e.target.value)}
+                      style={{
+                        width: '100%',
+                        padding: '9px 0',
+                        border: 'none',
+                        outline: 'none',
+                        backgroundColor: 'transparent',
+                        fontSize: '13px',
+                        color: 'var(--text-main)',
+                        fontWeight: 650,
+                      }}
+                    />
+                  </div>
                 </div>
               </div>
 
@@ -1385,9 +1753,6 @@ export const BranchesStaffScreen: React.FC = () => {
                       color: 'var(--primary)',
                     }}
                   />
-                  <div style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center' }}>
-                    Staff member will input this PIN or password on terminal sign-in.
-                  </div>
                 </div>
               </div>
 
@@ -1553,6 +1918,20 @@ export const BranchesStaffScreen: React.FC = () => {
                 </div>
               </div>
 
+              {/* Account Status */}
+              <div>
+                <label style={{ fontSize: '12px', fontWeight: 700, display: 'block', marginBottom: '4px' }}>Account Status</label>
+                <select
+                  value={editStatus}
+                  onChange={(e) => setEditStatus(e.target.value as UserStatus)}
+                  style={{ width: '100%', padding: '9px 12px', borderRadius: '6px', border: '1px solid var(--border-color)', backgroundColor: 'var(--bg-input)', fontSize: '13px', boxSizing: 'border-box', fontWeight: 700 }}
+                >
+                  <option value="active">Active (Login Allowed)</option>
+                  <option value="suspended">Suspended (Access Temporarily Blocked)</option>
+                  <option value="deactivated">Deactivated (Account Closed)</option>
+                </select>
+              </div>
+
               <div style={{ display: 'flex', gap: '10px', marginTop: '10px' }}>
                 <button type="button" onClick={() => setEditStaffModal(null)} style={{ flex: 1, padding: '10px', borderRadius: '6px', backgroundColor: 'var(--bg-card-subtle)', border: '1px solid var(--border-color)', fontWeight: 700 }}>
                   Cancel
@@ -1693,8 +2072,10 @@ export const BranchesStaffScreen: React.FC = () => {
               borderRadius: '20px',
               border: '1px solid var(--border-color)',
               boxShadow: '0 24px 60px rgba(0, 0, 0, 0.3)',
-              maxWidth: '480px',
+              maxWidth: '580px',
               width: '100%',
+              maxHeight: '90vh',
+              overflowY: 'auto',
               padding: '24px',
               display: 'flex',
               flexDirection: 'column',
@@ -1875,6 +2256,45 @@ export const BranchesStaffScreen: React.FC = () => {
 
               <div>
                 <label style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                  Pick & Store Branch Coordinates on OpenStreetMap
+                </label>
+                <OpenStreetMapView
+                  center={{
+                    lat: Number(branchEditForm.latitude) || 31.5126,
+                    lng: Number(branchEditForm.longitude) || 74.3436,
+                  }}
+                  zoom={14}
+                  height={210}
+                  interactivePin={{
+                    lat: Number(branchEditForm.latitude) || 31.5126,
+                    lng: Number(branchEditForm.longitude) || 74.3436,
+                  }}
+                  onPinChange={(coords, geo) => {
+                    setBranchEditForm((f) => ({
+                      ...f,
+                      latitude: coords.lat,
+                      longitude: coords.lng,
+                      address: geo?.address || f.address,
+                      city: geo?.city || f.city,
+                    }));
+                  }}
+                  onGpsLocated={(coords, geo) => {
+                    setBranchEditForm((f) => ({
+                      ...f,
+                      latitude: coords.lat,
+                      longitude: coords.lng,
+                      address: geo?.address || f.address,
+                      city: geo?.city || f.city,
+                    }));
+                  }}
+                  showSearch={true}
+                  showGpsButton={true}
+                  modeLabel="Click OpenStreetMap to Set Branch Coordinates"
+                />
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
                   Max Order Distance (km)
                 </label>
                 <input
@@ -1959,6 +2379,254 @@ export const BranchesStaffScreen: React.FC = () => {
                   }}
                 >
                   Save Location
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+      {/* CREATE NEW BRANCH MODAL (OWNER) */}
+      {createBranchModalOpen && (
+        <div
+          style={{
+            position: 'fixed',
+            inset: 0,
+            zIndex: 9999,
+            backgroundColor: 'rgba(0, 0, 0, 0.65)',
+            backdropFilter: 'blur(4px)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            padding: '16px',
+          }}
+        >
+          <div
+            style={{
+              backgroundColor: '#FFFFFF',
+              borderRadius: '20px',
+              border: '1px solid var(--border-color)',
+              boxShadow: '0 24px 60px rgba(0, 0, 0, 0.3)',
+              maxWidth: '520px',
+              width: '100%',
+              padding: '24px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '16px',
+            }}
+          >
+            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                <Store size={20} color="var(--primary)" />
+                <h3 style={{ fontSize: '18px', fontWeight: 900, margin: 0, color: 'var(--text-main)' }}>
+                  Add New Branch Entity
+                </h3>
+              </div>
+
+              <button
+                type="button"
+                onClick={() => setCreateBranchModalOpen(false)}
+                style={{
+                  border: 'none',
+                  background: 'none',
+                  cursor: 'pointer',
+                  color: 'var(--text-muted)',
+                }}
+              >
+                <X size={18} />
+              </button>
+            </div>
+
+            <form onSubmit={handleCreateBranchSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '12px' }}>
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                  Branch Name *
+                </label>
+                <input
+                  type="text"
+                  required
+                  placeholder="e.g. DHA Phase 5 Branch"
+                  value={newBranchName}
+                  onChange={(e) => setNewBranchName(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '9px 12px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-input)',
+                    fontSize: '13px',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                    City *
+                  </label>
+                  <select
+                    value={newBranchCity}
+                    onChange={(e) => setNewBranchCity(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'var(--bg-input)',
+                      fontSize: '13px',
+                      boxSizing: 'border-box',
+                    }}
+                  >
+                    <option value="Lahore">Lahore</option>
+                    <option value="Islamabad">Islamabad</option>
+                    <option value="Karachi">Karachi</option>
+                    <option value="Rawalpindi">Rawalpindi</option>
+                    <option value="Peshawar">Peshawar</option>
+                  </select>
+                </div>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                    Phone Number
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={newBranchPhone}
+                    onChange={(e) => setNewBranchPhone(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'var(--bg-input)',
+                      fontSize: '13px',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                  Physical Address *
+                </label>
+                <textarea
+                  rows={2}
+                  required
+                  placeholder="Complete street address..."
+                  value={newBranchAddress}
+                  onChange={(e) => setNewBranchAddress(e.target.value)}
+                  style={{
+                    width: '100%',
+                    padding: '8px 12px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-input)',
+                    fontSize: '13px',
+                    boxSizing: 'border-box',
+                    resize: 'none',
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                    Opening Hours
+                  </label>
+                  <input
+                    type="text"
+                    value={newBranchOpeningHours}
+                    onChange={(e) => setNewBranchOpeningHours(e.target.value)}
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'var(--bg-input)',
+                      fontSize: '13px',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+                <div>
+                  <label style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                    Prep Time (Mins)
+                  </label>
+                  <input
+                    type="number"
+                    min="5"
+                    max="120"
+                    value={newBranchPrepTime}
+                    onChange={(e) => setNewBranchPrepTime(parseInt(e.target.value) || 20)}
+                    style={{
+                      width: '100%',
+                      padding: '9px 12px',
+                      borderRadius: 'var(--radius-sm)',
+                      border: '1px solid var(--border-color)',
+                      backgroundColor: 'var(--bg-input)',
+                      fontSize: '13px',
+                      boxSizing: 'border-box',
+                    }}
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-secondary)', display: 'block', marginBottom: '4px' }}>
+                  Max Delivery Distance (km)
+                </label>
+                <input
+                  type="number"
+                  min="1"
+                  max="500"
+                  value={newBranchDeliveryDistance}
+                  onChange={(e) => setNewBranchDeliveryDistance(parseInt(e.target.value) || 50)}
+                  style={{
+                    width: '100%',
+                    padding: '9px 12px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-input)',
+                    fontSize: '13px',
+                    boxSizing: 'border-box',
+                  }}
+                />
+              </div>
+
+              <div style={{ display: 'flex', gap: '10px', marginTop: '6px' }}>
+                <button
+                  type="button"
+                  onClick={() => setCreateBranchModalOpen(false)}
+                  style={{
+                    flex: 1,
+                    padding: '11px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: '1px solid var(--border-color)',
+                    backgroundColor: 'var(--bg-card-subtle)',
+                    fontWeight: 700,
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                  }}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="submit"
+                  style={{
+                    flex: 1,
+                    padding: '11px',
+                    borderRadius: 'var(--radius-sm)',
+                    border: 'none',
+                    backgroundColor: 'var(--primary)',
+                    color: '#FFFFFF',
+                    fontWeight: 850,
+                    fontSize: '13px',
+                    cursor: 'pointer',
+                    boxShadow: '0 2px 8px var(--primary-glow)',
+                  }}
+                >
+                  + Create Branch
                 </button>
               </div>
             </form>

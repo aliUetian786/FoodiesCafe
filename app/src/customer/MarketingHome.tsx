@@ -1,672 +1,924 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '@/context/AppContext';
-import { Interactive3DCard } from '@/components/common/Interactive3DCard';
+import { OrderType, Branch, MenuItem } from '@/types/cafe';
 import {
-  QrCode,
-  Utensils,
-  MapPin,
-  Clock,
-  Banknote,
-  CheckCircle2,
+  Flame,
   ArrowRight,
   Sparkles,
-  Phone,
-  ShieldCheck,
-  Flame,
-  Plus,
+  Utensils,
   ShoppingBag,
+  Bike,
+  Plus,
+  Minus,
+  Trash2,
+  Megaphone,
+  Clock,
+  MapPin,
+  Tag,
+  X,
+  Check,
+  Search,
+  Navigation,
+  CheckCircle2,
+  Phone,
+  Mail,
+  ShieldCheck,
+  BookmarkPlus,
+  LocateFixed,
+  Map as MapIcon,
+  Bell,
+  Edit3,
+  Upload,
 } from 'lucide-react';
+import { OpenStreetMapView } from '@/components/common/OpenStreetMapView';
+import { OsmMarkerItem, getOsmDirectionsUrl } from '@/utils/openStreetMap';
 
 interface MarketingHomeProps {
   onNavigate: (view: string) => void;
   onOpenItemModal?: (item: any) => void;
 }
 
-export const MarketingHome: React.FC<MarketingHomeProps> = ({
-  onNavigate,
-  onOpenItemModal,
-}) => {
+// Exact Dish Image Fallbacks & Specific Images Matching Mobile App (mobile/src/services/api.ts)
+const DISH_IMAGE_FALLBACKS: Record<string, string> = {
+  'Biryani & Rice': 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=800&auto=format&fit=crop&q=60',
+  'Karahi & Handi': 'https://images.unsplash.com/photo-1603894584373-5ac82b2ae398?w=800&auto=format&fit=crop&q=60',
+  'Burgers': 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&auto=format&fit=crop&q=60',
+  'Burgers & Fast Food': 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&auto=format&fit=crop&q=60',
+  'BBQ & Kebabs': 'https://images.unsplash.com/photo-1599488615731-7e5c2823ff28?w=800&auto=format&fit=crop&q=60',
+  'Tandoor & Breads': 'https://images.unsplash.com/photo-1565557623262-b51c2513a641?w=800&auto=format&fit=crop&q=60',
+  'Beverages & Desserts': 'https://images.unsplash.com/photo-1551024709-8f23befc6f87?w=800&auto=format&fit=crop&q=60',
+  'Desserts': 'https://images.unsplash.com/photo-1551024709-8f23befc6f87?w=800&auto=format&fit=crop&q=60',
+  'Beverages': 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop&q=60',
+};
+
+const SPECIFIC_DISH_IMAGES: Record<string, string> = {
+  m14: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&auto=format&fit=crop&q=60',
+  m15: 'https://images.unsplash.com/photo-1576107232684-1279f3908594?w=800&auto=format&fit=crop&q=60',
+  m4: 'https://images.unsplash.com/photo-1521305916504-4a1121188589?w=800&auto=format&fit=crop&q=60',
+  m1: 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=800&auto=format&fit=crop&q=60',
+  m8: 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=800&auto=format&fit=crop&q=60',
+  m9: 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=800&auto=format&fit=crop&q=60',
+  m2: 'https://images.unsplash.com/photo-1603894584373-5ac82b2ae398?w=800&auto=format&fit=crop&q=60',
+  m10: 'https://images.unsplash.com/photo-1589302168068-964664d93dc0?w=800&auto=format&fit=crop&q=60',
+  m11: 'https://images.unsplash.com/photo-1545247181-516773cae754?w=800&auto=format&fit=crop&q=60',
+  m3: 'https://images.unsplash.com/photo-1599488615731-7e5c2823ff28?w=800&auto=format&fit=crop&q=60',
+  m12: 'https://images.unsplash.com/photo-1599488615731-7e5c2823ff28?w=800&auto=format&fit=crop&q=60',
+  m13: 'https://images.unsplash.com/photo-1544025162-d76694265947?w=800&auto=format&fit=crop&q=60',
+  m5: 'https://images.unsplash.com/photo-1565557623262-b51c2513a641?w=800&auto=format&fit=crop&q=60',
+  m16: 'https://images.unsplash.com/photo-1565557623262-b51c2513a641?w=800&auto=format&fit=crop&q=60',
+  m17: 'https://images.unsplash.com/photo-1565557623262-b51c2513a641?w=800&auto=format&fit=crop&q=60',
+  m6: 'https://images.unsplash.com/photo-1576092768241-dec231879fc3?w=800&auto=format&fit=crop&q=60',
+  m7: 'https://images.unsplash.com/photo-1551024709-8f23befc6f87?w=800&auto=format&fit=crop&q=60',
+  m18: 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop&q=60',
+  m19: 'https://images.unsplash.com/photo-1576092768241-dec231879fc3?w=800&auto=format&fit=crop&q=60',
+  m20: 'https://images.unsplash.com/photo-1551024709-8f23befc6f87?w=800&auto=format&fit=crop&q=60',
+};
+
+function resolveDishImage(image?: string, category?: string, dishIdOrName?: string): string {
+  if (dishIdOrName && SPECIFIC_DISH_IMAGES[dishIdOrName]) {
+    return SPECIFIC_DISH_IMAGES[dishIdOrName];
+  }
+  if (image && (image.startsWith('http://') || image.startsWith('https://'))) {
+    return image;
+  }
+  if (category && DISH_IMAGE_FALLBACKS[category]) {
+    return DISH_IMAGE_FALLBACKS[category];
+  }
+  return 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=800&auto=format&fit=crop&q=60';
+}
+
+function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
+  const R = 6371;
+  const dLat = ((lat2 - lat1) * Math.PI) / 180;
+  const dLon = ((lon2 - lon1) * Math.PI) / 180;
+  const a =
+    Math.sin(dLat / 2) * Math.sin(dLat / 2) +
+    Math.cos((lat1 * Math.PI) / 180) * Math.cos((lat2 * Math.PI) / 180) * Math.sin(dLon / 2) * Math.sin(dLon / 2);
+  const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1 - a));
+  return Math.round(R * c * 10) / 10;
+}
+
+const PRESET_ZONES = [
+  { name: 'Gulberg III', area: 'Main Boulevard, Gulberg III', lat: 31.5204, lng: 74.3587 },
+  { name: 'DHA Phase 5', area: 'Sector C, DHA Phase 5', lat: 31.4704, lng: 74.4103 },
+  { name: 'Johar Town', area: 'G1 Market, Johar Town', lat: 31.4697, lng: 74.2982 },
+  { name: 'Model Town', area: 'Bank Square, Model Town', lat: 31.4875, lng: 74.3195 },
+  { name: 'Mall Road', area: 'Shahrah-e-Quaid-e-Azam, Mall Road', lat: 31.5656, lng: 74.3142 },
+];
+
+export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
   const {
-    branches,
     menuItems,
+    branches,
+    cart,
+    addToCart,
+    updateCartItemQty,
+    removeFromCart,
+    orderType,
+    setOrderType,
+    setHasConfirmedOrderType,
+    currentBranch,
     currentBranchId,
     setCurrentBranchId,
+    hasSelectedBranch,
+    announcements,
+    addAnnouncement,
+    deleteAnnouncement,
+    currentRole,
+    customerCoordinates,
+    setCustomerCoordinates,
+    selectedDeliveryAddress,
+    setSelectedDeliveryAddress,
+    savedAddresses,
+    addSavedAddress,
+    deleteSavedAddress,
+    detectAndStoreCurrentLocation,
     footerSettings,
+    updateFooterSettings,
     heroBanners,
     dealCard,
-    addToCart,
     addToast,
   } = useApp();
 
-  const [currentSlide, setCurrentSlide] = useState(0);
-  // Click handler for Deal Card: navigate directly to menu
-  const handleDealClick = () => {
-    onNavigate('menu');
-  };
+  // Deal & Banner Photos synced with Browser Local Storage
+  const [localDealPhotos, setLocalDealPhotos] = useState<string[]>(() => {
+    const defaults = ['/food-biryani.jpg', '/hero-bg.jpg'];
+    if (typeof window === 'undefined') return defaults;
+    try {
+      const raw = localStorage.getItem('foodies_local_deal_photos');
+      if (raw) {
+        const parsed = JSON.parse(raw);
+        if (Array.isArray(parsed) && parsed.length > 0) return parsed;
+      }
+    } catch { }
+    return defaults;
+  });
 
-  // Click handler for Featured Menu Items: navigate directly to that item in menu page
-  const handleItemCardClick = (item: any) => {
-    if (typeof window !== 'undefined') {
-      localStorage.setItem('foodies_target_item', item.id);
+  const [announcementPhotosMap, setAnnouncementPhotosMap] = useState<Record<string, string>>(() => {
+    if (typeof window === 'undefined') return {};
+    try {
+      const raw = localStorage.getItem('foodies_announcement_photos');
+      return raw ? JSON.parse(raw) : {};
+    } catch {
+      return {};
     }
-    onNavigate('menu');
-  };
+  });
 
-  // Auto-transition hero banner every 5 seconds
+  // 2.5-Second Auto-Sliding Hero Carousel (Reads synced heroBanners & local photos instead of static external mocks)
+  const BANNERS = useMemo(() => {
+    const activeHero = (heroBanners || []).filter((b) => b.active !== false);
+    if (activeHero.length > 0) {
+      return activeHero.map((b) => ({
+        title: b.title,
+        subtitle: b.subtitle,
+        tag: b.badge || 'CHEF SPECIAL',
+        image: b.imageUrl || localDealPhotos[0] || '/hero-bg.jpg',
+      }));
+    }
+    return [
+      {
+        title: dealCard?.title || 'Mutton Dum Biryani Special',
+        subtitle: dealCard?.subtitle || 'Slow cooked in traditional copper degh with fragrant saffron',
+        tag: dealCard?.tag || 'CHEF SPECIAL',
+        image: dealCard?.imageUrl || localDealPhotos[0] || '/hero-bg.jpg',
+      },
+      {
+        title: 'Fresh Kitchen Combos & Deals',
+        subtitle: 'Ordered directly from your nearest Foodies Cafe branch',
+        tag: 'HOT & SIZZLING',
+        image: localDealPhotos[1] || '/food-biryani.jpg',
+      },
+    ];
+  }, [heroBanners, dealCard, localDealPhotos]);
+
+  const [activeBannerIndex, setActiveBannerIndex] = useState(0);
+
   useEffect(() => {
-    if (!heroBanners || heroBanners.length <= 1) return;
-    const interval = setInterval(() => {
-      setCurrentSlide((prev) => (prev + 1) % heroBanners.length);
-    }, 5000);
-    return () => clearInterval(interval);
-  }, [heroBanners]);
+    const timer = setInterval(() => {
+      setActiveBannerIndex((prev) => (prev + 1) % BANNERS.length);
+    }, 2500);
+    return () => clearInterval(timer);
+  }, [BANNERS.length]);
 
-  const activeBanner =
-    heroBanners && heroBanners.length > 0
-      ? heroBanners[currentSlide % heroBanners.length]
-      : {
-          id: 'b-default',
-          title: 'Eat Fresh & Healthy, Cooked with Passion',
-          subtitle:
-            'Authentic clay oven dum biryanis, organic desi ghee Shinwari karahi, and gourmet smash burgers across Lahore, Islamabad & Karachi.',
-          badge: 'Multi-Branch Pakistani Fine Dining & Fast Casual',
-          imageUrl: '/hero-bg.jpg',
-          categoryLink: 'Biryani & Rice',
-          active: true,
-        };
+  const activeBanner = BANNERS[activeBannerIndex % BANNERS.length] || BANNERS[0];
 
-  const featuredItems = menuItems.slice(0, 4);
+  // Screen width detection for responsive popup vs mobile bottom sheet
+  const [isDesktop, setIsDesktop] = useState(true);
+  useEffect(() => {
+    const handleResize = () => {
+      setIsDesktop(typeof window !== 'undefined' ? window.innerWidth > 768 : true);
+    };
+    handleResize();
+    window.addEventListener('resize', handleResize);
+    return () => window.removeEventListener('resize', handleResize);
+  }, []);
+
+  // Signature Specials items (First 4 menu items)
+  const featuredDishes = menuItems.slice(0, 4);
 
   return (
     <div
-      className="marketing-home-container"
       style={{
+        width: '100%',
+        maxWidth: '1360px',
+        margin: '0 auto',
+        padding: isDesktop ? '20px 24px' : '14px 16px',
+        paddingBottom: '80px',
+        boxSizing: 'border-box',
         display: 'flex',
         flexDirection: 'column',
-        gap: 'clamp(32px, 6vw, 64px)',
-        paddingBottom: '80px',
-        overflowX: 'hidden',
-        width: '100%',
-        maxWidth: '100vw',
-        boxSizing: 'border-box',
+        gap: isDesktop ? '24px' : '16px',
+        fontFamily: 'Outfit, -apple-system, BlinkMacSystemFont, sans-serif',
       }}
     >
-      {/* HERO SECTION WITH CHANGEABLE PICTURES CAROUSEL & DEAL CARD */}
-      <section
+      {/* ================= 1. AUTO-SLIDING HERO ANNOUNCEMENT CAROUSEL (PURE IMAGES, NO TEXT OVERLAY) ================= */}
+      <div
+        onClick={() => onNavigate('menu')}
         style={{
-          position: 'relative',
-          minHeight: 'auto',
-          borderRadius: 'clamp(16px, 3vw, 24px)',
+          height: isDesktop ? '340px' : '200px',
+          borderRadius: '18px',
           overflow: 'hidden',
-          display: 'flex',
-          alignItems: 'center',
-          padding: 'clamp(24px, 4vw, 50px) clamp(16px, 3.5vw, 36px)',
-          margin: '16px auto 0',
-          maxWidth: '1280px',
-          width: 'calc(100% - clamp(16px, 3vw, 32px))',
-          boxSizing: 'border-box',
-          backgroundImage: `linear-gradient(to right, rgba(16, 13, 11, 0.94) 0%, rgba(16, 13, 11, 0.82) 55%, rgba(16, 13, 11, 0.45) 100%), url('${activeBanner.imageUrl}')`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          boxShadow: 'var(--shadow-xl)',
-          border: '1px solid var(--border-color)',
-          transition: 'background-image 0.6s ease-in-out',
+          position: 'relative',
+          cursor: 'pointer',
+          boxShadow: '0 8px 24px rgba(0,0,0,0.08)',
+          backgroundColor: '#F8FAFC',
+          transition: 'all 0.3s ease',
         }}
+        title="View Foodies Cafe Menu"
       >
+        <img
+          src={activeBanner.image}
+          alt="Foodies Cafe Announcement"
+          style={{
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            display: 'block',
+          }}
+        />
 
+        {/* Subtle Carousel Dots on Bottom Center */}
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '12px',
+            left: 0,
+            right: 0,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            gap: '6px',
+            zIndex: 3,
+          }}
+        >
+          {BANNERS.map((_, idx) => (
+            <div
+              key={idx}
+              onClick={(e) => {
+                e.stopPropagation();
+                setActiveBannerIndex(idx);
+              }}
+              style={{
+                width: idx === activeBannerIndex ? '20px' : '7px',
+                height: '7px',
+                borderRadius: '4px',
+                backgroundColor: idx === activeBannerIndex ? 'var(--primary)' : 'rgba(255, 255, 255, 0.75)',
+                boxShadow: '0 1px 3px rgba(0,0,0,0.35)',
+                cursor: 'pointer',
+                transition: 'all 0.25s ease',
+              }}
+            />
+          ))}
+        </div>
+      </div>
+
+      {/* ================= 3. FEATURED SIGNATURE DISHES (SIGNATURE SPECIALS) ================= */}
+      <div>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '12px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Flame size={18} color="var(--primary)" />
+            <h3
+              style={{
+                margin: 0,
+                fontSize: '16px',
+                fontWeight: 850,
+                color: 'var(--text-main, #1E293B)',
+              }}
+            >
+              Signature Specials
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigate('menu')}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--primary)',
+              fontSize: '12.5px',
+              fontWeight: 750,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px',
+              padding: 0,
+            }}
+          >
+            <span>View Menu →</span>
+          </button>
+        </div>
+
+        {/* Dishes Grid (4 cols on laptop/desktop, 2 cols on mobile) */}
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(min(280px, 100%), 1fr))',
-            gap: 'clamp(24px, 4vw, 40px)',
-            alignItems: 'center',
-            width: '100%',
-            zIndex: 10,
+            gridTemplateColumns: isDesktop ? 'repeat(4, 1fr)' : 'repeat(2, 1fr)',
+            gap: isDesktop ? '16px' : '12px',
           }}
         >
-          {/* Hero Left Content */}
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', maxWidth: '590px', width: '100%' }}>
+          {featuredDishes.map((dish) => {
+            const cartItemsForDish = cart.filter((ci) => ci.menuItemId === dish.id || ci.id === dish.id);
+            const totalQtyInCart = cartItemsForDish.reduce((sum, ci) => sum + (ci.quantity || 1), 0);
+            const dishPrice = hasSelectedBranch
+              ? (dish.branchPriceOverrides?.[currentBranch.id] ?? dish.basePrice)
+              : dish.basePrice;
+
+            return (
+              <div
+                key={dish.id}
+                style={{
+                  backgroundColor: 'var(--bg-card, #FFFFFF)',
+                  borderRadius: '16px',
+                  overflow: 'hidden',
+                  border: '1px solid var(--border-color, #E2E8F0)',
+                  boxShadow: 'var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.04))',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  aspectRatio: '1 / 1',
+                  boxSizing: 'border-box',
+                }}
+              >
+                <div style={{ width: '100%', height: '52%', minHeight: '52%', position: 'relative', overflow: 'hidden' }}>
+                  <img
+                    src={resolveDishImage(dish.image, dish.category, dish.id)}
+                    alt={dish.name}
+                    style={{
+                      width: '100%',
+                      height: '100%',
+                      objectFit: 'cover',
+                    }}
+                  />
+                  <span
+                    style={{
+                      position: 'absolute',
+                      top: '8px',
+                      left: '8px',
+                      fontSize: '9.5px',
+                      fontWeight: 850,
+                      backgroundColor: 'rgba(0, 0, 0, 0.65)',
+                      color: '#FFFFFF',
+                      padding: '2px 7px',
+                      borderRadius: '6px',
+                      textTransform: 'uppercase',
+                      letterSpacing: '0.4px',
+                      backdropFilter: 'blur(4px)',
+                    }}
+                  >
+                    {dish.category}
+                  </span>
+                </div>
+                <div style={{ padding: isDesktop ? '10px 12px' : '8px 10px', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, justifyContent: 'space-between' }}>
+                  <div style={{ minHeight: 0 }}>
+                    <div
+                      style={{
+                        fontSize: isDesktop ? '13.5px' : '12.5px',
+                        fontWeight: 850,
+                        color: 'var(--text-main, #1E293B)',
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                      title={dish.name}
+                    >
+                      {dish.name}
+                    </div>
+                    <div
+                      style={{
+                        fontSize: '10.5px',
+                        color: 'var(--text-muted, #64748B)',
+                        marginTop: '2px',
+                        lineHeight: '13px',
+                        maxHeight: '26px',
+                        overflow: 'hidden',
+                        display: '-webkit-box',
+                        WebkitLineClamp: 2,
+                        WebkitBoxOrient: 'vertical',
+                      }}
+                    >
+                      {dish.description}
+                    </div>
+                  </div>
+
+                  {/* Price & Add/Stepper Row */}
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      justifyContent: 'space-between',
+                      paddingTop: '6px',
+                      borderTop: '1px solid var(--border-color, #F1F5F9)',
+                      marginTop: 'auto',
+                      flexShrink: 0,
+                    }}
+                  >
+                    <span style={{ fontSize: isDesktop ? '13px' : '12px', fontWeight: 850, color: 'var(--text-main, #1E293B)' }}>
+                      Rs. {dishPrice.toLocaleString()}
+                    </span>
+
+                    {/* Stepper if in cart, or 1-tap add */}
+                    {totalQtyInCart > 0 ? (
+                      <div
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '4px',
+                          backgroundColor: 'rgba(217, 101, 40, 0.08)',
+                          borderRadius: '8px',
+                          padding: '2px 4px',
+                          border: '1px solid rgba(217, 101, 40, 0.25)',
+                        }}
+                      >
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const firstItem = cartItemsForDish[0];
+                            if (firstItem) {
+                              if (firstItem.quantity <= 1) removeFromCart(firstItem.id);
+                              else updateCartItemQty(firstItem.id, -1);
+                            }
+                          }}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            padding: '2px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            color: totalQtyInCart === 1 ? '#DC2626' : 'var(--primary)',
+                          }}
+                        >
+                          {totalQtyInCart === 1 ? <Trash2 size={11} /> : <Minus size={11} />}
+                        </button>
+                        <span style={{ fontSize: '11px', fontWeight: 850, color: 'var(--primary)', minWidth: '14px', textAlign: 'center' }}>
+                          {totalQtyInCart}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const firstItem = cartItemsForDish[0];
+                            if (firstItem) updateCartItemQty(firstItem.id, 1);
+                          }}
+                          style={{
+                            background: 'none',
+                            border: 'none',
+                            cursor: 'pointer',
+                            padding: '2px',
+                            display: 'flex',
+                            alignItems: 'center',
+                            color: 'var(--primary)',
+                          }}
+                        >
+                          <Plus size={11} />
+                        </button>
+                      </div>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          addToCart({
+                            id: `cart-${dish.id}-${Date.now()}`,
+                            menuItemId: dish.id,
+                            name: dish.name,
+                            unitPrice: dishPrice,
+                            quantity: 1,
+                            size: dish.sizes?.[0]?.name || 'Standard',
+                          });
+                          addToast({
+                            type: 'success',
+                            title: 'Added to Cart',
+                            message: `${dish.name} added to your order.`,
+                          });
+                        }}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '3px',
+                          backgroundColor: 'rgba(217, 101, 40, 0.08)',
+                          color: 'var(--primary)',
+                          padding: '3px 8px',
+                          borderRadius: '7px',
+                          border: '1px solid rgba(217, 101, 40, 0.25)',
+                          fontSize: '11px',
+                          fontWeight: 750,
+                          cursor: 'pointer',
+                        }}
+                      >
+                        <Plus size={11} />
+                        <span>Add</span>
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
+
+      {/* ================= 4. SPECIAL DEALS ONLY SECTION ================= */}
+      <div style={{ marginTop: '8px' }}>
+        <div
+          style={{
+            display: 'flex',
+            justifyContent: 'space-between',
+            alignItems: 'center',
+            marginBottom: '12px',
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <Tag size={18} color="var(--primary)" />
+            <h3
+              style={{
+                margin: 0,
+                fontSize: '16px',
+                fontWeight: 850,
+                color: 'var(--text-main, #1E293B)',
+              }}
+            >
+              Special Deals
+            </h3>
+          </div>
+          <button
+            type="button"
+            onClick={() => onNavigate('menu')}
+            style={{
+              background: 'none',
+              border: 'none',
+              color: 'var(--primary)',
+              fontSize: '12.5px',
+              fontWeight: 750,
+              cursor: 'pointer',
+              display: 'flex',
+              alignItems: 'center',
+              gap: '3px',
+              padding: 0,
+            }}
+          >
+            <span>View All Deals →</span>
+          </button>
+        </div>
+
+        {/* Deals List */}
+        <div style={{ display: 'grid', gridTemplateColumns: isDesktop ? 'repeat(auto-fit, minmax(280px, 1fr))' : '1fr', gap: isDesktop ? '16px' : '12px' }}>
+          {(() => {
+            const homeDealsList = [
+              {
+                id: 'deal-home-1',
+                title: dealCard?.title || 'Family Dum Biryani Feast (Deal for 3-4)',
+                tag: dealCard?.tag || 'CHEF SPECIAL DEAL',
+                description: dealCard?.subtitle || '2x Royal Chicken Biryani, 1x Half Chicken Boti BBQ, 2x Mint Margaritas, Raita & Salad.',
+                price: 1650,
+                image: dealCard?.imageUrl || localDealPhotos[0] || '/food-biryani.jpg',
+              },
+              {
+                id: 'deal-home-2',
+                title: 'Shinwari Karahi Duo Combo (Deal for 2)',
+                tag: 'HOT COMBO',
+                description: 'Half Desi Ghee Shinwari Chicken Karahi, 4x Fresh Roghni Naan, 2x Soft Drinks & Mint Chutney.',
+                price: 1550,
+                image: localDealPhotos[1] || '/hero-bg.jpg',
+              },
+              {
+                id: 'deal-home-3',
+                title: 'Smashed Burger & Fries Crave Deal',
+                tag: 'FAST FOOD DEAL',
+                description: '1x Double Beef Smashed Cheeseburger, 1x Peri Peri Loaded Fries & 1x Artisanal Mint Margarita.',
+                price: 1190,
+                image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&auto=format&fit=crop&q=60',
+              },
+              {
+                id: 'deal-home-4',
+                title: 'Midnight BBQ Feast Deal',
+                tag: 'BBQ SPECIAL',
+                description: '4 pcs Reshmi Chicken Kebabs, 6 pcs Chicken Malai Boti, 2x Garlic Butter Naans, Raita & Salad.',
+                price: 1290,
+                image: 'https://images.unsplash.com/photo-1599488615731-7e5c2823ff28?w=800&auto=format&fit=crop&q=60',
+              },
+            ];
+
+            return homeDealsList.map((d) => (
+              <div
+                key={d.id}
+                style={{
+                  backgroundColor: 'var(--bg-card, #FFFFFF)',
+                  borderRadius: '16px',
+                  padding: '14px',
+                  border: '1.2px solid var(--border-color, #E2E8F0)',
+                  boxShadow: 'var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.04))',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '10px',
+                }}
+              >
+                <div
+                  style={{
+                    width: '100%',
+                    height: '140px',
+                    borderRadius: '12px',
+                    overflow: 'hidden',
+                    backgroundColor: '#F8FAFC',
+                    position: 'relative',
+                  }}
+                >
+                  <img
+                    src={d.image}
+                    alt={d.title}
+                    style={{ width: '100%', height: '100%', objectFit: 'cover', display: 'block' }}
+                  />
+                  <div
+                    style={{
+                      position: 'absolute',
+                      top: '8px',
+                      left: '8px',
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      backgroundColor: 'var(--primary)',
+                      color: '#FFFFFF',
+                      padding: '3px 8px',
+                      borderRadius: '6px',
+                      fontSize: '9.5px',
+                      fontWeight: 850,
+                      letterSpacing: '0.4px',
+                      textTransform: 'uppercase',
+                    }}
+                  >
+                    <Tag size={10} color="#FFFFFF" />
+                    <span>{d.tag}</span>
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '4px', flex: 1 }}>
+                  <div style={{ fontSize: '14.5px', fontWeight: 850, color: 'var(--text-main, #1E293B)', lineHeight: 1.3 }}>
+                    {d.title}
+                  </div>
+                  <div style={{ fontSize: '11.5px', color: 'var(--text-muted, #64748B)', lineHeight: '16px' }}>
+                    {d.description}
+                  </div>
+                </div>
+
+                <div
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    paddingTop: '8px',
+                    borderTop: '1px solid var(--border-color, #F1F5F9)',
+                    marginTop: 'auto',
+                  }}
+                >
+                  <span style={{ fontSize: '15px', fontWeight: 900, color: 'var(--primary)' }}>
+                    Rs. {d.price.toLocaleString()}
+                  </span>
+
+                  <button
+                    type="button"
+                    onClick={() => {
+                      addToCart({
+                        id: `cart-${d.id}-${Date.now()}`,
+                        menuItemId: d.id,
+                        name: d.title,
+                        unitPrice: d.price,
+                        quantity: 1,
+                        size: 'Deal Special',
+                      });
+                      addToast({
+                        type: 'success',
+                        title: 'Deal Added to Cart 🎉',
+                        message: `${d.title} added to your order.`,
+                      });
+                    }}
+                    style={{
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '5px',
+                      backgroundColor: 'var(--primary)',
+                      color: '#FFFFFF',
+                      padding: '6px 14px',
+                      borderRadius: '10px',
+                      border: 'none',
+                      fontSize: '12px',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      boxShadow: '0 2px 6px var(--primary-glow)',
+                    }}
+                  >
+                    <Plus size={13} color="#FFFFFF" />
+                    <span>Order Deal</span>
+                  </button>
+                </div>
+              </div>
+            ));
+          })()}
+        </div>
+      </div>
+
+      {/* ================= 5. RESPONSIVE WEB FOOTER (Below Announcements) ================= */}
+      <footer
+        style={{
+          marginTop: isDesktop ? '16px' : '8px',
+          backgroundColor: 'var(--bg-card, #FFFFFF)',
+          border: '1.2px solid var(--border-color, #E2E8F0)',
+          borderRadius: isDesktop ? '20px' : '14px',
+          padding: isDesktop ? '36px 32px 24px' : '14px 12px 10px',
+          boxShadow: 'var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.04))',
+          boxSizing: 'border-box',
+          overflowX: 'auto',
+        }}
+      >
+        <div
+          style={{
+            display: 'grid',
+            gridTemplateColumns: isDesktop ? 'repeat(4, 1fr)' : 'repeat(4, minmax(125px, 1fr))',
+            gap: isDesktop ? '32px' : '10px',
+            marginBottom: isDesktop ? '28px' : '10px',
+            minWidth: isDesktop ? 'auto' : '520px',
+          }}
+        >
+          {/* Col 1: Brand Info & Halal Assurance */}
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: isDesktop ? '10px' : '6px', marginBottom: isDesktop ? '12px' : '6px' }}>
+              <img
+                src="/logo.png"
+                alt="Foodies Cafe"
+                style={{ width: isDesktop ? '42px' : '22px', height: isDesktop ? '42px' : '22px', objectFit: 'contain' }}
+                onError={(e) => {
+                  (e.target as HTMLElement).style.display = 'none';
+                }}
+              />
+              <div>
+                <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: isDesktop ? 900 : 750, fontSize: isDesktop ? '19px' : '12px', color: 'var(--text-main, #1E293B)' }}>
+                  Foodies<span style={{ color: 'var(--primary)' }}>Cafe</span>
+                </span>
+                <div style={{ fontSize: isDesktop ? '11px' : '8.5px', color: 'var(--text-muted, #64748B)', fontWeight: isDesktop ? 700 : 500 }}>
+                  Taste That Speaks
+                </div>
+              </div>
+            </div>
+            <p style={{ fontSize: isDesktop ? '12.5px' : '9px', color: 'var(--text-secondary, #475569)', lineHeight: 1.35, fontWeight: 400, margin: isDesktop ? '0 0 14px' : '0 0 6px' }}>
+              Pakistan&apos;s premier multi-branch dining experience. Authentic Dum Biryani, sizzling karahis, gourmet burgers, and fresh shakes.
+            </p>
             <div
               style={{
                 display: 'inline-flex',
                 alignItems: 'center',
-                gap: '8px',
-                padding: '6px 14px',
-                borderRadius: 'var(--radius-full)',
-                backgroundColor: 'rgba(217, 101, 40, 0.25)',
-                border: '1px solid rgba(217, 101, 40, 0.5)',
-                color: '#FFA270',
-                fontSize: '12px',
-                fontWeight: 700,
-                letterSpacing: '0.06em',
-                textTransform: 'uppercase',
-                width: 'fit-content',
-              }}
-            >
-              <Sparkles size={14} />
-              <span>{activeBanner.badge}</span>
-            </div>
-
-            <h1
-              style={{
-                fontFamily: 'Outfit, sans-serif',
-                fontSize: 'clamp(34px, 4.6vw, 50px)',
-                fontWeight: 800,
-                lineHeight: 1.15,
-                color: '#FFFFFF',
-                letterSpacing: '-0.03em',
-                margin: 0,
-              }}
-            >
-              {activeBanner.title}
-            </h1>
-          </div>
-
-          {/* Hero Right: 3D Interactive Deal Card Showcase (Changeable) */}
-          <div style={{ display: 'flex', justifyContent: 'center' }}>
-            <div style={{ maxWidth: '420px', width: '100%', display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-              <Interactive3DCard
-                imageSrc={dealCard.imageUrl}
-                title={dealCard.title}
-                subtitle=""
-                tag=""
-                price={dealCard.price}
-                onClick={handleDealClick}
-              />
-            </div>
-          </div>
-        </div>
-      </section>
-
-      {/* SWAPPED SECTION 1: FEATURED MENU ITEMS (Signatures & Best Sellers) FIRST */}
-      <section style={{ maxWidth: '1280px', margin: '0 auto', width: 'calc(100% - clamp(16px, 3vw, 32px))', boxSizing: 'border-box' }}>
-        <div
-          style={{
-            display: 'flex',
-            justifyContent: 'space-between',
-            alignItems: 'flex-end',
-            marginBottom: '28px',
-            flexWrap: 'wrap',
-            gap: '14px',
-          }}
-        >
-          <div>
-            <span
-              style={{
-                fontSize: '12px',
-                fontWeight: 800,
-                color: 'var(--primary)',
-                textTransform: 'uppercase',
-                letterSpacing: '0.08em',
-              }}
-            >
-              Signatures & Best Sellers
-            </span>
-            <h2 style={{ fontSize: 'clamp(22px, 4.5vw, 30px)', fontWeight: 800, color: 'var(--text-main)', marginTop: '4px' }}>
-              Craving Something Special?
-            </h2>
-          </div>
-          <button
-            onClick={() => onNavigate('menu')}
-            className="home-view-full-menu-btn"
-            style={{
-              padding: '10px 20px',
-              borderRadius: 'var(--radius-full)',
-              backgroundColor: 'var(--primary)',
-              color: '#FFFFFF',
-              fontSize: '13.5px',
-              fontWeight: 700,
-              display: 'flex',
-              alignItems: 'center',
-              gap: '6px',
-              cursor: 'pointer',
-              border: 'none',
-              boxShadow: '0 4px 12px var(--primary-glow)',
-            }}
-          >
-            <span>View Full Menu</span>
-            <ArrowRight size={15} />
-          </button>
-        </div>
-
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(min(240px, 100%), 1fr))',
-            gap: 'clamp(14px, 2.5vw, 24px)',
-          }}
-        >
-          {featuredItems.map((item) => (
-            <div
-              key={item.id}
-              onClick={() => handleItemCardClick(item)}
-              style={{
-                backgroundColor: 'var(--bg-card)',
-                borderRadius: 'var(--radius-lg)',
-                border: '1px solid var(--border-color)',
-                overflow: 'hidden',
-                boxShadow: 'var(--shadow-md)',
-                display: 'flex',
-                flexDirection: 'column',
-                cursor: 'pointer',
-                transition: 'transform 0.2s ease, box-shadow 0.2s ease',
-              }}
-            >
-              <div style={{ height: 'clamp(170px, 28vw, 220px)', width: '100%', position: 'relative', overflow: 'hidden' }}>
-                <img
-                  src={item.image}
-                  alt={item.name}
-                  style={{ width: '100%', height: '100%', objectFit: 'cover', transition: 'transform 0.3s ease' }}
-                />
-                <span
-                  style={{
-                    position: 'absolute',
-                    top: '12px',
-                    left: '12px',
-                    backgroundColor: 'rgba(0,0,0,0.65)',
-                    backdropFilter: 'blur(6px)',
-                    color: '#FFFFFF',
-                    fontSize: '11px',
-                    fontWeight: 700,
-                    padding: '4px 10px',
-                    borderRadius: 'var(--radius-full)',
-                  }}
-                >
-                  {item.category}
-                </span>
-
-                <div
-                  style={{
-                    position: 'absolute',
-                    bottom: 0,
-                    left: 0,
-                    right: 0,
-                    padding: '16px 14px',
-                    background: 'linear-gradient(to top, rgba(0,0,0,0.85) 0%, rgba(0,0,0,0.3) 60%, transparent 100%)',
-                    color: '#FFFFFF',
-                  }}
-                >
-                  <h4 style={{ fontSize: '16.5px', fontWeight: 800, margin: 0, color: '#FFFFFF' }}>
-                    {item.name}
-                  </h4>
-                  <div style={{ fontSize: '12px', color: '#E2E8F0', marginTop: '3px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <span>Order in Menu</span>
-                    <ArrowRight size={13} />
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </section>
-
-      {/* SWAPPED SECTION 2: HOW IT WORKS IN 3 EASY STEPS (Seamless Service Experience) SECOND */}
-      <section style={{ maxWidth: '1280px', margin: '0 auto', width: 'calc(100% - clamp(16px, 3vw, 32px))', boxSizing: 'border-box' }}>
-        <div style={{ textAlign: 'center', marginBottom: '32px' }}>
-          <span
-            style={{
-              fontSize: '12px',
-              fontWeight: 800,
-              color: 'var(--primary)',
-              textTransform: 'uppercase',
-              letterSpacing: '0.08em',
-            }}
-          >
-            Seamless Service Experience
-          </span>
-          <h2
-            style={{
-              fontSize: 'clamp(22px, 4.5vw, 32px)',
-              fontWeight: 800,
-              color: 'var(--text-main)',
-              marginTop: '6px',
-            }}
-          >
-            How It Works in 3 Easy Steps
-          </h2>
-        </div>
-
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(auto-fit, minmax(min(250px, 100%), 1fr))',
-            gap: 'clamp(14px, 2.5vw, 24px)',
-          }}
-        >
-          {/* Step 1 */}
-          <div
-            style={{
-              backgroundColor: 'var(--bg-card)',
-              borderRadius: 'var(--radius-lg)',
-              border: '1px solid var(--border-color)',
-              padding: 'clamp(20px, 3vw, 32px) clamp(16px, 2.5vw, 24px)',
-              boxShadow: 'var(--shadow-md)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '14px',
-              position: 'relative',
-              overflow: 'hidden',
-            }}
-          >
-            <div
-              style={{
-                width: '50px',
-                height: '50px',
-                borderRadius: '16px',
-                backgroundColor: 'var(--primary-light)',
-                color: 'var(--primary)',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontWeight: 800,
-                fontSize: '20px',
-                fontFamily: 'Outfit, sans-serif',
-              }}
-            >
-              01
-            </div>
-            <h3 style={{ fontSize: '19px', fontWeight: 700, color: 'var(--text-main)' }}>
-              Choose Your Branch
-            </h3>
-            <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
-              Select from Gulberg Lahore, F-7 Islamabad, or Clifton Karachi. View live menu availability, prep times, and current cafe busy status.
-            </p>
-          </div>
-
-          {/* Step 2 */}
-          <div
-            style={{
-              backgroundColor: 'var(--bg-card)',
-              borderRadius: 'var(--radius-lg)',
-              border: '1px solid var(--border-color)',
-              padding: 'clamp(20px, 3vw, 32px) clamp(16px, 2.5vw, 24px)',
-              boxShadow: 'var(--shadow-md)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '14px',
-              position: 'relative',
-            }}
-          >
-            <div
-              style={{
-                width: '50px',
-                height: '50px',
-                borderRadius: '16px',
-                backgroundColor: 'var(--accent-light)',
-                color: '#B45309',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontWeight: 800,
-                fontSize: '20px',
-                fontFamily: 'Outfit, sans-serif',
-              }}
-            >
-              02
-            </div>
-            <h3 style={{ fontSize: '19px', fontWeight: 700, color: 'var(--text-main)' }}>
-              Customize & Place Order
-            </h3>
-            <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
-              Pick sizes, extras, and spice levels. Choose Dine-in (with table number or QR scan) or Takeaway pickup time. Enjoy two-stage order editing flexibility!
-            </p>
-          </div>
-
-          {/* Step 3 */}
-          <div
-            style={{
-              backgroundColor: 'var(--bg-card)',
-              borderRadius: 'var(--radius-lg)',
-              border: '1px solid var(--border-color)',
-              padding: 'clamp(20px, 3vw, 32px) clamp(16px, 2.5vw, 24px)',
-              boxShadow: 'var(--shadow-md)',
-              display: 'flex',
-              flexDirection: 'column',
-              gap: '14px',
-              position: 'relative',
-            }}
-          >
-            <div
-              style={{
-                width: '50px',
-                height: '50px',
-                borderRadius: '16px',
+                gap: isDesktop ? '6px' : '4px',
+                padding: isDesktop ? '4px 10px' : '2px 6px',
+                borderRadius: '999px',
                 backgroundColor: '#DCFCE7',
                 color: '#15803D',
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                fontWeight: 800,
-                fontSize: '20px',
-                fontFamily: 'Outfit, sans-serif',
+                fontSize: isDesktop ? '11.5px' : '8.5px',
+                fontWeight: isDesktop ? 800 : 650,
               }}
             >
-              03
+              <ShieldCheck size={isDesktop ? 14 : 11} />
+              <span>100% Halal Certified</span>
             </div>
-            <h3 style={{ fontSize: '19px', fontWeight: 700, color: 'var(--text-main)' }}>
-              Pay Cash at the Cafe
-            </h3>
-            <p style={{ fontSize: '13.5px', color: 'var(--text-secondary)', lineHeight: 1.6, margin: 0 }}>
-              Receive live countdown notifications (&quot;food ready in ~10 mins, come now!&quot;). Settle in cash at the counter or table with printed itemized receipts.
-            </p>
-          </div>
-        </div>
-      </section>
-
-      {/* FOOTER */}
-      <footer
-        className="marketing-home-footer"
-        style={{
-          borderTop: '1px solid var(--border-color)',
-          backgroundColor: 'var(--bg-card)',
-          padding: 'clamp(24px, 4vw, 42px) clamp(14px, 2.5vw, 24px) 20px',
-          maxWidth: '1280px',
-          margin: '0 auto',
-          width: 'calc(100% - clamp(16px, 3vw, 32px))',
-          boxSizing: 'border-box',
-          borderRadius: 'var(--radius-lg)',
-        }}
-      >
-        <div className="foodies-footer-grid">
-          {/* Column 1: Brand & Tagline (Quality multi-branch cafe) */}
-          <div className="footer-col footer-brand-col">
-            <div className="footer-brand-header" style={{ display: 'flex', alignItems: 'center', gap: '8px', marginBottom: '8px' }}>
-              <img src="/logo.png" alt="Foodies Cafe" className="footer-logo-img" style={{ width: 'clamp(24px, 3.5vw, 36px)', height: 'clamp(24px, 3.5vw, 36px)', objectFit: 'contain' }} />
-              <span className="footer-brand-name" style={{ fontFamily: 'Outfit', fontWeight: 800 }}>
-                Foodies<span style={{ color: 'var(--primary)' }}>Cafe</span>
-              </span>
-            </div>
-            <p className="footer-text" style={{ color: 'var(--text-secondary)', lineHeight: 1.45, margin: 0 }}>
-              {footerSettings.tagline}
-            </p>
           </div>
 
-          {/* Column 2: Quick Navigation */}
-          <div className="footer-col footer-nav-col">
-            <h4 className="footer-heading">
+          {/* Col 2: Quick Navigation */}
+          <div>
+            <h4 style={{ fontSize: isDesktop ? '15px' : '11px', fontWeight: isDesktop ? 850 : 700, marginBottom: isDesktop ? '14px' : '6px', color: 'var(--text-main, #1E293B)' }}>
               Quick Navigation
             </h4>
-            <div className="footer-nav-links">
-              <span onClick={() => onNavigate('home')} style={{ cursor: 'pointer' }}>Home</span>
-              <span onClick={() => onNavigate('menu')} style={{ cursor: 'pointer' }}>Browse Menu</span>
-              <span onClick={() => onNavigate('support')} style={{ cursor: 'pointer' }}>Help & Support</span>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: isDesktop ? '9px' : '4px', fontSize: isDesktop ? '13px' : '9.5px', color: 'var(--text-secondary, #475569)', fontWeight: 450 }}>
+              <span
+                onClick={() => onNavigate('home')}
+                style={{ cursor: 'pointer', transition: 'color 0.15s' }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--primary)')}
+                onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary, #475569)')}
+              >
+                🏠 Home & Highlights
+              </span>
+              <span
+                onClick={() => onNavigate('menu')}
+                style={{ cursor: 'pointer', transition: 'color 0.15s' }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--primary)')}
+                onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary, #475569)')}
+              >
+                🍽️ Browse Full Menu
+              </span>
+              <span
+                onClick={() => onNavigate('table-qr')}
+                style={{ cursor: 'pointer', transition: 'color 0.15s' }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--primary)')}
+                onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary, #475569)')}
+              >
+                📷 Scan Table QR
+              </span>
+              <span
+                onClick={() => onNavigate('order-history')}
+                style={{ cursor: 'pointer', transition: 'color 0.15s' }}
+                onMouseEnter={(e) => (e.currentTarget.style.color = 'var(--primary)')}
+                onMouseLeave={(e) => (e.currentTarget.style.color = 'var(--text-secondary, #475569)')}
+              >
+                📜 Order History
+              </span>
             </div>
           </div>
 
-          {/* Column 3: Branch Locations (Removed at <= 860px to make space for other elements!) */}
-          <div className="footer-col footer-branch-locations">
-            <h4 className="footer-heading">
+          {/* Col 3: Branch Locations */}
+          <div>
+            <h4 style={{ fontSize: isDesktop ? '15px' : '11px', fontWeight: isDesktop ? 850 : 700, marginBottom: isDesktop ? '14px' : '6px', color: 'var(--text-main, #1E293B)' }}>
               Branch Locations
             </h4>
-            <div className="footer-nav-links">
-              <div>📍 <strong>Gulberg III:</strong> {footerSettings.addressLahore}</div>
-              <div>📍 <strong>F-7 Markaz:</strong> {footerSettings.addressIslamabad}</div>
-              <div>📍 <strong>Clifton Block 4:</strong> {footerSettings.addressKarachi}</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: isDesktop ? '11px' : '5px', fontSize: isDesktop ? '12.5px' : '9px', color: 'var(--text-secondary, #475569)' }}>
+              <div>
+                <strong style={{ color: 'var(--text-main, #1E293B)', fontWeight: isDesktop ? 700 : 600, fontSize: isDesktop ? '12.5px' : '9.5px' }}>📍 Lahore (Flagship):</strong>
+                <div style={{ fontSize: isDesktop ? '12px' : '8.5px', marginTop: '1px', lineHeight: 1.25 }}>Gulberg III, Lahore</div>
+              </div>
+              <div>
+                <strong style={{ color: 'var(--text-main, #1E293B)', fontWeight: isDesktop ? 700 : 600, fontSize: isDesktop ? '12.5px' : '9.5px' }}>📍 Islamabad:</strong>
+                <div style={{ fontSize: isDesktop ? '12px' : '8.5px', marginTop: '1px', lineHeight: 1.25 }}>F-7 Markaz, Islamabad</div>
+              </div>
+              <div>
+                <strong style={{ color: 'var(--text-main, #1E293B)', fontWeight: isDesktop ? 700 : 600, fontSize: isDesktop ? '12.5px' : '9.5px' }}>📍 Karachi:</strong>
+                <div style={{ fontSize: isDesktop ? '12px' : '8.5px', marginTop: '1px', lineHeight: 1.25 }}>Clifton Block 4, Karachi</div>
+              </div>
             </div>
           </div>
 
-          {/* Column 4: Customer Support */}
-          <div className="footer-col footer-support-col">
-            <h4 className="footer-heading">
-              Customer Support
+          {/* Col 4: Customer Care & Hours */}
+          <div>
+            <h4 style={{ fontSize: isDesktop ? '15px' : '11px', fontWeight: isDesktop ? 850 : 700, marginBottom: isDesktop ? '14px' : '6px', color: 'var(--text-main, #1E293B)' }}>
+              Customer Care & Hours
             </h4>
-            <div className="footer-nav-links">
-              <div>📞 {footerSettings.helpline}</div>
-              <div style={{ wordBreak: 'break-word' }}>✉️ {footerSettings.email}</div>
-              <div>🕒 {footerSettings.hours}</div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: isDesktop ? '10px' : '4px', fontSize: isDesktop ? '12.5px' : '9px', color: 'var(--text-secondary, #475569)', fontWeight: 450 }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: isDesktop ? '8px' : '4px' }}>
+                <Phone size={isDesktop ? 14 : 10} color="var(--primary)" />
+                <span>Helpline: <strong style={{ fontWeight: isDesktop ? 750 : 600 }}>+92 42 3575 8899</strong></span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: isDesktop ? '8px' : '4px' }}>
+                <Mail size={isDesktop ? 14 : 10} color="var(--primary)" />
+                <span>Email: <strong style={{ fontWeight: isDesktop ? 750 : 600 }}>support@foodiescafe.pk</strong></span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: isDesktop ? '8px' : '4px' }}>
+                <Clock size={isDesktop ? 14 : 10} color="var(--primary)" />
+                <span>Daily: <strong style={{ fontWeight: isDesktop ? 750 : 600 }}>11:00 AM – 1:00 AM</strong></span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: isDesktop ? '8px' : '4px' }}>
+                <Bike size={isDesktop ? 14 : 10} color="var(--primary)" />
+                <span>Delivery: <strong style={{ fontWeight: isDesktop ? 750 : 600 }}>Up to 15 km</strong></span>
+              </div>
             </div>
           </div>
         </div>
 
+        {/* Bottom Copyright & Live Status Bar */}
         <div
           style={{
-            borderTop: '1px solid var(--border-color)',
-            paddingTop: '16px',
+            borderTop: '1px solid var(--border-color, #E2E8F0)',
+            paddingTop: isDesktop ? '18px' : '8px',
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            fontSize: '11.5px',
-            color: 'var(--text-muted)',
+            fontSize: isDesktop ? '12px' : '9px',
+            color: 'var(--text-muted, #64748B)',
             flexWrap: 'wrap',
-            gap: '8px',
+            gap: isDesktop ? '10px' : '6px',
+            fontWeight: 450,
           }}
         >
-          <div>{footerSettings.copyrightText}</div>
+          <div>
+            © 2026 FoodiesCafe Pakistan (Pvt.) Ltd. All Rights Reserved.
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: isDesktop ? '14px' : '8px' }}>
+            <span style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}>
+              <span style={{ width: isDesktop ? '8px' : '6px', height: isDesktop ? '8px' : '6px', borderRadius: '50%', backgroundColor: '#22C55E' }} />
+              <span>Real-time POS & Kitchen Sync Active</span>
+            </span>
+          </div>
         </div>
       </footer>
-
-      {/* Footer Responsive Pattern Styles */}
-      <style jsx>{`
-        .foodies-footer-grid {
-          display: grid;
-          grid-template-columns: repeat(4, minmax(0, 1fr));
-          gap: clamp(16px, 2.5vw, 32px);
-          margin-bottom: 24px;
-          align-items: start;
-        }
-
-        .footer-brand-name {
-          font-size: clamp(14px, 2vw, 18px);
-        }
-
-        .footer-heading {
-          font-size: clamp(12.5px, 1.8vw, 15px);
-          font-weight: 700;
-          margin-bottom: 10px;
-          color: var(--text-main);
-          white-space: nowrap;
-        }
-
-        .footer-text,
-        .footer-nav-links {
-          font-size: clamp(10.5px, 1.4vw, 13px);
-          color: var(--text-secondary);
-          line-height: 1.45;
-          display: flex;
-          flex-direction: column;
-          gap: clamp(4px, 1vw, 8px);
-        }
-
-        /* At screen size <= 860px (where desktop checkout card removes):
-           1. Branch locations column is removed.
-           2. Quick Navigation and Customer Support stay strictly IN LINE with Quality Multi-Branch Cafe tagline.
-           3. Bottom padding collapses to 0 so the footer cleanly stops scrolling as soon as its bottom meets the viewport. */
-        @media (max-width: 860px) {
-          .marketing-home-container {
-            padding-bottom: 0 !important;
-          }
-          .marketing-home-footer {
-            margin-bottom: 0 !important;
-            border-bottom-left-radius: 0 !important;
-            border-bottom-right-radius: 0 !important;
-            border-bottom: none !important;
-            border-left: none !important;
-            border-right: none !important;
-            width: 100% !important;
-            max-width: 100% !important;
-            padding: 24px 16px 20px !important;
-          }
-          .footer-branch-locations {
-            display: none !important;
-          }
-          .foodies-footer-grid {
-            grid-template-columns: 1.15fr 0.95fr 1.15fr !important;
-            gap: 12px !important;
-            align-items: start !important;
-            margin-bottom: 16px !important;
-          }
-        }
-
-        @media (max-width: 580px) {
-          .marketing-home-container {
-            padding-bottom: 0 !important;
-          }
-          .marketing-home-footer {
-            margin-bottom: 0 !important;
-            padding: 18px 12px 16px !important;
-          }
-          .foodies-footer-grid {
-            grid-template-columns: 1.1fr 0.95fr 1.15fr !important;
-            gap: 8px !important;
-            align-items: start !important;
-            margin-bottom: 12px !important;
-          }
-          .footer-brand-name {
-            font-size: 12.5px !important;
-          }
-          .footer-logo-img {
-            width: 22px !important;
-            height: 22px !important;
-          }
-          .footer-heading {
-            font-size: 11px !important;
-            margin-bottom: 6px !important;
-            white-space: nowrap !important;
-          }
-          .footer-text,
-          .footer-nav-links {
-            font-size: 9.5px !important;
-            line-height: 1.35 !important;
-            gap: 4px !important;
-          }
-        }
-
-        @media (max-width: 400px) {
-          .marketing-home-container {
-            padding-bottom: 0 !important;
-          }
-          .marketing-home-footer {
-            margin-bottom: 0 !important;
-            padding: 16px 8px 14px !important;
-          }
-          .foodies-footer-grid {
-            grid-template-columns: 1.05fr 0.9fr 1.15fr !important;
-            gap: 6px !important;
-            margin-bottom: 10px !important;
-          }
-          .footer-brand-name {
-            font-size: 11px !important;
-          }
-          .footer-logo-img {
-            width: 18px !important;
-            height: 18px !important;
-          }
-          .footer-heading {
-            font-size: 9.5px !important;
-            margin-bottom: 4px !important;
-            letter-spacing: -0.2px !important;
-            white-space: nowrap !important;
-          }
-          .footer-text,
-          .footer-nav-links {
-            font-size: 8.5px !important;
-            line-height: 1.25 !important;
-            gap: 3px !important;
-          }
-        }
-      `}</style>
     </div>
   );
 };

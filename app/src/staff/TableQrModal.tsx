@@ -3,7 +3,7 @@
 import React, { useState, useMemo } from 'react';
 import QRCode from 'qrcode';
 import { useApp } from '@/context/AppContext';
-import { Table, TableStatus } from '@/types/cafe';
+import { Table, TableStatus, normalizeBranchId } from '@/types/cafe';
 import { TableQrCodeSvg } from '@/components/common/TableQrCodeSvg';
 import {
   QrCode,
@@ -41,17 +41,24 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
     generateTableQr,
     toggleTableQrAllowReserved,
     addToast,
+    addTable,
+    deleteTable,
   } = useApp();
 
+  const normBranchId = normalizeBranchId(currentBranch.id);
   const branchTables = useMemo(() => {
     return tables.filter(
-      (t) => !t.branchId || t.branchId === currentBranch.id
+      (t) => !t.branchId || t.branchId === currentBranch.id || normalizeBranchId(t.branchId) === normBranchId
     );
-  }, [tables, currentBranch.id]);
+  }, [tables, currentBranch.id, normBranchId]);
 
   const [selectedTableId, setSelectedTableId] = useState<string>(
     branchTables[0]?.id || ''
   );
+  const [showAddTableForm, setShowAddTableForm] = useState(false);
+  const [newTableNum, setNewTableNum] = useState('');
+  const [newTableCap, setNewTableCap] = useState(4);
+  const [newTableFloor, setNewTableFloor] = useState('Ground Floor');
   const [selectedDurationMin, setSelectedDurationMin] = useState<number>(60);
   const [customMinInput, setCustomMinInput] = useState<string>('90');
   const [copiedLink, setCopiedLink] = useState(false);
@@ -70,10 +77,29 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
   const [isEditingOrigin, setIsEditingOrigin] = useState(false);
   const [originInput, setOriginInput] = useState('');
 
+  // Persistent override cache so user toggle is never wiped by background sync
+  const [allowReservedOverrides, setAllowReservedOverrides] = useState<Record<string, boolean>>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const saved = localStorage.getItem('foodies_allow_reserved_overrides');
+        if (saved) return JSON.parse(saved);
+      } catch { }
+    }
+    return {};
+  });
+
   // Active table
   const activeTable = useMemo(() => {
     return branchTables.find((t) => t.id === selectedTableId) || branchTables[0];
   }, [branchTables, selectedTableId]);
+
+  const isAllowReserved = useMemo(() => {
+    if (!activeTable) return false;
+    if (allowReservedOverrides[activeTable.id] !== undefined) {
+      return allowReservedOverrides[activeTable.id];
+    }
+    return Boolean(activeTable.allowQrOrderOnReserved);
+  }, [activeTable, allowReservedOverrides]);
 
   if (!isOpen) return null;
 
@@ -93,15 +119,22 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
     await generateTableQr(
       activeTable.id,
       duration,
-      activeTable.allowQrOrderOnReserved ?? false
+      isAllowReserved
     );
     setIsGenerating(false);
   };
 
   const handleToggleAllowReserved = async () => {
     if (!activeTable) return;
-    const current = activeTable.allowQrOrderOnReserved ?? false;
-    await toggleTableQrAllowReserved(activeTable.id, !current);
+    const nextVal = !isAllowReserved;
+    setAllowReservedOverrides((prev) => {
+      const next = { ...prev, [activeTable.id]: nextVal };
+      if (typeof window !== 'undefined') {
+        localStorage.setItem('foodies_allow_reserved_overrides', JSON.stringify(next));
+      }
+      return next;
+    });
+    await toggleTableQrAllowReserved(activeTable.id, nextVal);
   };
 
   const handleCopyLink = () => {
@@ -297,10 +330,10 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
                   lineHeight: 1.2,
                 }}
               >
-                Table QR Codes
+                Tables & QR Code Management
               </h2>
               <div style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>
-                {currentBranch.name} · Generate time-limited QR codes with in-store reservation bypass
+                {currentBranch.name} · Create new tables, delete tables, and generate in-store customer QR codes
               </div>
             </div>
           </div>
@@ -339,19 +372,166 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
           <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
             {/* Table Selection Pills */}
             <div>
-              <label
-                style={{
-                  fontSize: '12px',
-                  fontWeight: 800,
-                  color: 'var(--text-secondary)',
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.04em',
-                  display: 'block',
-                  marginBottom: '8px',
-                }}
-              >
-                1. Select Table ({branchTables.length} Tables Available):
-              </label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '8px' }}>
+                <label
+                  style={{
+                    fontSize: '12px',
+                    fontWeight: 800,
+                    color: 'var(--text-secondary)',
+                    textTransform: 'uppercase',
+                    letterSpacing: '0.04em',
+                    margin: 0,
+                  }}
+                >
+                  1. Select Table ({branchTables.length} Tables Available):
+                </label>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                  <button
+                    type="button"
+                    onClick={() => setShowAddTableForm(!showAddTableForm)}
+                    style={{
+                      padding: '4px 10px',
+                      borderRadius: '6px',
+                      border: '1.5px solid var(--primary)',
+                      backgroundColor: showAddTableForm ? 'var(--primary)' : 'rgba(234, 88, 12, 0.08)',
+                      color: showAddTableForm ? '#FFFFFF' : 'var(--primary)',
+                      fontSize: '11.5px',
+                      fontWeight: 800,
+                      cursor: 'pointer',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                      boxShadow: 'var(--shadow-sm)',
+                    }}
+                  >
+                    <span>{showAddTableForm ? '✕ Close Form' : '+ Add New Table'}</span>
+                  </button>
+                  {activeTable && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        if (confirm(`Delete Table #${activeTable.number}? This will permanently remove it from the system.`)) {
+                          deleteTable(activeTable.id);
+                          const remaining = branchTables.filter((t) => t.id !== activeTable.id);
+                          if (remaining.length > 0) {
+                            setSelectedTableId(remaining[0].id);
+                          }
+                          addToast({
+                            type: 'info',
+                            title: 'Table Deleted',
+                            message: `Table #${activeTable.number} was permanently removed.`,
+                          });
+                        }
+                      }}
+                      style={{
+                        padding: '4px 10px',
+                        borderRadius: '6px',
+                        border: '1px solid #EF4444',
+                        backgroundColor: 'rgba(239, 68, 68, 0.08)',
+                        color: '#DC2626',
+                        fontSize: '11.5px',
+                        fontWeight: 800,
+                        cursor: 'pointer',
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: '4px',
+                      }}
+                      title="Permanently delete active table"
+                    >
+                      <span>🗑️ Delete Table #{activeTable.number}</span>
+                    </button>
+                  )}
+                </div>
+              </div>
+
+              {showAddTableForm && (
+                <div style={{ marginBottom: '12px', padding: '12px 14px', backgroundColor: 'var(--bg-card-subtle)', borderRadius: '10px', border: '1.5px solid var(--primary)', display: 'grid', gridTemplateColumns: 'repeat(3, 1fr) auto', gap: '10px', alignItems: 'end' }}>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>Table Number *</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. 15 or T-15"
+                      value={newTableNum}
+                      onChange={(e) => setNewTableNum(e.target.value)}
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '12px', fontWeight: 700 }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>Chairs / Seats</label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={30}
+                      value={newTableCap}
+                      onChange={(e) => setNewTableCap(Number(e.target.value) || 4)}
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '12px', fontWeight: 700 }}
+                    />
+                  </div>
+                  <div>
+                    <label style={{ fontSize: '11px', fontWeight: 800, color: 'var(--text-main)', display: 'block', marginBottom: '4px' }}>Floor / Area</label>
+                    <input
+                      type="text"
+                      placeholder="e.g. Ground Floor"
+                      value={newTableFloor}
+                      onChange={(e) => setNewTableFloor(e.target.value)}
+                      style={{ width: '100%', padding: '7px 10px', borderRadius: '6px', border: '1px solid var(--border-color)', fontSize: '12px', fontWeight: 700 }}
+                    />
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const trimmed = newTableNum.trim();
+                      if (!trimmed) {
+                        addToast({
+                          type: 'warning',
+                          title: 'Table Number Required',
+                          message: 'Please enter a valid table number.',
+                        });
+                        return;
+                      }
+                      const exists = branchTables.some(
+                        (t) => String(t.number).toLowerCase() === trimmed.toLowerCase()
+                      );
+                      if (exists) {
+                        addToast({
+                          type: 'warning',
+                          title: 'Table Already Exists',
+                          message: `Table #${trimmed} already exists in this branch.`,
+                        });
+                        return;
+                      }
+                      addTable({
+                        number: trimmed,
+                        branchId: currentBranch.id,
+                        floor: newTableFloor.trim() || 'Ground Floor',
+                        capacity: Number(newTableCap) || 4,
+                        chairs: Number(newTableCap) || 4,
+                        status: 'available',
+                      });
+                      addToast({
+                        type: 'success',
+                        title: 'Table Created ✓',
+                        message: `Table #${trimmed} has been created and is ready for service.`,
+                      });
+                      setNewTableNum('');
+                      setShowAddTableForm(false);
+                    }}
+                    style={{
+                      padding: '8px 16px',
+                      borderRadius: '6px',
+                      backgroundColor: 'var(--primary)',
+                      color: '#FFFFFF',
+                      border: 'none',
+                      fontWeight: 800,
+                      fontSize: '12.5px',
+                      cursor: 'pointer',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    Save Table
+                  </button>
+                </div>
+              )}
               <div
                 style={{
                   display: 'grid',
@@ -477,11 +657,11 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
             {/* CASHIER FEATURE TOGGLE: ALLOW ORDERING ON ALREADY RESERVED TABLE */}
             <div
               style={{
-                backgroundColor: activeTable?.allowQrOrderOnReserved
+                backgroundColor: isAllowReserved
                   ? 'rgba(34, 197, 94, 0.08)'
                   : 'var(--bg-card-subtle)',
                 borderRadius: 'var(--radius-md)',
-                border: activeTable?.allowQrOrderOnReserved
+                border: isAllowReserved
                   ? '1.5px solid #22C55E'
                   : '1px solid var(--border-color)',
                 padding: '14px',
@@ -500,7 +680,7 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
                 <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
                   <ShieldCheck
                     size={18}
-                    color={activeTable?.allowQrOrderOnReserved ? '#16A34A' : 'var(--text-muted)'}
+                    color={isAllowReserved ? '#16A34A' : 'var(--text-muted)'}
                   />
                   <span
                     style={{
@@ -521,7 +701,7 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
                     width: '46px',
                     height: '24px',
                     borderRadius: '12px',
-                    backgroundColor: activeTable?.allowQrOrderOnReserved
+                    backgroundColor: isAllowReserved
                       ? '#16A34A'
                       : 'var(--border-color)',
                     border: 'none',
@@ -539,7 +719,7 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
                       borderRadius: '50%',
                       backgroundColor: '#FFFFFF',
                       boxShadow: '0 1px 3px rgba(0,0,0,0.25)',
-                      transform: activeTable?.allowQrOrderOnReserved
+                      transform: isAllowReserved
                         ? 'translateX(22px)'
                         : 'translateX(0)',
                       transition: 'transform 0.2s ease',
@@ -556,7 +736,7 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
                   lineHeight: 1.45,
                 }}
               >
-                {activeTable?.allowQrOrderOnReserved ? (
+                {isAllowReserved ? (
                   <span style={{ color: '#166534', fontWeight: 650 }}>
                     🟢 <strong>ENABLED:</strong> If Table {activeTable?.number} is reserved online, a customer scanning this physical QR code will see a Reserved notice with an option to <strong>Ignore & Continue Ordering</strong> for in-store dining.
                   </span>
@@ -873,11 +1053,16 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
               <button
                 type="button"
                 onClick={() => {
-                  onClose();
-                  if (onSimulateCustomerScan && activeTable) {
-                    onSimulateCustomerScan(activeTable.number);
-                  } else if (typeof window !== 'undefined' && activeTable) {
-                    window.location.href = `/?tableQr=${encodeURIComponent(activeTable.number)}`;
+                  if (activeTable && typeof window !== 'undefined') {
+                    const simUrl =
+                      customerQrUrl ||
+                      `/?tableQr=${encodeURIComponent(activeTable.number)}&branch=${encodeURIComponent(currentBranch.id)}&token=${encodeURIComponent(activeTable.qrCode || `QR-${activeTable.number}`)}`;
+                    window.open(simUrl, '_blank', 'noopener,noreferrer');
+                    if (onSimulateCustomerScan) {
+                      try {
+                        onSimulateCustomerScan(activeTable.number);
+                      } catch { }
+                    }
                   }
                 }}
                 style={{

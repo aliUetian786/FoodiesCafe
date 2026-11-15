@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
 import { Role } from '@/types/cafe';
 import {
@@ -11,7 +11,6 @@ import {
   ChefHat,
   Banknote,
   LayoutGrid,
-  MessageSquare,
   BarChart3,
   Building2,
   Users,
@@ -25,6 +24,7 @@ import {
   ShoppingBag,
   Bike,
   Navigation,
+  Clock,
   User,
   Edit,
   X,
@@ -36,8 +36,11 @@ import {
   ExternalLink,
   Sparkles,
   Bell,
+  Megaphone,
 } from 'lucide-react';
 import { StoreMapModal } from '../customer/StoreMapModal';
+import { BranchShutdownModal } from '../components/common/BranchShutdownModal';
+import { NotificationCenterModal } from '../components/common/NotificationCenterModal';
 
 interface StaffLayoutProps {
   currentView: string;
@@ -59,10 +62,15 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
     allowRepresentativeMenuEdit,
     orders,
     refundRequests,
-    complaints,
     pendingApprovalRequests,
     users,
     addToast,
+    shutdownModalState,
+    closeShutdownModal,
+    confirmShutdownKeepProcessing,
+    confirmShutdownCancelOrders,
+    unreadNotificationsCount,
+    openNotificationModal,
   } = useApp();
 
   const [collapsed, setCollapsed] = useState(false);
@@ -144,7 +152,7 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
     currentUser?.role === 'platform_owner';
 
   // Subordinates under this branch manager
-  const subordinateRoles = ['cashier', 'kitchen_staff', 'floor_staff', 'branch_representative', 'delivery_staff'];
+  const subordinateRoles = ['cashier', 'kitchen_staff', 'floor_staff', 'delivery_staff'];
   const branchSubordinates = (users || []).filter(
     (u) => (!u.branchId || u.branchId === currentBranch.id) && subordinateRoles.includes(u.role)
   );
@@ -170,33 +178,57 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
     onNavigate('staff-auth');
   };
 
-  // Active session revocation: if current subordinate staff user is suspended or deleted, auto-signout
+  // Active session revocation: if current staff user is suspended, deactivated, or edited, auto-handle
   React.useEffect(() => {
     // Guard: ignore if customer or guest
     if (!currentUser || currentUser.role === 'customer' || currentUser.name === 'Guest Customer') {
       return;
     }
-    // Platform Owner and Branch Manager sessions are master roles and are never auto-revoked
-    if (currentUser.role === 'platform_owner' || currentUser.role === 'branch_manager') {
+    // Only Platform Owner cannot be auto-revoked by themselves
+    if (currentUser.role === 'platform_owner') {
       return;
     }
     const freshUser = (users || []).find(
-      (u) => u.id === currentUser.id || (u.email && currentUser.email && u.email === currentUser.email)
+      (u) =>
+        u.id === currentUser.id ||
+        (u.email && currentUser.email && u.email.toLowerCase() === currentUser.email.toLowerCase())
     );
     if (!freshUser) {
       addToast({
         type: 'error',
         title: 'Session Terminated 🚫',
-        message: 'Your staff account was removed by the branch manager. You have been logged out.',
+        message: 'Your staff account was removed by management. You have been logged out.',
       });
       handleStaffSignOut();
-    } else if (freshUser.status === 'suspended') {
+    } else if (freshUser.status !== 'active') {
       addToast({
         type: 'error',
-        title: 'Account Suspended 🚫',
-        message: 'Your staff account has been suspended by the branch manager. Access is revoked.',
+        title: `Account Access Revoked (${freshUser.status.toUpperCase()}) 🚫`,
+        message: `Your staff account has been ${freshUser.status.toUpperCase()} by management. Access is revoked immediately.`,
       });
       handleStaffSignOut();
+    } else {
+      // If active staff details (role, branch, name) were updated by the Owner
+      if (
+        freshUser.name !== currentUser.name ||
+        freshUser.role !== currentUser.role ||
+        freshUser.branchId !== currentUser.branchId ||
+        freshUser.phone !== currentUser.phone
+      ) {
+        setCurrentUser({ ...currentUser, ...freshUser });
+        if (freshUser.role !== currentUser.role) {
+          setCurrentRole(freshUser.role);
+          if (typeof window !== 'undefined') {
+            localStorage.setItem('foodies_staff_role', freshUser.role);
+            localStorage.setItem('foodies_staff_user', JSON.stringify({ ...currentUser, ...freshUser }));
+          }
+          addToast({
+            type: 'info',
+            title: 'Role Updated ℹ️',
+            message: `Your account role was updated to ${freshUser.role.replace('_', ' ')}.`,
+          });
+        }
+      }
     }
   }, [users, currentUser, onNavigate, setCurrentUser, addToast]);
 
@@ -205,13 +237,81 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
     (r) => r.status === 'requested' && (!r.branchId || r.branchId === currentBranch.id)
   ).length;
 
-  const pendingComplaintCount = complaints.filter(
-    (c) => (c.status === 'new' || c.assignedTo === 'manager') && (!c.branchId || c.branchId === currentBranch.id)
-  ).length;
-
   const pendingBannerApprovalCount = (pendingApprovalRequests || []).filter(
     (r) => r.status === 'pending'
   ).length;
+
+  // Track seen incoming order IDs per order type page so badge shows count only for new incoming orders when page has not been opened
+  const [seenIncomingOrderIds, setSeenIncomingOrderIds] = useState<Set<string>>(() => {
+    if (typeof window !== 'undefined') {
+      try {
+        const stored = sessionStorage.getItem('foodies_rep_seen_order_ids');
+        if (stored) return new Set(JSON.parse(stored));
+      } catch {}
+    }
+    return new Set<string>();
+  });
+
+  // Whenever an order type view is active (opened), mark all current incoming orders of that type as seen
+  useEffect(() => {
+    let targetType: 'dine_in' | 'takeaway' | 'delivery' | null = null;
+    if (currentView === 'staff-rep-dinein') targetType = 'dine_in';
+    else if (currentView === 'staff-rep-takeaway') targetType = 'takeaway';
+    else if (currentView === 'staff-rep-delivery') targetType = 'delivery';
+
+    if (targetType) {
+      setSeenIncomingOrderIds((prev) => {
+        let hasNewSeen = false;
+        const next = new Set(prev);
+        orders.forEach((o) => {
+          if (o.type === targetType && (o.status === 'placed' || o.status === 'accepted') && !next.has(o.id)) {
+            next.add(o.id);
+            hasNewSeen = true;
+          }
+        });
+        if (hasNewSeen) {
+          if (typeof window !== 'undefined') {
+            try {
+              sessionStorage.setItem('foodies_rep_seen_order_ids', JSON.stringify(Array.from(next)));
+            } catch {}
+          }
+          return next;
+        }
+        return prev;
+      });
+    }
+  }, [currentView, orders]);
+
+  // Compute new incoming orders that have not been opened yet for slide options
+  const { newIncomingDineInCount, newIncomingTakeawayCount, newIncomingDeliveryCount } = useMemo(() => {
+    let newDineIn = 0;
+    let newTakeaway = 0;
+    let newDelivery = 0;
+    const branchId = currentBranch.id;
+
+    for (let i = 0; i < orders.length; i++) {
+      const o = orders[i];
+      if (o.branchId && o.branchId !== branchId) continue;
+      const isNewIncoming = o.status === 'placed' || o.status === 'accepted';
+      if (!isNewIncoming) continue;
+
+      if (!seenIncomingOrderIds.has(o.id)) {
+        if (o.type === 'dine_in') {
+          if (currentView !== 'staff-rep-dinein') newDineIn++;
+        } else if (o.type === 'takeaway') {
+          if (currentView !== 'staff-rep-takeaway') newTakeaway++;
+        } else if (o.type === 'delivery') {
+          if (currentView !== 'staff-rep-delivery') newDelivery++;
+        }
+      }
+    }
+
+    return {
+      newIncomingDineInCount: newDineIn,
+      newIncomingTakeawayCount: newTakeaway,
+      newIncomingDeliveryCount: newDelivery,
+    };
+  }, [orders, currentBranch.id, seenIncomingOrderIds, currentView]);
 
   // Memoized live ready and active counts for branch (High-performance single pass)
   const { activeDineInCount, activeTakeawayCount, readyTakeawayCount, activeDeliveryCount, readyDeliveryCount } = useMemo(() => {
@@ -264,9 +364,8 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
       return [
         {
           id: 'staff-manager',
-          label: 'Branch Operations',
+          label: 'Overview',
           icon: BarChart3,
-          actionRequired: pendingRefundCount > 0 ? `${pendingRefundCount}` : undefined,
           canEdit: true,
         },
         {
@@ -285,12 +384,6 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
           canEdit: true,
         },
         {
-          id: 'staff-kitchen',
-          label: 'Kitchen Monitor',
-          icon: ChefHat,
-          canEdit: false,
-        },
-        {
           id: 'staff-cashier',
           label: 'Cash Desk Monitor',
           icon: Banknote,
@@ -304,68 +397,10 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
           canEdit: false,
         },
         {
-          id: 'staff-rep',
-          label: 'Customer Support',
-          icon: MessageSquare,
-          hasDot: pendingComplaintCount > 0,
-          canEdit: false,
-        },
-        {
-          id: 'staff-rep-dinein',
-          label: 'Dine-In Orders',
-          icon: Utensils,
-          badge: activeDineInCount > 0 ? `${activeDineInCount}` : undefined,
-          canEdit: false,
-        },
-        {
-          id: 'staff-rep-takeaway',
-          label: 'Takeaway Orders',
+          id: 'staff-orders',
+          label: 'Orders',
           icon: ShoppingBag,
-          badge: activeTakeawayCount > 0 ? `${activeTakeawayCount}` : undefined,
           canEdit: false,
-        },
-        {
-          id: 'staff-rep-delivery',
-          label: 'Delivery Orders',
-          icon: Bike,
-          badge: activeDeliveryCount > 0 ? `${activeDeliveryCount}` : undefined,
-          canEdit: false,
-        },
-        {
-          id: 'staff-rider',
-          label: 'Rider Operations',
-          icon: Bike,
-          canEdit: true,
-        },
-      ];
-    }
-
-    if (effectiveRole === 'delivery_staff') {
-      const myActiveDeliveries = orders.filter(
-        (o) =>
-          o.type === 'delivery' &&
-          o.assignedRiderId === currentUser.id &&
-          o.status !== 'completed' &&
-          o.status !== 'cancelled'
-      ).length;
-
-      return [
-        {
-          id: 'staff-rider',
-          label: 'Rider Console',
-          icon: Bike,
-          badge: myActiveDeliveries > 0 ? `${myActiveDeliveries} Active` : undefined,
-        },
-        {
-          id: 'staff-rider-route',
-          label: 'Multi-Stop Route',
-          icon: Navigation,
-          badge: myActiveDeliveries > 0 ? `${myActiveDeliveries} Stops` : undefined,
-        },
-        {
-          id: 'staff-rider-history',
-          label: 'Delivery History',
-          icon: FileClock,
         },
       ];
     }
@@ -375,17 +410,9 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
     }
 
     if (effectiveRole === 'cashier') {
-      const cashierOrdersCount = orders.filter((o) => {
+      const activeBranchOrdersCount = orders.filter((o) => {
         if (o.branchId && o.branchId !== currentBranch.id) return false;
-        if (o.type !== 'dine_in') return false;
-        const isCashierOrder =
-          o.isWalkIn === true ||
-          o.isTableQr === true ||
-          !!o.tableQrSessionId ||
-          o.cashierId === currentUser.id ||
-          (o.notes && o.notes.toLowerCase().includes('walk-in')) ||
-          (o.pickupTime && o.pickupTime.toLowerCase().includes('walk-in'));
-        return isCashierOrder && o.status !== 'completed' && o.status !== 'cancelled';
+        return o.status !== 'completed' && o.status !== 'cancelled';
       }).length;
 
       return [
@@ -398,8 +425,14 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
           id: 'staff-cashier-orders',
           label: 'Orders Hub',
           icon: ShoppingBag,
-          badge: cashierOrdersCount > 0 ? `${cashierOrdersCount}` : undefined,
+          badge: activeBranchOrdersCount > 0 ? `${activeBranchOrdersCount}` : undefined,
         },
+        {
+          id: 'staff-cashier-history',
+          label: 'Orders History',
+          icon: FileClock,
+        },
+        { id: 'mgmt-menu', label: 'Menu & Prices', icon: UtensilsCrossed },
       ];
     }
 
@@ -424,49 +457,13 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
       }).length;
 
       return [
-        { id: 'staff-floor', label: 'Floor Tables Grid', icon: LayoutGrid },
         {
           id: 'staff-floor-server',
-          label: 'Orders for Server / Waiter',
+          label: 'Order',
           icon: Bell,
           badge: serverOrdersCount > 0 ? `${serverOrdersCount}` : undefined,
         },
-        {
-          id: 'staff-floor-orders',
-          label: 'Orders Hub',
-          icon: ShoppingBag,
-          badge: floorOrdersCount > 0 ? `${floorOrdersCount}` : undefined,
-        },
-      ];
-    }
-
-    if (effectiveRole === 'branch_representative') {
-      return [
-        {
-          id: 'staff-rep-dinein',
-          label: 'Dine-In Orders',
-          icon: Utensils,
-          badge: activeDineInCount > 0 ? `${activeDineInCount}` : undefined,
-        },
-        {
-          id: 'staff-rep-takeaway',
-          label: 'Takeaway Orders',
-          icon: ShoppingBag,
-          badge: activeTakeawayCount > 0 ? `${activeTakeawayCount}` : undefined,
-        },
-        {
-          id: 'staff-rep-delivery',
-          label: 'Delivery Orders',
-          icon: Bike,
-          badge: activeDeliveryCount > 0 ? `${activeDeliveryCount}` : undefined,
-        },
-        {
-          id: 'staff-rep',
-          label: 'Customer Support',
-          icon: MessageSquare,
-          hasDot: pendingComplaintCount > 0,
-        },
-        { id: 'mgmt-menu', label: 'Menu', icon: UtensilsCrossed },
+        { id: 'staff-floor', label: 'Floor Tables Grid', icon: LayoutGrid },
       ];
     }
 
@@ -481,6 +478,9 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
     activeDeliveryCount,
     readyDeliveryCount,
     activeDineInCount,
+    newIncomingDineInCount,
+    newIncomingTakeawayCount,
+    newIncomingDeliveryCount,
   ]);
 
   return (
@@ -643,7 +643,7 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
         >
           {navItems.map((item: any) => {
             const Icon = item.icon;
-            const active = currentView === item.id;
+            const active = currentView === item.id || (item.id === 'mgmt-customers' && currentView.startsWith('mgmt-customers'));
 
             return (
               <button
@@ -852,7 +852,7 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
 
           {navItems.map((item: any, idx: number) => {
             const Icon = item.icon;
-            const active = currentView === item.id;
+            const active = currentView === item.id || (item.id === 'mgmt-customers' && currentView.startsWith('mgmt-customers'));
             const isManager = currentRole === 'branch_manager';
             const canEdit = !isManager || item.canEdit !== false;
 
@@ -1101,6 +1101,49 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
               </button>
             )}
 
+            {/* Single Notification Bell Button for all Staff */}
+            <button
+              type="button"
+              onClick={() => openNotificationModal('inbox')}
+              title="Open Notifications & Alerts"
+              style={{
+                position: 'relative',
+                display: 'flex',
+                alignItems: 'center',
+                gap: '6px',
+                padding: '6px 11px',
+                borderRadius: '8px',
+                backgroundColor: unreadNotificationsCount > 0 ? '#FFF7ED' : 'var(--bg-card-subtle)',
+                border: unreadNotificationsCount > 0 ? '1px solid #FDBA74' : '1px solid var(--border-color)',
+                color: unreadNotificationsCount > 0 ? '#C2410C' : 'var(--text-main)',
+                fontWeight: 800,
+                fontSize: '12px',
+                cursor: 'pointer',
+              }}
+            >
+              <Bell size={14} />
+              <span>Alerts</span>
+              {unreadNotificationsCount > 0 && (
+                <span
+                  style={{
+                    minWidth: '18px',
+                    height: '18px',
+                    borderRadius: '9px',
+                    backgroundColor: '#EA580C',
+                    color: '#FFFFFF',
+                    fontSize: '10px',
+                    fontWeight: 900,
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    padding: '0 4px',
+                  }}
+                >
+                  {unreadNotificationsCount > 99 ? '99+' : unreadNotificationsCount}
+                </span>
+              )}
+            </button>
+
             {/* Quick Action: Edit Branch Location (Owner & Manager) */}
             {isManagerOrOwner && (
               <button
@@ -1177,20 +1220,14 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
         {/* Dynamic Page Content: Placed directly below the 60px header */}
         {(() => {
           const isManager = currentRole === 'branch_manager';
-          const isStaticWorkspace =
-            !isManager &&
-            (currentView === 'staff-rep' ||
-              currentView === 'staff-rep-dinein' ||
-              currentView === 'staff-rep-takeaway' ||
-              currentView === 'staff-rep-delivery');
 
           return (
             <main
               className="staff-main-content"
               style={{
                 flex: 1,
-                padding: isManager ? '20px 24px' : isStaticWorkspace ? '8px 14px 10px' : '24px',
-                overflowY: isManager ? 'auto' : isStaticWorkspace ? 'hidden' : 'auto',
+                padding: isManager ? '20px 24px' : '24px',
+                overflowY: 'auto',
                 overflowX: 'hidden',
                 display: 'flex',
                 flexDirection: 'column',
@@ -1651,6 +1688,19 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
         startInEditMode={staffStoreMapInEdit}
         initialEditingBranchId={currentBranch.id}
       />
+
+      {/* ============ BRANCH SHUTDOWN CONFIRMATION MODAL ============ */}
+      <BranchShutdownModal
+        isOpen={shutdownModalState.isOpen}
+        branch={shutdownModalState.branch}
+        pendingOrders={shutdownModalState.pendingOrders}
+        onCancelAction={closeShutdownModal}
+        onContinueProcessing={confirmShutdownKeepProcessing}
+        onCancelOrdersAndShut={confirmShutdownCancelOrders}
+      />
+
+      {/* ============ REAL-TIME NOTIFICATION CENTER MODAL ============ */}
+      <NotificationCenterModal />
     </div>
   );
 };
