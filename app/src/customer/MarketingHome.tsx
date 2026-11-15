@@ -337,13 +337,13 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
           </button>
         </div>
 
-        {/* Dishes Grid (Compact 4 cols on laptop/desktop, 2 cols on mobile) */}
+        {/* Dishes Grid (Fits full horizontal screen width: 4 cols on laptop/desktop, 2 cols on mobile) */}
         <div
           style={{
             display: 'grid',
-            gridTemplateColumns: isDesktop ? 'repeat(4, minmax(0, 220px))' : 'repeat(2, minmax(0, 1fr))',
-            gap: isDesktop ? '12px' : '10px',
-            justifyContent: isDesktop ? 'flex-start' : 'stretch',
+            gridTemplateColumns: isDesktop ? 'repeat(4, 1fr)' : 'repeat(2, 1fr)',
+            gap: isDesktop ? '16px' : '12px',
+            width: '100%',
           }}
         >
           {featuredDishes.map((dish) => {
@@ -358,17 +358,17 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
                 key={dish.id}
                 style={{
                   backgroundColor: 'var(--bg-card, #FFFFFF)',
-                  borderRadius: '12px',
+                  borderRadius: '16px',
                   overflow: 'hidden',
                   border: '1px solid var(--border-color, #E2E8F0)',
                   boxShadow: 'var(--shadow-sm, 0 1px 3px rgba(0,0,0,0.04))',
                   display: 'flex',
                   flexDirection: 'column',
-                  maxWidth: isDesktop ? '220px' : '100%',
+                  width: '100%',
                   boxSizing: 'border-box',
                 }}
               >
-                <div style={{ width: '100%', height: isDesktop ? '110px' : '95px', minHeight: isDesktop ? '110px' : '95px', position: 'relative', overflow: 'hidden' }}>
+                <div style={{ width: '100%', height: isDesktop ? '145px' : '105px', minHeight: isDesktop ? '145px' : '105px', position: 'relative', overflow: 'hidden' }}>
                   <img
                     src={resolveDishImage(dish.image, dish.category, dish.id)}
                     alt={dish.name}
@@ -381,14 +381,14 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
                   <span
                     style={{
                       position: 'absolute',
-                      top: '6px',
-                      left: '6px',
-                      fontSize: '9px',
+                      top: '8px',
+                      left: '8px',
+                      fontSize: '9.5px',
                       fontWeight: 850,
                       backgroundColor: 'rgba(0, 0, 0, 0.65)',
                       color: '#FFFFFF',
-                      padding: '2px 6px',
-                      borderRadius: '4px',
+                      padding: '2px 7px',
+                      borderRadius: '6px',
                       textTransform: 'uppercase',
                       letterSpacing: '0.4px',
                       backdropFilter: 'blur(4px)',
@@ -397,11 +397,11 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
                     {dish.category}
                   </span>
                 </div>
-                <div style={{ padding: isDesktop ? '8px 10px' : '6px 8px', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, justifyContent: 'space-between' }}>
+                <div style={{ padding: isDesktop ? '11px 13px' : '8px 10px', display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0, justifyContent: 'space-between' }}>
                   <div style={{ minHeight: 0 }}>
                     <div
                       style={{
-                        fontSize: isDesktop ? '12.5px' : '11.5px',
+                        fontSize: isDesktop ? '13.5px' : '12px',
                         fontWeight: 850,
                         color: 'var(--text-main, #1E293B)',
                         whiteSpace: 'nowrap',
@@ -414,11 +414,11 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
                     </div>
                     <div
                       style={{
-                        fontSize: '10px',
+                        fontSize: '11px',
                         color: 'var(--text-muted, #64748B)',
-                        marginTop: '2px',
-                        lineHeight: '13px',
-                        maxHeight: '26px',
+                        marginTop: '3px',
+                        lineHeight: '14px',
+                        maxHeight: '28px',
                         overflow: 'hidden',
                         display: '-webkit-box',
                         WebkitLineClamp: 2,
@@ -435,13 +435,13 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
                       display: 'flex',
                       alignItems: 'center',
                       justifyContent: 'space-between',
-                      paddingTop: '6px',
+                      paddingTop: '8px',
                       borderTop: '1px solid var(--border-color, #F1F5F9)',
-                      marginTop: '6px',
+                      marginTop: '8px',
                       flexShrink: 0,
                     }}
                   >
-                    <span style={{ fontSize: isDesktop ? '12px' : '11px', fontWeight: 850, color: 'var(--text-main, #1E293B)' }}>
+                    <span style={{ fontSize: isDesktop ? '13px' : '11.5px', fontWeight: 850, color: 'var(--text-main, #1E293B)' }}>
                       Rs. {dishPrice.toLocaleString()}
                     </span>
 
