@@ -1026,49 +1026,28 @@ export const OrderTrackingScreen: React.FC<OrderTrackingScreenProps> = ({ onNavi
                     </button>
                   )}
 
-                  {/* Toggle Embedded Map View + External Directions Link */}
-                  <button
-                    onClick={() =>
-                      setExpandedMapOrderId((prev) => (prev === ord.id ? null : ord.id))
-                    }
-                    title={ord.type === 'delivery' ? 'View Delivery Route on OpenStreetMap' : 'View Branch Location on Google Maps'}
-                    style={{
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: '5px',
-                      backgroundColor: expandedMapOrderId === ord.id ? '#FFF7ED' : '#F8FAFC',
-                      border: '1px solid #CBD5E1',
-                      borderRadius: '8px',
-                      padding: '6px 10px',
-                      fontSize: '12px',
-                      fontWeight: 750,
-                      color: '#EA580C',
-                      cursor: 'pointer',
-                    }}
-                  >
-                    <MapIcon size={13} />
-                    <span>{expandedMapOrderId === ord.id ? 'Hide Map' : ord.type === 'delivery' ? 'OpenStreetMap' : 'Google Maps'}</span>
-                  </button>
-
-                  <button
-                    onClick={() => handleOpenDirections(ord)}
-                    title={ord.type === 'delivery' ? 'Open Directions in OpenStreetMap' : 'Open Branch Location in Google Maps'}
-                    style={{
-                      width: '32px',
-                      height: '32px',
-                      borderRadius: '50%',
-                      backgroundColor: 'var(--primary-light)',
-                      border: '1px solid var(--primary-border)',
-                      display: 'flex',
-                      alignItems: 'center',
-                      justifyContent: 'center',
-                      cursor: 'pointer',
-                      color: 'var(--primary)',
-                      transition: 'all 0.15s ease',
-                    }}
-                  >
-                    <Navigation size={14} color="var(--primary)" />
-                  </button>
+                  {/* Branch Location Direction Icon: Displayed ONLY for Dine-In & Takeaway, hidden for Delivery */}
+                  {ord.type !== 'delivery' && (
+                    <button
+                      onClick={() => handleOpenDirections(ord)}
+                      title="View Branch Location on Map"
+                      style={{
+                        width: '32px',
+                        height: '32px',
+                        borderRadius: '50%',
+                        backgroundColor: 'var(--primary-light, #FFF7ED)',
+                        border: '1px solid var(--primary-border, #FED7AA)',
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                        cursor: 'pointer',
+                        color: 'var(--primary, #EA580C)',
+                        transition: 'all 0.15s ease',
+                      }}
+                    >
+                      <Navigation size={14} color="var(--primary, #EA580C)" />
+                    </button>
+                  )}
                 </div>
               </div>
 
@@ -1089,14 +1068,14 @@ export const OrderTrackingScreen: React.FC<OrderTrackingScreenProps> = ({ onNavi
                           color: '#1E40AF',
                         }}
                       >
-                        <span>Google Maps • {orderBranch?.name || 'Branch'} Location</span>
+                        <span>Branch Location • {orderBranch?.name || 'Branch'}</span>
                         <a
                           href={`https://www.google.com/maps/search/?api=1&query=${Number(orderBranch?.latitude) || 31.5126},${Number(orderBranch?.longitude) || 74.3436}`}
                           target="_blank"
                           rel="noopener noreferrer"
                           style={{ color: '#2563EB', textDecoration: 'underline', fontSize: '11px', fontWeight: 800 }}
                         >
-                          Open in Google Maps ↗
+                          Open Directions ↗
                         </a>
                       </div>
                       <iframe

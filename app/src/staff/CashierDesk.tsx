@@ -4,7 +4,7 @@ import { HistoricalLoadingModal } from '../components/common/HistoricalLoadingMo
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
-import { Order, PaymentStatus, OrderItem } from '@/types/cafe';
+import { Order, PaymentStatus, OrderItem, normalizeBranchId } from '@/types/cafe';
 import { ModalConfirmation } from '@/components/common/ModalConfirmation';
 import {
   Banknote,
@@ -123,32 +123,33 @@ export const CashierScreen: React.FC = () => {
 
   // Helper to test if date string is today
   const isToday = (dateStr?: string) => {
-    if (!dateStr) return false;
+    if (!dateStr) return true;
     const s = String(dateStr).toLowerCase();
     if (s.includes('today') || s.includes('just now') || s.includes('m ago') || s.includes('s ago')) return true;
     const d = new Date(dateStr);
-    if (isNaN(d.getTime())) return false;
-    const today = new Date();
-    return (
-      d.getDate() === today.getDate() &&
-      d.getMonth() === today.getMonth() &&
-      d.getFullYear() === today.getFullYear()
-    );
+    if (isNaN(d.getTime())) return true;
+    const now = new Date();
+    const isSameDay =
+      d.getDate() === now.getDate() &&
+      d.getMonth() === now.getMonth() &&
+      d.getFullYear() === now.getFullYear();
+    const isWithin24Hours = (now.getTime() - d.getTime()) < 24 * 60 * 60 * 1000;
+    return isSameDay || isWithin24Hours;
   };
 
-  // Cashier Desk: Strictly ONLY his takeaway orders created today (no other order types)
+  // Cashier Desk: Counter orders for this branch (takeaway orders or cashier walk-ins, active or placed today)
   const cashierOrders = useMemo(() => {
     return orders.filter((o) => {
-      if (o.branchId && o.branchId !== currentBranch.id) return false;
-      // Strictly takeaway only
-      if (o.type !== 'takeaway') return false;
-      // Strictly today's orders only
-      if (!isToday(o.createdAt)) return false;
-      // Strictly his takeaway orders
-      if (o.cashierId && currentUser?.id && o.cashierId !== currentUser.id) return false;
+      if (o.branchId && o.branchId !== currentBranch.id && normalizeBranchId(o.branchId) !== normalizeBranchId(currentBranch.id)) return false;
+      // Allow all takeaway orders and any walk-in/desk orders
+      const isDeskOrder = o.type === 'takeaway' || Boolean(o.cashierId) || Boolean(o.isWalkIn);
+      if (!isDeskOrder) return false;
+      // Keep all active orders (placed, accepted, preparing, ready, served) visible so they never disappear mid-session, plus today's completed/paid
+      const isRecentOrActive = (!['completed', 'cancelled'].includes(o.status)) || isToday(o.createdAt);
+      if (!isRecentOrActive) return false;
       return true;
     });
-  }, [orders, currentBranch.id, currentUser]);
+  }, [orders, currentBranch.id]);
 
   const filteredOrders = useMemo(() => {
     return cashierOrders.filter((o) => {
@@ -165,7 +166,7 @@ export const CashierScreen: React.FC = () => {
   // Cash collected today across branch (takeaway at desk + delivery COD collected by riders)
   const todayBranchCashOrders = useMemo(() => {
     return orders.filter((o) => {
-      if (o.branchId && o.branchId !== currentBranch.id) return false;
+      if (o.branchId && o.branchId !== currentBranch.id && normalizeBranchId(o.branchId) !== normalizeBranchId(currentBranch.id)) return false;
       if (!isToday(o.createdAt)) return false;
       const isPaid = o.paymentStatus === 'paid' || o.paymentCollected === true;
       if (!isPaid) return false;

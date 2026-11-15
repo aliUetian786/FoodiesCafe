@@ -165,10 +165,22 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
   const [loginModalOpen, setLoginModalOpen] = useState(false);
   const [confirmModalOpen, setConfirmModalOpen] = useState(false);
   const [specialInstructions, setSpecialInstructions] = useState('');
-  const [customerName, setCustomerName] = useState(
-    currentUser?.name && currentUser.name !== 'Guest Customer' ? currentUser.name : ''
-  );
-  const [customerPhone, setCustomerPhone] = useState(currentUser?.phone || '');
+  const [customerName, setCustomerName] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const userKey = currentUser?.id && currentUser.id !== 'user-guest' ? currentUser.id : 'guest';
+      const saved = localStorage.getItem(`foodies_saved_name_${userKey}`) || localStorage.getItem('foodies_saved_customer_name');
+      if (saved) return saved;
+    }
+    return currentUser?.name && currentUser.name !== 'Guest Customer' ? currentUser.name : '';
+  });
+  const [customerPhone, setCustomerPhone] = useState(() => {
+    if (typeof window !== 'undefined') {
+      const userKey = currentUser?.id && currentUser.id !== 'user-guest' ? currentUser.id : 'guest';
+      const saved = localStorage.getItem(`foodies_saved_phone_${userKey}`) || localStorage.getItem('foodies_saved_customer_phone');
+      if (saved) return saved;
+    }
+    return currentUser?.phone || '';
+  });
   const [deliveryAddress, setDeliveryAddress] = useState(selectedDeliveryAddress || 'Main Boulevard, Gulberg III, Lahore');
 
   useEffect(() => {
@@ -247,6 +259,13 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
   );
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const userKey = currentUser?.id && currentUser.id !== 'user-guest' ? currentUser.id : 'guest';
+      const savedName = localStorage.getItem(`foodies_saved_name_${userKey}`) || localStorage.getItem('foodies_saved_customer_name');
+      const savedPhone = localStorage.getItem(`foodies_saved_phone_${userKey}`) || localStorage.getItem('foodies_saved_customer_phone');
+      if (savedName && !customerName) setCustomerName(savedName);
+      if (savedPhone && !customerPhone) setCustomerPhone(savedPhone);
+    }
     if (currentUser?.name && currentUser.name !== 'Guest Customer' && !customerName) {
       setCustomerName(currentUser.name);
     }
@@ -760,6 +779,25 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
           paymentCollected: false,
         }
       );
+
+      if (typeof window !== 'undefined') {
+        const userKey = activeCustomer?.id && activeCustomer.id !== 'user-guest' ? activeCustomer.id : 'guest';
+        if (customerName.trim()) {
+          localStorage.setItem(`foodies_saved_name_${userKey}`, customerName.trim());
+          localStorage.setItem('foodies_saved_customer_name', customerName.trim());
+        }
+        if (customerPhone.trim()) {
+          localStorage.setItem(`foodies_saved_phone_${userKey}`, customerPhone.trim());
+          localStorage.setItem('foodies_saved_customer_phone', customerPhone.trim());
+        }
+      }
+      if (setCurrentUser && activeCustomer && (customerName.trim() || customerPhone.trim())) {
+        setCurrentUser({
+          ...activeCustomer,
+          name: customerName.trim() || activeCustomer.name,
+          phone: customerPhone.trim() || activeCustomer.phone,
+        });
+      }
 
       // Permanently link order to active customer account cache immediately
       if (typeof window !== 'undefined' && placed) {

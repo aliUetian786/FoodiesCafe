@@ -232,7 +232,7 @@ export async function GET(request: Request) {
       whereClauses.push(`created_at >= (NOW() - INTERVAL '30 days')`);
     } else if (dateScope === 'today' || (!isMultiDayOrOlder && !customerId && !customerPhone)) {
       // Default live scope: ONLY load today's data and active orders. Data of older days is loaded on-demand.
-      whereClauses.push(`(created_at >= CURRENT_DATE OR status IN ('placed', 'accepted', 'preparing', 'ready', 'out_for_delivery'))`);
+      whereClauses.push(`(created_at >= CURRENT_DATE OR status IN ('placed', 'accepted', 'preparing', 'ready', 'served', 'out_for_delivery'))`);
     }
 
     if (cursor) {
@@ -514,17 +514,25 @@ export async function POST(request: Request) {
       } = calcResult.calculated;
 
       // 4. Dine-In / Table QR atomic table lock & availability recheck at submit
+      let effectiveAssignedWaiterId = assignedWaiterId || null;
+      let effectiveAssignedWaiterName = assignedWaiterName || null;
+
       if (type === 'dine_in' && tableNumber) {
         const tableRes = await client.query(
-          `SELECT id, number, status, current_order_id, allow_qr_reserved
+          `SELECT id, number, status, current_order_id, allow_qr_reserved, assigned_waiter_id, assigned_waiter_name
            FROM tables
-           WHERE branch_id = $1 AND number = $2
+           WHERE branch_id = $1 AND (number = $2 OR id = $2 OR regexp_replace(number, '\\D', '', 'g') = regexp_replace($2, '\\D', '', 'g'))
            FOR UPDATE`,
-          [normBranchId, tableNumber]
+          [normBranchId, String(tableNumber)]
         );
 
         if (tableRes.rows.length > 0) {
           const tbl = tableRes.rows[0];
+          if (!effectiveAssignedWaiterId && tbl.assigned_waiter_id) {
+            effectiveAssignedWaiterId = tbl.assigned_waiter_id;
+            effectiveAssignedWaiterName = tbl.assigned_waiter_name || null;
+          }
+
           const isOccupiedByAnotherOrder =
             tbl.status === 'occupied' &&
             tbl.current_order_id &&
@@ -650,8 +658,8 @@ export async function POST(request: Request) {
         deliveredAt || null,
         Boolean(isPaymentCollected),
         customerCoordinates ? JSON.stringify(customerCoordinates) : null,
-        assignedWaiterId || null,
-        assignedWaiterName || null,
+        effectiveAssignedWaiterId || null,
+        effectiveAssignedWaiterName || null,
         Boolean(isTableQr),
         Boolean(waiterNotified),
         headerIdempotencyKey,
@@ -1114,6 +1122,25 @@ export async function PATCH(request: Request) {
       if (assignedWaiterName !== undefined) {
         updates.push(`assigned_waiter_name = $${idx++}`);
         values.push(assignedWaiterName || null);
+      }
+      // If dine-in order doesn't have an assigned waiter yet, auto-assign from the table's assigned waiter
+      if (
+        assignedWaiterId === undefined &&
+        !currentOrder.assigned_waiter_id &&
+        (currentOrder.type === 'dine_in' || body.type === 'dine_in') &&
+        (currentOrder.table_number || body.tableNumber)
+      ) {
+        const tblNum = String(body.tableNumber || currentOrder.table_number);
+        const tblRes = await client.query(
+          `SELECT assigned_waiter_id, assigned_waiter_name FROM tables WHERE branch_id = $1 AND (number = $2 OR id = $2 OR regexp_replace(number, '\\D', '', 'g') = regexp_replace($2, '\\D', '', 'g')) LIMIT 1`,
+          [targetBranchId, tblNum]
+        );
+        if (tblRes.rows.length > 0 && tblRes.rows[0].assigned_waiter_id) {
+          updates.push(`assigned_waiter_id = $${idx++}`);
+          values.push(tblRes.rows[0].assigned_waiter_id);
+          updates.push(`assigned_waiter_name = $${idx++}`);
+          values.push(tblRes.rows[0].assigned_waiter_name || null);
+        }
       }
       if (isTableQr !== undefined) {
         updates.push(`is_table_qr = $${idx++}`);

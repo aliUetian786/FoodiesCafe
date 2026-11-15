@@ -298,7 +298,7 @@ export function CustomerTracking({ onBackToMenu, onViewHistory }: CustomerTracki
     if (ord.type !== 'delivery') {
       const gUrl = `https://www.google.com/maps/search/?api=1&query=${branchCoords.lat},${branchCoords.lng}`;
       Linking.openURL(gUrl).catch(() => {
-        showToast(`Google Maps: ${orderBranch.name}`, 'info');
+        showToast(`Branch Location: ${orderBranch.name}`, 'info');
       });
       return;
     }
@@ -592,28 +592,17 @@ export function CustomerTracking({ onBackToMenu, onViewHistory }: CustomerTracki
                     </TouchableOpacity>
                   )}
 
-                  {/* Embedded OpenStreetMap View + External OpenStreetMap Link */}
-                  <TouchableOpacity
-                    style={[styles.billBtn, { borderColor: '#CBD5E1', backgroundColor: expandedMapOrderId === ord.id ? '#FFF7ED' : '#F8FAFC' }]}
-                    onPress={() =>
-                      setExpandedMapOrderId((prev) => (prev === ord.id ? null : ord.id))
-                    }
-                    activeOpacity={0.7}
-                  >
-                    <MapIcon size={12} color="#EA580C" />
-                    <Text style={styles.billBtnText}>
-                      {expandedMapOrderId === ord.id ? 'Hide Map' : ord.type === 'delivery' ? 'OpenStreetMap' : 'Google Maps'}
-                    </Text>
-                  </TouchableOpacity>
-
-                  <TouchableOpacity
-                    style={styles.directionSignBtn}
-                    onPress={() => handleOpenDirections(ord, locationDisplay)}
-                    activeOpacity={0.7}
-                    hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
-                  >
-                    <Navigation size={15} color={Colors.primary} />
-                  </TouchableOpacity>
+                  {/* Branch Location Direction Icon: Displayed ONLY for Dine-In & Takeaway, hidden for Delivery */}
+                  {ord.type !== 'delivery' && (
+                    <TouchableOpacity
+                      style={styles.directionSignBtn}
+                      onPress={() => handleOpenDirections(ord, locationDisplay)}
+                      activeOpacity={0.7}
+                      hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+                    >
+                      <Navigation size={15} color={Colors.primary} />
+                    </TouchableOpacity>
+                  )}
                 </View>
               </View>
 
@@ -672,7 +661,7 @@ export function CustomerTracking({ onBackToMenu, onViewHistory }: CustomerTracki
                     modeLabel={
                       ord.type === 'delivery'
                         ? 'OpenStreetMap • Delivery Route'
-                        : 'Google Maps • Branch Location'
+                        : 'Branch Location'
                     }
                     externalDirectionsOrigin={
                       ord.type === 'delivery'

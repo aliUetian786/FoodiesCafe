@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import {
   View,
   Text,
@@ -120,6 +121,15 @@ export function CustomerCart({ visible, onClose, onOrderPlaced }: CustomerCartPr
   const [confirmModalVisible, setConfirmModalVisible] = useState<boolean>(false);
 
   useEffect(() => {
+    AsyncStorage.multiGet(['foodies_saved_customer_name', 'foodies_saved_customer_phone'])
+      .then((stores) => {
+        const savedName = stores[0]?.[1];
+        const savedPhone = stores[1]?.[1];
+        if (savedName && !customerName) setCustomerName(savedName);
+        if (savedPhone && !customerPhone) setCustomerPhone(savedPhone.replace(/^(\+92|0)/, ''));
+      })
+      .catch(() => {});
+
     if (currentUser?.name && currentUser.name !== 'Guest Customer' && !customerName) {
       setCustomerName(currentUser.name);
     }
@@ -400,11 +410,17 @@ export function CustomerCart({ visible, onClose, onOrderPlaced }: CustomerCartPr
         ? `cust-${cleanLast10}`
         : `cust-mobile-${Date.now()}`;
 
-    // Optionally update user profile with latest name & phone if missing
-    if (updateCurrentUser && (!currentUser.name || currentUser.name === 'Guest Customer' || !currentUser.phone)) {
+    // Update user profile and AsyncStorage with latest name & phone
+    if (customerName.trim()) {
+      AsyncStorage.setItem('foodies_saved_customer_name', customerName.trim()).catch(() => {});
+    }
+    if (formattedPhone) {
+      AsyncStorage.setItem('foodies_saved_customer_phone', formattedPhone).catch(() => {});
+    }
+    if (updateCurrentUser) {
       updateCurrentUser({
-        name: customerName.trim() || currentUser.name,
-        phone: formattedPhone || currentUser.phone,
+        name: customerName.trim() || currentUser?.name,
+        phone: formattedPhone || currentUser?.phone,
       });
     }
 

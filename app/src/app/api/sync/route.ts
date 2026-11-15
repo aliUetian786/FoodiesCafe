@@ -433,7 +433,7 @@ export async function GET(request: Request) {
 
     // Compute state ETag for 304 Not Modified optimization
     const stateSignature = JSON.stringify({
-      orders: orders.map((o: any) => `${o.id}:${o.status}:${o.paymentStatus}:${o.version}:${o.riderStatus}:${o.assignedRiderId || ''}:${Boolean(o.sentToKitchen)}:${o.sentToKitchenAt || ''}:${o.forwardToKitchenAt || ''}`),
+      orders: orders.map((o: any) => `${o.id}:${o.status}:${o.paymentStatus}:${o.version}:${o.riderStatus}:${o.assignedRiderId || ''}:${o.assignedWaiterId || ''}:${Boolean(o.sentToKitchen)}:${o.sentToKitchenAt || ''}:${o.forwardToKitchenAt || ''}`),
       tables: tablesRes.rows.map((t: any) => `${t.id}:${t.status}:${t.currentOrderId}`),
       branches: catalog.branches.map((b: any) => `${b.id}:${b.isOpen}:${b.isBusy}:${JSON.stringify(b.paymentSettings || '')}:${b.deliveryEnabled}:${b.prepTimeEstimateMin}`),
       riders: parsedUsers.filter((u: any) => u.role === 'delivery_staff').map((r: any) => `${r.id}:${r.riderAvailability || 'available'}:${r.status}:${r.riderActiveOrderId || ''}`),

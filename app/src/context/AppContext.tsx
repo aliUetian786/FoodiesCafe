@@ -1273,6 +1273,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     assignedRiderId?: string;
     assignedRiderName?: string;
     riderStatus?: 'assigned' | 'accepted' | 'picked_up' | 'en_route' | 'delivered';
+    assignedWaiterId?: string;
+    assignedWaiterName?: string;
     timestamp: number;
   }>>(new Map());
 
@@ -1913,6 +1915,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   deliveredAt: isDeliveryFinished ? (inc.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
                   assignedRiderId: inc.assignedRiderId || existing.assignedRiderId || inFlight?.assignedRiderId,
                   assignedRiderName: inc.assignedRiderName || existing.assignedRiderName || inFlight?.assignedRiderName,
+                  assignedWaiterId: inc.assignedWaiterId || existing.assignedWaiterId || inFlight?.assignedWaiterId,
+                  assignedWaiterName: inc.assignedWaiterName || existing.assignedWaiterName || inFlight?.assignedWaiterName,
                   riderStatus: isDeliveryFinished ? 'delivered' : (inc.riderStatus || existing.riderStatus || inFlight?.riderStatus),
                 });
               } else {
@@ -2044,6 +2048,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   preparationStartedAt: inc.preparationStartedAt || existing.preparationStartedAt,
                   completedAt: isOrderFinished ? (inc.completedAt || existing.completedAt || new Date().toISOString()) : (inc.completedAt || existing.completedAt),
                   deliveredAt: isOrderFinished ? (inc.deliveredAt || existing.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
+                  assignedRiderId: inc.assignedRiderId || existing.assignedRiderId || inFlight?.assignedRiderId,
+                  assignedRiderName: inc.assignedRiderName || existing.assignedRiderName || inFlight?.assignedRiderName,
+                  assignedWaiterId: inc.assignedWaiterId || existing.assignedWaiterId || inFlight?.assignedWaiterId,
+                  assignedWaiterName: inc.assignedWaiterName || existing.assignedWaiterName || inFlight?.assignedWaiterName,
                   paymentStatus: (isOrderFinished || isLocallyPaid) ? 'paid' : (inc.paymentStatus || existing.paymentStatus),
                   paymentCollected: Boolean(isOrderFinished || isLocallyPaid || existing.paymentCollected || inc.paymentCollected),
                 } as Order;
@@ -2273,6 +2281,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                       deliveredAt: isDeliveryFinished ? (inc.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
                       assignedRiderId: inc.assignedRiderId || existing.assignedRiderId || inFlight?.assignedRiderId,
                       assignedRiderName: inc.assignedRiderName || existing.assignedRiderName || inFlight?.assignedRiderName,
+                      assignedWaiterId: inc.assignedWaiterId || existing.assignedWaiterId || inFlight?.assignedWaiterId,
+                      assignedWaiterName: inc.assignedWaiterName || existing.assignedWaiterName || inFlight?.assignedWaiterName,
                       riderStatus: isDeliveryFinished ? 'delivered' : (inc.riderStatus || existing.riderStatus || inFlight?.riderStatus),
                     });
                   } else {
@@ -2764,11 +2774,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const targetCustomerPhone = options?.customerPhone || (isStaffOrCashier ? '+92 300 0000000' : (currentUser.phone || '+92 300 0000000'));
     const targetCustomerEmail = options?.customerEmail || (!isStaffOrCashier ? currentUser.email : undefined);
 
-    const matchingTable = tables.find(
-      (t) =>
-        (t.number === tableNumber || t.id === tableNumber) &&
-        (!t.branchId || normalizeBranchId(t.branchId) === normalizeBranchId(currentBranchId))
-    );
+    const matchingTable = type === 'dine_in' && tableNumber
+      ? tables.find(
+          (t) =>
+            (!t.branchId || normalizeBranchId(t.branchId) === normalizeBranchId(currentBranchId)) &&
+            (t.number.toLowerCase() === String(tableNumber).toLowerCase() ||
+             t.id === tableNumber ||
+             t.number.replace(/\D/g, '') === String(tableNumber).replace(/\D/g, '') ||
+             `t-${t.number.replace(/\D/g, '')}` === String(tableNumber).toLowerCase().replace(/\s/g, ''))
+        )
+      : undefined;
     const assignedWaiterId =
       options?.assignedWaiterId ||
       matchingTable?.assignedWaiterId ||
@@ -4605,8 +4620,30 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   const assignWaiterToOrder = async (orderId: string, waiterId: string, waiterName: string) => {
+    const target = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
+    const targetOrderId = target?.id || orderId;
+
+    inFlightStatusRef.current.set(targetOrderId, {
+      ...inFlightStatusRef.current.get(targetOrderId),
+      timestamp: Date.now(),
+      assignedWaiterId: waiterId,
+      assignedWaiterName: waiterName,
+    });
+    if (target?.orderNumber) {
+      inFlightStatusRef.current.set(target.orderNumber, {
+        ...inFlightStatusRef.current.get(target.orderNumber),
+        timestamp: Date.now(),
+        assignedWaiterId: waiterId,
+        assignedWaiterName: waiterName,
+      });
+    }
+
     setOrders((prev) => {
-      const next = prev.map((o) => (o.id === orderId ? { ...o, assignedWaiterId: waiterId, assignedWaiterName: waiterName } : o));
+      const next = prev.map((o) =>
+        o.id === targetOrderId || o.orderNumber === targetOrderId || o.id === orderId || o.orderNumber === orderId
+          ? { ...o, assignedWaiterId: waiterId, assignedWaiterName: waiterName }
+          : o
+      );
       broadcastOrders(next);
       return next;
     });
@@ -4616,7 +4653,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         method: 'PATCH',
         headers: getClientAuthHeaders(),
         body: JSON.stringify({
-          orderId,
+          orderId: targetOrderId,
           assignedWaiterId: waiterId,
           assignedWaiterName: waiterName,
         }),
@@ -4629,16 +4666,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     const targetOrderId = target?.id || orderId;
     const nowIso = new Date().toISOString();
 
+    const matchingTable = target?.tableNumber
+      ? tables.find(
+          (t) =>
+            (!t.branchId || normalizeBranchId(t.branchId) === normalizeBranchId(currentBranchId)) &&
+            (t.number.toLowerCase() === String(target.tableNumber).toLowerCase() ||
+             t.id === target.tableNumber ||
+             t.number.replace(/\D/g, '') === String(target.tableNumber).replace(/\D/g, ''))
+        )
+      : undefined;
+
+    const resolvedWaiterId =
+      target?.assignedWaiterId ||
+      matchingTable?.assignedWaiterId ||
+      (currentUser?.role === 'floor_staff' ? currentUser.id : undefined);
+    const resolvedWaiterName =
+      target?.assignedWaiterName ||
+      matchingTable?.assignedWaiterName ||
+      (currentUser?.role === 'floor_staff' ? currentUser.name : undefined);
+
     inFlightStatusRef.current.set(targetOrderId, {
       status: 'served',
       sentToKitchen: true,
       timestamp: Date.now(),
+      assignedWaiterId: resolvedWaiterId,
+      assignedWaiterName: resolvedWaiterName,
     });
     if (target?.orderNumber) {
       inFlightStatusRef.current.set(target.orderNumber, {
         status: 'served',
         sentToKitchen: true,
         timestamp: Date.now(),
+        assignedWaiterId: resolvedWaiterId,
+        assignedWaiterName: resolvedWaiterName,
       });
     }
 
@@ -4650,8 +4710,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
             status: 'served' as OrderStatus,
             deliveredAt: nowIso,
             sentToKitchen: true,
-            assignedWaiterId: o.assignedWaiterId || (currentUser?.role === 'floor_staff' ? currentUser.id : undefined),
-            assignedWaiterName: o.assignedWaiterName || (currentUser?.role === 'floor_staff' ? currentUser.name : undefined),
+            assignedWaiterId: resolvedWaiterId || o.assignedWaiterId,
+            assignedWaiterName: resolvedWaiterName || o.assignedWaiterName,
           }
           : o
       );
@@ -4673,6 +4733,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           orderId: targetOrderId,
           status: 'served',
           deliveredAt: nowIso,
+          assignedWaiterId: resolvedWaiterId,
+          assignedWaiterName: resolvedWaiterName,
           actorId: currentUser?.id,
           actorName: currentUser?.name,
           actorRole: currentRole || 'floor_staff',

@@ -142,21 +142,62 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
   }, [users, currentBranch.id]);
 
   // Cashier Orders Hub: Active Takeaway, Delivery, and Dine-In orders
-  // User Rule: Order will appear only in order hub until it is not marked paid, and when marked paid then it will not appear in order hub then it will show only in order history!
+  // Cashier Orders Hub: Active Takeaway, Delivery, and Dine-In orders
+  // Rule: Active kitchen/dispatch orders remain in hub; served dine-in orders remain until paid/settled, then move to history
   const branchOrders = useMemo(() => {
     return orders.filter((o) => {
       if (o.branchId && normalizeBranchId(o.branchId) !== normalizeBranchId(currentBranch.id)) return false;
-      if (
+      if (o.status === 'cancelled') return false;
+
+      const isTerminalFinished =
         o.status === 'completed' ||
         o.status === 'delivered' ||
-        o.status === 'cancelled' ||
-        o.riderStatus === 'delivered' ||
-        o.paymentStatus === 'paid' ||
-        Boolean(o.paymentCollected)
-      ) return false;
-      return true;
+        o.riderStatus === 'delivered';
+
+      // If it is terminal finished, it moves to history
+      if (isTerminalFinished) return false;
+
+      // Active kitchen/service stages must ALWAYS remain in Orders Hub
+      const isActiveCookingOrReady =
+        o.status === 'placed' ||
+        o.status === 'accepted' ||
+        o.status === 'preparing' ||
+        o.status === 'ready' ||
+        o.status === 'out_for_delivery';
+
+      if (isActiveCookingOrReady) return true;
+
+      // If served (dining): keep in order hub until payment is marked and settled
+      if (o.status === 'served') {
+        const isSettled = (o.paymentStatus === 'paid' || Boolean(o.paymentCollected));
+        if (isSettled) return false; // Served AND paid -> moves to order history
+        return true;
+      }
+
+      return false;
     });
   }, [orders, currentBranch.id]);
+
+  // Auto-assign waiter to dine-in orders based on the table's assigned waiter
+  React.useEffect(() => {
+    branchOrders.forEach((ord) => {
+      if (ord.type !== 'dine_in' || ord.assignedWaiterId || !ord.tableNumber) return;
+      if (ord.status === 'completed' || ord.status === 'cancelled') return;
+
+      const tableObj = tables.find(
+        (t) =>
+          (!t.branchId || normalizeBranchId(t.branchId) === normalizeBranchId(currentBranch.id)) &&
+          (String(t.number) === String(ord.tableNumber) ||
+           String(t.id) === String(ord.tableNumber) ||
+           t.number.replace(/\D/g, '') === String(ord.tableNumber).replace(/\D/g, '') ||
+           `t-${t.number.replace(/\D/g, '')}` === String(ord.tableNumber).toLowerCase().replace(/\s/g, ''))
+      );
+
+      if (tableObj?.assignedWaiterId) {
+        assignWaiterToOrder(ord.id, tableObj.assignedWaiterId, tableObj.assignedWaiterName || '');
+      }
+    });
+  }, [branchOrders, tables, currentBranch.id, assignWaiterToOrder]);
 
   // Active orders count
   const activeOrdersCount = useMemo(() => {
@@ -1273,8 +1314,11 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                     })() : ord.type === 'dine_in' ? (() => {
                       const tableObj = tables.find(
                         (t) =>
-                          String(t.number) === String(ord.tableNumber) &&
-                          (!t.branchId || normalizeBranchId(t.branchId) === normalizeBranchId(currentBranch.id))
+                          (!t.branchId || normalizeBranchId(t.branchId) === normalizeBranchId(currentBranch.id)) &&
+                          (String(t.number) === String(ord.tableNumber) ||
+                           String(t.id) === String(ord.tableNumber) ||
+                           t.number.replace(/\D/g, '') === String(ord.tableNumber).replace(/\D/g, '') ||
+                           `t-${t.number.replace(/\D/g, '')}` === String(ord.tableNumber).toLowerCase().replace(/\s/g, ''))
                       );
 
                       const resolvedWaiterId =

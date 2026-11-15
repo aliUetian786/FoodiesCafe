@@ -49,6 +49,7 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
     menuItems,
     tables,
     currentUser,
+    setCurrentUser,
     addToast,
     orderType: globalOrderType,
     setOrderType: setGlobalOrderType,
@@ -93,13 +94,32 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
 
   // Form Details
   const [notes, setNotes] = useState<string>('');
-  const [customerName, setCustomerName] = useState<string>(
-    currentUser?.name && currentUser.name !== 'Guest Customer' ? currentUser.name : ''
-  );
-  const [customerPhone, setCustomerPhone] = useState<string>(currentUser?.phone || '');
+  const [customerName, setCustomerName] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const userKey = currentUser?.id && currentUser.id !== 'user-guest' ? currentUser.id : 'guest';
+      const saved = localStorage.getItem(`foodies_saved_name_${userKey}`) || localStorage.getItem('foodies_saved_customer_name');
+      if (saved) return saved;
+    }
+    return currentUser?.name && currentUser.name !== 'Guest Customer' ? currentUser.name : '';
+  });
+  const [customerPhone, setCustomerPhone] = useState<string>(() => {
+    if (typeof window !== 'undefined') {
+      const userKey = currentUser?.id && currentUser.id !== 'user-guest' ? currentUser.id : 'guest';
+      const saved = localStorage.getItem(`foodies_saved_phone_${userKey}`) || localStorage.getItem('foodies_saved_customer_phone');
+      if (saved) return saved;
+    }
+    return currentUser?.phone || '';
+  });
   const [confirmModalOpen, setConfirmModalOpen] = useState<boolean>(false);
 
   useEffect(() => {
+    if (typeof window !== 'undefined') {
+      const userKey = currentUser?.id && currentUser.id !== 'user-guest' ? currentUser.id : 'guest';
+      const savedName = localStorage.getItem(`foodies_saved_name_${userKey}`) || localStorage.getItem('foodies_saved_customer_name');
+      const savedPhone = localStorage.getItem(`foodies_saved_phone_${userKey}`) || localStorage.getItem('foodies_saved_customer_phone');
+      if (savedName && !customerName) setCustomerName(savedName);
+      if (savedPhone && !customerPhone) setCustomerPhone(savedPhone);
+    }
     if (currentUser?.name && currentUser.name !== 'Guest Customer' && !customerName) {
       setCustomerName(currentUser.name);
     }
@@ -365,6 +385,25 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
             : undefined,
       }
     );
+
+    if (typeof window !== 'undefined') {
+      const userKey = currentUser?.id && currentUser.id !== 'user-guest' ? currentUser.id : 'guest';
+      if (customerName.trim()) {
+        localStorage.setItem(`foodies_saved_name_${userKey}`, customerName.trim());
+        localStorage.setItem('foodies_saved_customer_name', customerName.trim());
+      }
+      if (customerPhone.trim()) {
+        localStorage.setItem(`foodies_saved_phone_${userKey}`, customerPhone.trim());
+        localStorage.setItem('foodies_saved_customer_phone', customerPhone.trim());
+      }
+    }
+    if (setCurrentUser && currentUser && (customerName.trim() || customerPhone.trim())) {
+      setCurrentUser({
+        ...currentUser,
+        name: customerName.trim() || currentUser.name,
+        phone: customerPhone.trim() || currentUser.phone,
+      });
+    }
 
     if (typeof window !== 'undefined' && placed) {
       try {

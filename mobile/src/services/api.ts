@@ -47,9 +47,9 @@ export const API_BASE_URL = getApiBaseUrl();
 export function normalizeBranchId(id?: string): string {
   if (!id) return 'gulberg-lahore';
   if (id === 'all') return 'all';
-  if (id === 'branch-gulberg' || id.includes('gulberg')) return 'gulberg-lahore';
-  if (id === 'branch-f7' || id.includes('f7') || id.includes('islamabad')) return 'f7-islamabad';
-  if (id === 'branch-clifton' || id.includes('clifton') || id.includes('karachi')) return 'clifton-karachi';
+  if (id === 'branch-1' || id === 'branch-gulberg' || id.includes('gulberg')) return 'gulberg-lahore';
+  if (id === 'branch-2' || id === 'branch-f7' || id.includes('f7') || id.includes('islamabad')) return 'f7-islamabad';
+  if (id === 'branch-3' || id === 'branch-clifton' || id.includes('clifton') || id.includes('karachi')) return 'clifton-karachi';
   return id;
 }
 
