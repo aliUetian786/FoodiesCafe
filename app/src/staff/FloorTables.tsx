@@ -190,12 +190,27 @@ export const FloorTablesScreen: React.FC<FloorTablesScreenProps> = ({ initialVie
   );
 
   const dineInOrders = useMemo(
-    () => branchDineInOrders.filter((o) => o.status !== 'completed' && o.status !== 'cancelled'),
+    () =>
+      branchDineInOrders.filter(
+        (o) =>
+          o.status !== 'completed' &&
+          o.status !== 'cancelled' &&
+          o.paymentStatus !== 'paid' &&
+          !o.paymentCollected
+      ),
     [branchDineInOrders]
   );
 
   const servedDineInOrders = useMemo(
-    () => branchDineInOrders.filter((o) => o.status === 'served' || o.status === 'completed' || o.status === 'taken'),
+    () =>
+      branchDineInOrders.filter(
+        (o) =>
+          o.status === 'served' ||
+          o.status === 'completed' ||
+          o.status === 'taken' ||
+          o.paymentStatus === 'paid' ||
+          Boolean(o.paymentCollected)
+      ),
     [branchDineInOrders]
   );
 

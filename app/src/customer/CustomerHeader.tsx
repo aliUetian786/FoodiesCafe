@@ -318,7 +318,7 @@ export const CustomerHeader: React.FC<CustomerHeaderProps> = ({
                 style={{
                   fontFamily: 'Outfit, sans-serif',
                   fontWeight: 900,
-                  fontSize: '22px',
+                  fontSize: '28px',
                   color: 'var(--text-main)',
                   letterSpacing: '-0.03em',
                   lineHeight: 1,

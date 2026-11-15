@@ -69,8 +69,8 @@ export const TableQrCodeSvg: React.FC<TableQrCodeSvgProps> = ({
     }
   }, [value, errorCorrectionLevel, margin]);
 
-  // Center badge dimensions: ~18-20% of the total size (safe within 30% Level H Error Correction)
-  const badgeSize = Math.max(28, Math.round(size * 0.19));
+  // Center badge dimensions: ~18-22% of total size (safe within 30% Level H Error Correction)
+  const badgeSize = Math.max(32, Math.round(size * 0.22));
 
   return (
     <div
@@ -103,7 +103,7 @@ export const TableQrCodeSvg: React.FC<TableQrCodeSvgProps> = ({
         {pathData && <path d={pathData} fill={fgColor} />}
       </svg>
 
-      {/* Center Branding Badge (safe within 30% Level H Error Correction) */}
+      {/* Center Branding Badge: Official Foodies Cafe Logo (safe within 30% Level H Error Correction) */}
       {includeBranding && (
         <div
           style={{
@@ -111,42 +111,28 @@ export const TableQrCodeSvg: React.FC<TableQrCodeSvgProps> = ({
             width: `${badgeSize}px`,
             height: `${badgeSize}px`,
             backgroundColor: '#FFFFFF',
-            borderRadius: '6px',
+            borderRadius: '8px',
             border: '1.5px solid var(--primary)',
-            boxShadow: '0 2px 6px rgba(0, 0, 0, 0.15)',
+            boxShadow: '0 2px 8px rgba(0, 0, 0, 0.16)',
             display: 'flex',
-            flexDirection: 'column',
             alignItems: 'center',
             justifyContent: 'center',
             padding: '2px',
             pointerEvents: 'none',
             zIndex: 2,
+            overflow: 'hidden',
           }}
         >
-          <span
+          <img
+            src="/logo.png"
+            alt="Foodies Cafe"
             style={{
-              fontSize: `${Math.max(7, Math.round(badgeSize * 0.28))}px`,
-              fontWeight: 900,
-              color: 'var(--primary)',
-              lineHeight: 1,
-              letterSpacing: '0.04em',
+              width: '100%',
+              height: '100%',
+              objectFit: 'contain',
+              display: 'block',
             }}
-          >
-            FOODIES
-          </span>
-          {tableNumber && (
-            <span
-              style={{
-                fontSize: `${Math.max(7, Math.round(badgeSize * 0.26))}px`,
-                fontWeight: 800,
-                color: '#0F0C0A',
-                lineHeight: 1,
-                marginTop: '1.5px',
-              }}
-            >
-              {tableNumber}
-            </span>
-          )}
+          />
         </div>
       )}
     </div>

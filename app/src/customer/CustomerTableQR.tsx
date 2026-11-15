@@ -201,7 +201,16 @@ export const TableSelectionScreen: React.FC<TableSelectionScreenProps> = ({ onNa
   const [locationError, setLocationError] = useState<string | null>(null);
   const [showLocationModal, setShowLocationModal] = useState<boolean>(false);
 
-  const isLocationVerified = locationStatus === 'verified';
+  // Check if customer accessed via scanned Table QR code
+  const isDirectQrScan = useMemo(() => {
+    if (typeof window !== 'undefined') {
+      const params = new URLSearchParams(window.location.search);
+      return Boolean(params.get('tableQr') || params.get('token') || params.get('table'));
+    }
+    return false;
+  }, []);
+
+  const isLocationVerified = locationStatus === 'verified' || isDirectQrScan;
 
   // Request user location access via browser Geolocation API
   const requestLocationAccess = (showToastNotice = true) => {

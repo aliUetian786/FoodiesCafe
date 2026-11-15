@@ -38,58 +38,6 @@ interface MenuScreenProps {
   onProceedToCheckout?: () => void;
 }
 
-// Default Authentic Deals if not present in custom menu
-const DEFAULT_DEAL_ITEMS: MenuItem[] = [
-  {
-    id: 'deal-family-biryani',
-    name: 'Family Dum Biryani Feast (Deal for 3-4)',
-    category: 'Deals',
-    description: '2x Royal Chicken Biryani, 1x Half Chicken Boti BBQ, 2x Mint Margaritas, Fresh Zeera Raita & Salad.',
-    basePrice: 1650,
-    image: '/food-biryani.jpg',
-    isAvailable: true,
-    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
-    branchPriceOverrides: { 'gulberg-lahore': 1650, 'f7-islamabad': 1590, 'clifton-karachi': 1690 },
-    sizes: [{ name: 'Family Combo', priceDelta: 0 }],
-  },
-  {
-    id: 'deal-shinwari-duo',
-    name: 'Shinwari Karahi Duo Combo (Deal for 2)',
-    category: 'Deals',
-    description: 'Half Desi Ghee Shinwari Chicken Karahi, 4x Fresh Roghni Naan, 2x Soft Drinks & Mint Chutney.',
-    basePrice: 1550,
-    image: '/hero-bg.jpg',
-    isAvailable: true,
-    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
-    branchPriceOverrides: { 'gulberg-lahore': 1550, 'f7-islamabad': 1490, 'clifton-karachi': 1590 },
-    sizes: [{ name: '2 Persons', priceDelta: 0 }],
-  },
-  {
-    id: 'deal-burger-crave',
-    name: 'Smashed Burger & Fries Crave Deal',
-    category: 'Deals',
-    description: '1x Double Beef Smashed Cheeseburger, 1x Peri Peri Loaded Fries & 1x Artisanal Mint Margarita.',
-    basePrice: 1190,
-    image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&auto=format&fit=crop&q=60',
-    isAvailable: true,
-    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
-    branchPriceOverrides: { 'gulberg-lahore': 1190, 'f7-islamabad': 1150, 'clifton-karachi': 1220 },
-    sizes: [{ name: 'Single Meal', priceDelta: 0 }],
-  },
-  {
-    id: 'deal-bbq-midnight',
-    name: 'Midnight BBQ Feast Deal',
-    category: 'Deals',
-    description: '4 pcs Reshmi Chicken Kebabs, 6 pcs Chicken Malai Boti, 2x Garlic Butter Naans, Raita & Salad.',
-    basePrice: 1290,
-    image: 'https://images.unsplash.com/photo-1599488615731-7e5c2823ff28?w=800&auto=format&fit=crop&q=60',
-    isAvailable: true,
-    branchAvailability: { 'gulberg-lahore': true, 'f7-islamabad': true, 'clifton-karachi': true },
-    branchPriceOverrides: { 'gulberg-lahore': 1290, 'f7-islamabad': 1250, 'clifton-karachi': 1320 },
-    sizes: [{ name: 'Sharing Platter', priceDelta: 0 }],
-  },
-];
-
 export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart, onProceedToCheckout }) => {
   const {
     currentBranch,
@@ -346,18 +294,16 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
   const searchQuery = menuSearchQuery;
   const [unavailableModalDish, setUnavailableModalDish] = useState<MenuItem | null>(null);
 
-  // Fallback combined items containing default deals if not in database
+  // Synchronized catalog with Staff Menu & Prices page
   const allMenuItems = useMemo(() => {
-    const existingDeal = (menuItems || []).some((i) => (i.category || '').toLowerCase() === 'deals');
-    if (existingDeal) return menuItems;
-    return [...DEFAULT_DEAL_ITEMS, ...(menuItems || [])];
+    return menuItems || [];
   }, [menuItems]);
 
-  // Dynamically ensure 'Deals' is always a simple category alongside other categories
+  // Dynamically ensure categories match the active categories and uploaded menu items
   const categories: string[] = useMemo(() => {
-    const list: string[] = ['Deals'];
+    const list: string[] = [];
     (appCategories || []).forEach((c) => {
-      if (!list.includes(c) && c.toLowerCase() !== 'deals') {
+      if (!list.includes(c)) {
         list.push(c);
       }
     });
@@ -366,10 +312,12 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({ onNavigate, onOpenCart
         list.push(item.category);
       }
     });
-    return list.length > 0 ? list : ['Deals', 'Biryani & Rice', 'Karahi & Handi', 'BBQ & Kebabs', 'Burgers & Fast Food', 'Tandoor & Breads', 'Beverages & Desserts'];
+    return list.length > 0
+      ? list
+      : ['Biryani & Rice', 'Karahi & Handi', 'BBQ & Kebabs', 'Burgers & Fast Food', 'Tandoor & Breads', 'Beverages & Desserts'];
   }, [appCategories, allMenuItems]);
 
-  const [selectedCategory, setSelectedCategory] = useState<string>(() => categories[0] || 'Deals');
+  const [selectedCategory, setSelectedCategory] = useState<string>(() => categories[0] || 'Biryani & Rice');
 
   const categoryRowRef = useRef<HTMLDivElement>(null);
   const categoryBtnRefs = useRef<Record<string, HTMLButtonElement | null>>({});

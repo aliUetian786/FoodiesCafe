@@ -806,16 +806,19 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   inc.status !== 'cancelled' &&
                   existingRank > incomingRank;
 
-                const isDeliveryFinished =
+                const isOrderFinished =
                   inc.status === 'delivered' ||
                   inc.status === 'completed' ||
+                  existing?.status === 'completed' ||
                   inc.riderStatus === 'delivered' ||
                   inFlight?.riderStatus === 'delivered' ||
                   inFlight?.status === 'completed' ||
                   inFlight?.status === 'delivered' ||
-                  (inc.type === 'delivery' && (isLocallyPaid || inc.paymentStatus === 'paid'));
+                  (inc.type === 'delivery' && (isLocallyPaid || inc.paymentStatus === 'paid')) ||
+                  ((isLocallyPaid || inc.paymentStatus === 'paid') &&
+                    (existing?.status === 'served' || inc.status === 'served' || existing?.status === 'ready' || inc.status === 'ready' || inc.type === 'dine_in'));
 
-                const resolvedStatus = isDeliveryFinished
+                const resolvedStatus = isOrderFinished
                   ? ('completed' as OrderStatus)
                   : inFlight?.status || (preserveLocal ? existing.status : inc.status);
 
@@ -831,11 +834,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   sentToKitchen: existing.sentToKitchen || inc.sentToKitchen,
                   sentToKitchenAt: inc.sentToKitchenAt || existing.sentToKitchenAt,
                   preparationStartedAt: inc.preparationStartedAt || existing.preparationStartedAt,
-                  completedAt: isDeliveryFinished ? (inc.completedAt || new Date().toISOString()) : (inc.completedAt || existing.completedAt),
-                  deliveredAt: isDeliveryFinished ? (inc.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
+                  completedAt: isOrderFinished ? (inc.completedAt || new Date().toISOString()) : (inc.completedAt || existing.completedAt),
+                  deliveredAt: isOrderFinished ? (inc.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
                   assignedRiderId: inc.assignedRiderId || existing.assignedRiderId,
                   assignedRiderName: inc.assignedRiderName || existing.assignedRiderName,
-                  riderStatus: isDeliveryFinished ? 'delivered' : (inFlight?.riderStatus || inc.riderStatus || existing.riderStatus),
+                  riderStatus: isOrderFinished ? 'delivered' : (inFlight?.riderStatus || inc.riderStatus || existing.riderStatus),
                 });
               } else {
                 map.set(inc.id, {
@@ -3590,6 +3593,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const targetOrderId = target?.id || orderId;
     const nowIso = new Date().toISOString();
 
+    inFlightOrdersRef.current.set(targetOrderId, {
+      status: 'served',
+      timestamp: Date.now(),
+    });
+    if (target?.orderNumber) {
+      inFlightOrdersRef.current.set(target.orderNumber, {
+        status: 'served',
+        timestamp: Date.now(),
+      });
+    }
+
     setOrders((prev) => {
       const next = prev.map((o) =>
         o.id === targetOrderId || o.orderNumber === targetOrderId || o.id === orderId || o.orderNumber === orderId
@@ -3629,6 +3643,21 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       ordersRef.current.find((o) => o.id === orderId || o.orderNumber === orderId);
     const targetOrderId = target?.id || orderId;
     const nowIso = new Date().toISOString();
+
+    inFlightOrdersRef.current.set(targetOrderId, {
+      status: 'completed',
+      paymentStatus: 'paid',
+      paymentCollected: true,
+      timestamp: Date.now(),
+    });
+    if (target?.orderNumber) {
+      inFlightOrdersRef.current.set(target.orderNumber, {
+        status: 'completed',
+        paymentStatus: 'paid',
+        paymentCollected: true,
+        timestamp: Date.now(),
+      });
+    }
 
     setOrders((prev) => {
       const next = prev.map((o) =>

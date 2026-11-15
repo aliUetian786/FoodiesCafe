@@ -150,7 +150,9 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
         o.status === 'completed' ||
         o.status === 'delivered' ||
         o.status === 'cancelled' ||
-        o.riderStatus === 'delivered'
+        o.riderStatus === 'delivered' ||
+        o.paymentStatus === 'paid' ||
+        Boolean(o.paymentCollected)
       ) return false;
       return true;
     });

@@ -141,17 +141,20 @@ export async function runSync(options?: { full?: boolean; force?: boolean }): Pr
         const sanitizeOrder = (o: any) => {
           const existing = byId.get(o.id) || (o.orderNumber ? byId.get(o.orderNumber) : undefined);
           const isLocallyPaid = existing ? (existing.paymentStatus === 'paid' || existing.paymentCollected === true) : false;
-          const isDeliveryFinished =
+          const isOrderFinished =
             o.status === 'delivered' ||
             o.status === 'completed' ||
-            o.riderStatus === 'delivered';
+            o.riderStatus === 'delivered' ||
+            existing?.status === 'completed' ||
+            ((isLocallyPaid || o.paymentStatus === 'paid') &&
+              (existing?.status === 'served' || o.status === 'served' || existing?.status === 'ready' || o.status === 'ready' || o.type === 'dine_in'));
 
           if (!existing) {
-            return isDeliveryFinished
+            return isOrderFinished
               ? {
                   ...o,
                   status: 'completed',
-                  riderStatus: 'delivered',
+                  riderStatus: o.type === 'delivery' ? 'delivered' : o.riderStatus,
                   paymentStatus: 'paid',
                   paymentCollected: true,
                   completedAt: o.completedAt || new Date().toISOString(),
@@ -167,7 +170,7 @@ export async function runSync(options?: { full?: boolean; force?: boolean }): Pr
             existing.status !== 'cancelled' &&
             o.status !== 'cancelled' &&
             existingRank > incomingRank;
-          const resolvedStatus = isDeliveryFinished ? 'completed' : preserveStatus ? existing.status : o.status;
+          const resolvedStatus = isOrderFinished ? 'completed' : preserveStatus ? existing.status : o.status;
           const resolvedSentToKitchen = existing ? (existing.sentToKitchen || o.sentToKitchen) : o.sentToKitchen;
 
           return {
@@ -176,11 +179,11 @@ export async function runSync(options?: { full?: boolean; force?: boolean }): Pr
             sentToKitchen: resolvedSentToKitchen,
             sentToKitchenAt: o.sentToKitchenAt || existing.sentToKitchenAt,
             preparationStartedAt: o.preparationStartedAt || existing.preparationStartedAt,
-            riderStatus: isDeliveryFinished ? 'delivered' : (o.riderStatus || existing.riderStatus),
-            paymentStatus: (isDeliveryFinished || isLocallyPaid) && o.paymentStatus !== 'refunded' ? 'paid' : o.paymentStatus,
-            paymentCollected: isDeliveryFinished || isLocallyPaid || o.paymentCollected || o.paymentStatus === 'paid',
-            completedAt: isDeliveryFinished ? (o.completedAt || new Date().toISOString()) : (o.completedAt || existing.completedAt),
-            deliveredAt: isDeliveryFinished ? (o.deliveredAt || new Date().toISOString()) : (o.deliveredAt || existing.deliveredAt),
+            riderStatus: isOrderFinished && o.type === 'delivery' ? 'delivered' : (o.riderStatus || existing.riderStatus),
+            paymentStatus: (isOrderFinished || isLocallyPaid) && o.paymentStatus !== 'refunded' ? 'paid' : o.paymentStatus,
+            paymentCollected: isOrderFinished || isLocallyPaid || o.paymentCollected || o.paymentStatus === 'paid',
+            completedAt: isOrderFinished ? (o.completedAt || existing.completedAt || new Date().toISOString()) : (o.completedAt || existing.completedAt),
+            deliveredAt: isOrderFinished ? (o.deliveredAt || existing.deliveredAt || new Date().toISOString()) : (o.deliveredAt || existing.deliveredAt),
             cashierId: existing.cashierId || o.cashierId,
             cashierName: existing.cashierName || o.cashierName,
             shiftId: existing.shiftId || o.shiftId,

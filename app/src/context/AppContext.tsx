@@ -1682,19 +1682,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       try {
         const parsed = JSON.parse(savedMenu);
         if (Array.isArray(parsed) && parsed.length > 0) {
-          const initialMap = new Map(INITIAL_MENU.map((m) => [m.id, m]));
-          const preserved = parsed.map((p: any) => {
-            const canonical = initialMap.get(p.id);
-            if (!canonical) return p;
-            return {
-              ...canonical,
-              ...p,
-              branchAvailability: { ...canonical.branchAvailability, ...(p.branchAvailability || {}) },
-              branchPriceOverrides: { ...canonical.branchPriceOverrides, ...(p.branchPriceOverrides || {}) },
-            };
-          });
-          setMenuItems(preserved);
-          localStorage.setItem('foodies_menu_items', JSON.stringify(preserved));
+          setMenuItems(parsed);
         }
       } catch (e) { }
     } else {
@@ -2036,11 +2024,17 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   existing.status !== 'cancelled' &&
                   inc.status !== 'cancelled' &&
                   (existingRank > incomingRank || (isRecentInFlight && inFlight?.status && (STATUS_RANK[inFlight.status] || 0) >= incomingRank));
-                const isDeliveryFinished =
-                  inc.status === 'delivered' || inc.status === 'completed' || inc.riderStatus === 'delivered';
+                const isLocallyPaid = (existing && (existing.paymentStatus === 'paid' || existing.paymentCollected)) || (inFlight && inFlight.paymentStatus === 'paid') || inc.paymentStatus === 'paid';
+                const isOrderFinished =
+                  inc.status === 'delivered' ||
+                  inc.status === 'completed' ||
+                  existing.status === 'completed' ||
+                  inFlight?.status === 'completed' ||
+                  inc.riderStatus === 'delivered' ||
+                  (isLocallyPaid && (existing.status === 'served' || inc.status === 'served' || existing.status === 'ready' || inc.status === 'ready'));
                 return {
                   ...inc,
-                  status: isDeliveryFinished
+                  status: isOrderFinished
                     ? 'completed'
                     : preserveLocal
                     ? (isRecentInFlight && inFlight?.status ? inFlight.status : existing.status)
@@ -2048,9 +2042,10 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
                   sentToKitchen: existing.sentToKitchen || inc.sentToKitchen || Boolean(inFlight?.sentToKitchen),
                   sentToKitchenAt: inc.sentToKitchenAt || existing.sentToKitchenAt,
                   preparationStartedAt: inc.preparationStartedAt || existing.preparationStartedAt,
-                  completedAt: inc.completedAt || existing.completedAt,
-                  paymentStatus: (existing.paymentStatus === 'paid' || inc.paymentStatus === 'paid') ? 'paid' : (inc.paymentStatus || existing.paymentStatus),
-                  paymentCollected: Boolean(existing.paymentCollected || inc.paymentCollected),
+                  completedAt: isOrderFinished ? (inc.completedAt || existing.completedAt || new Date().toISOString()) : (inc.completedAt || existing.completedAt),
+                  deliveredAt: isOrderFinished ? (inc.deliveredAt || existing.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
+                  paymentStatus: (isOrderFinished || isLocallyPaid) ? 'paid' : (inc.paymentStatus || existing.paymentStatus),
+                  paymentCollected: Boolean(isOrderFinished || isLocallyPaid || existing.paymentCollected || inc.paymentCollected),
                 } as Order;
               });
               return merged;
@@ -4129,7 +4124,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           deliveredAt: shouldCompleteDelivery ? new Date().toISOString() : undefined,
           actorId: currentUser?.id,
           actorName: currentUser?.name,
-          actorRole: currentRole,
+          actorRole: currentRole || 'floor_staff',
         }),
       }).catch(() => { });
     } catch (e) { }
@@ -4181,7 +4176,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           version: nextVersion,
           actorId: currentUser?.id,
           actorName: currentUser?.name,
-          actorRole: currentRole,
+          actorRole: currentRole || 'floor_staff',
         }),
       }).catch(() => { });
     } catch (e) { }
@@ -4242,7 +4237,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           version: nextVersion,
           actorId: currentUser?.id,
           actorName: currentUser?.name,
-          actorRole: currentRole,
+          actorRole: currentRole || 'floor_staff',
         }),
       }).catch(() => { });
     } catch (e) { }
@@ -4680,7 +4675,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           deliveredAt: nowIso,
           actorId: currentUser?.id,
           actorName: currentUser?.name,
-          actorRole: currentRole,
+          actorRole: currentRole || 'floor_staff',
         }),
       }).catch(() => { });
     } catch (e) { }
@@ -4693,12 +4688,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     inFlightStatusRef.current.set(targetOrderId, {
       status: 'completed',
+      paymentStatus: 'paid',
+      paymentCollected: true,
       sentToKitchen: true,
       timestamp: Date.now(),
     });
     if (target?.orderNumber) {
       inFlightStatusRef.current.set(target.orderNumber, {
         status: 'completed',
+        paymentStatus: 'paid',
+        paymentCollected: true,
         sentToKitchen: true,
         timestamp: Date.now(),
       });
@@ -4774,7 +4773,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           deliveredAt: target?.deliveredAt || nowIso,
           actorId: currentUser?.id,
           actorName: currentUser?.name,
-          actorRole: currentRole,
+          actorRole: currentRole || 'floor_staff',
         }),
       }).catch(() => { });
     } catch (e) { }

@@ -23,7 +23,7 @@ const getInitialOrders = (): Order[] => {
         );
       }
     }
-  } catch (e) {}
+  } catch (e) { }
   return [];
 };
 
@@ -39,7 +39,7 @@ const persistOrders = (orders: Order[]) => {
   if (typeof window === 'undefined') return;
   try {
     localStorage.setItem('foodies_orders_live', JSON.stringify(orders));
-  } catch (e) {}
+  } catch (e) { }
 };
 
 export const ordersSlice = createSlice({
@@ -105,15 +105,18 @@ export const ordersSlice = createSlice({
         const resolvedWaiterId = existing.assignedWaiterId || inc.assignedWaiterId;
         const resolvedWaiterName = existing.assignedWaiterName || inc.assignedWaiterName;
 
-        const isDeliveryFinished =
+        const isOrderFinished =
           (inc.status as string) === 'delivered' ||
           inc.status === 'completed' ||
-          resolvedRiderStatus === 'delivered';
+          existing.status === 'completed' ||
+          resolvedRiderStatus === 'delivered' ||
+          ((isLocallyPaid || inc.paymentStatus === 'paid') &&
+            (existing.status === 'served' || inc.status === 'served' || existing.status === 'ready' || inc.status === 'ready' || inc.type === 'dine_in'));
 
-        const finalStatus: OrderStatus = isDeliveryFinished ? 'completed' : resolvedStatus;
-        const finalRiderStatus: Order['riderStatus'] = isDeliveryFinished ? 'delivered' : resolvedRiderStatus;
-        const finalPaymentStatus: PaymentStatus = isDeliveryFinished ? 'paid' : resolvedPaymentStatus;
-        const finalPaymentCollected: boolean = isDeliveryFinished ? true : resolvedPaymentCollected;
+        const finalStatus: OrderStatus = isOrderFinished ? 'completed' : resolvedStatus;
+        const finalRiderStatus: Order['riderStatus'] = (isOrderFinished && inc.type === 'delivery') ? 'delivered' : resolvedRiderStatus;
+        const finalPaymentStatus: PaymentStatus = (isOrderFinished || isLocallyPaid) && inc.paymentStatus !== 'refunded' ? 'paid' : resolvedPaymentStatus;
+        const finalPaymentCollected: boolean = isOrderFinished || isLocallyPaid || resolvedPaymentCollected;
 
         return {
           ...inc,
@@ -129,8 +132,8 @@ export const ordersSlice = createSlice({
           sentToKitchenAt: resolvedSentToKitchenAt,
           forwardToKitchenAt: resolvedSentToKitchen ? undefined : inc.forwardToKitchenAt,
           preparationStartedAt: resolvedPrepStartedAt,
-          completedAt: isDeliveryFinished ? (inc.completedAt || new Date().toISOString()) : resolvedCompletedAt,
-          deliveredAt: isDeliveryFinished ? (inc.deliveredAt || new Date().toISOString()) : resolvedDeliveredAt,
+          completedAt: isOrderFinished ? (inc.completedAt || new Date().toISOString()) : resolvedCompletedAt,
+          deliveredAt: isOrderFinished ? (inc.deliveredAt || new Date().toISOString()) : resolvedDeliveredAt,
           assignedRiderId: resolvedRiderId,
           assignedRiderName: resolvedRiderName,
           riderStatus: finalRiderStatus,
@@ -164,16 +167,18 @@ export const ordersSlice = createSlice({
     },
     upsertOrder: (state, action: PayloadAction<Order>) => {
       let ord = action.payload;
-      const isDeliveryFinished =
+      const isOrderFinished =
         (ord.status as string) === 'delivered' ||
         ord.status === 'completed' ||
-        ord.riderStatus === 'delivered';
+        ord.riderStatus === 'delivered' ||
+        ((ord.paymentStatus === 'paid' || Boolean(ord.paymentCollected)) &&
+          (ord.status === 'served' || ord.status === 'ready' || ord.type === 'dine_in'));
 
-      if (isDeliveryFinished) {
+      if (isOrderFinished) {
         ord = {
           ...ord,
           status: 'completed',
-          riderStatus: 'delivered',
+          riderStatus: ord.type === 'delivery' ? 'delivered' : ord.riderStatus,
           paymentStatus: 'paid',
           paymentCollected: true,
           completedAt: ord.completedAt || new Date().toISOString(),

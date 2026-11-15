@@ -958,18 +958,22 @@ export async function PATCH(request: Request) {
       let effectivePaymentStatus = paymentStatus;
       let effectivePaymentCollected = paymentCollected;
 
-      const isDeliveryFinished =
-        status === 'delivered' ||
+      const isOrderSettledAndFinished =
         status === 'completed' ||
+        status === 'delivered' ||
         riderStatus === 'delivered' ||
         ((currentOrder.type === 'delivery' || body.type === 'delivery') &&
-          (paymentStatus === 'paid' || currentPaymentStatus === 'paid' || Boolean(paymentCollected) || Boolean(currentOrder.payment_collected)));
+          (paymentStatus === 'paid' || currentPaymentStatus === 'paid' || Boolean(paymentCollected) || Boolean(currentOrder.payment_collected))) ||
+        ((paymentStatus === 'paid' || Boolean(paymentCollected) || currentPaymentStatus === 'paid' || Boolean(currentOrder.payment_collected)) &&
+          (status === 'served' || status === 'completed' || currentStatus === 'served' || currentStatus === 'ready' || currentOrder.type === 'dine_in'));
 
-      if (isDeliveryFinished) {
+      if (isOrderSettledAndFinished) {
         effectiveStatus = 'completed';
-        effectiveRiderStatus = 'delivered';
         effectivePaymentStatus = 'paid';
         effectivePaymentCollected = true;
+        if (currentOrder.type === 'delivery' || body.type === 'delivery') {
+          effectiveRiderStatus = 'delivered';
+        }
       }
 
       // 4. Server State Machine Validation for Status Transitions
@@ -1042,7 +1046,7 @@ export async function PATCH(request: Request) {
           updates.push(`preparation_started_at = CURRENT_TIMESTAMP`);
         } else if (effectiveStatus === 'completed' || effectiveStatus === 'delivered' || effectiveStatus === 'served' || effectiveStatus === 'taken') {
           updates.push(`completed_at = CURRENT_TIMESTAMP`);
-          if (effectiveStatus === 'delivered' || isDeliveryFinished || currentOrder.type === 'delivery') {
+          if (effectiveStatus === 'delivered' || isOrderSettledAndFinished || currentOrder.type === 'delivery') {
             updates.push(`delivered_at = CURRENT_TIMESTAMP`);
             if (effectiveRiderStatus === undefined) {
               updates.push(`rider_status = 'delivered'`);
@@ -1094,7 +1098,7 @@ export async function PATCH(request: Request) {
         updates.push(`rider_status = $${idx++}`);
         values.push(effectiveRiderStatus || null);
       }
-      if (deliveredAt !== undefined && !isDeliveryFinished) {
+      if (deliveredAt !== undefined && !isOrderSettledAndFinished) {
         updates.push(`delivered_at = $${idx++}`);
         values.push(deliveredAt || null);
       }

@@ -137,12 +137,12 @@ export function WaiterOrdersQueue({ onOpenWalkIn, onNavigateToTables }: WaiterOr
     return formatDateYYYYMMDD(d);
   };
 
-  // 1. All served / completed dine-in orders
+  // 1. All served / completed / settled dine-in orders
   const servedDineInOrders = useMemo(() => {
     return orders.filter(
       (o) =>
         o.type === 'dine_in' &&
-        (o.status === 'served' || o.status === 'completed' || o.status === 'taken')
+        (o.status === 'served' || o.status === 'completed' || o.status === 'taken' || o.paymentStatus === 'paid' || o.paymentCollected)
     );
   }, [orders]);
 
@@ -232,11 +232,15 @@ export function WaiterOrdersQueue({ onOpenWalkIn, onNavigateToTables }: WaiterOr
 
   const [stageFilter, setStageFilter] = useState<'all' | 'ready' | 'cooking' | 'served'>('all');
 
-  // 4. Incoming active orders queue (ready, preparing, accepted, placed, served)
+  // 4. Incoming active orders queue (ready, preparing, accepted, placed, served) - strictly unsettled
   const allActiveDineIn = useMemo(() => {
     return orders.filter(
       (o) =>
         o.type === 'dine_in' &&
+        o.status !== 'completed' &&
+        o.status !== 'cancelled' &&
+        o.paymentStatus !== 'paid' &&
+        !o.paymentCollected &&
         (o.status === 'ready' || o.status === 'accepted' || o.status === 'preparing' || o.status === 'placed' || o.status === 'served')
     );
   }, [orders]);

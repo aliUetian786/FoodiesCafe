@@ -1780,27 +1780,6 @@ export const CashierScreen: React.FC = () => {
           {/* Shift Control Buttons */}
           <div style={{ display: 'flex', gap: '8px', alignItems: 'center', flexWrap: 'wrap' }}>
             <button
-              type="button"
-              onClick={() => openNotificationModal('send')}
-              style={{
-                padding: '8px 13px',
-                borderRadius: 'var(--radius-md)',
-                backgroundColor: '#FFF7ED',
-                border: '1px solid #FDBA74',
-                color: '#C2410C',
-                fontSize: '12.5px',
-                fontWeight: 800,
-                cursor: 'pointer',
-                display: 'flex',
-                alignItems: 'center',
-                gap: '6px',
-              }}
-            >
-              <Bell size={14} />
-              <span>Notify User / Staff</span>
-            </button>
-
-            <button
               onClick={() => setShowWalkInModal(true)}
               style={{
                 padding: '8px 14px',

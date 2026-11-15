@@ -69,7 +69,12 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
   const [customOrigin, setCustomOrigin] = useState<string>(() => {
     if (typeof window !== 'undefined') {
       const saved = localStorage.getItem('foodies_qr_custom_origin');
-      if (saved) return saved;
+      if (saved) {
+        if (saved.includes('localhost') && !window.location.origin.includes('localhost')) {
+          return window.location.origin;
+        }
+        return saved;
+      }
       return window.location.origin;
     }
     return 'https://foodiescafe.pk';
@@ -808,8 +813,8 @@ export const TableQrModal: React.FC<TableQrModalProps> = ({
             {/* Crisp Vector QR Code Preview */}
             <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
               <TableQrCodeSvg
-                value={customerQrUrl || `FC-TABLE-${activeTable?.number}`}
-                size={175}
+                value={customerQrUrl || `${effectiveOrigin}/?tableQr=${encodeURIComponent(activeTable?.number || '1')}&branch=${encodeURIComponent(currentBranch.id)}`}
+                size={200}
                 tableNumber={activeTable?.number}
                 includeBranding={includeBranding}
               />
