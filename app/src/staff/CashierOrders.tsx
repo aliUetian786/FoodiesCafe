@@ -96,10 +96,27 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
   const [paymentFilter, setPaymentFilter] = useState<'all' | 'unpaid' | 'paid'>('all');
   const [statusFilter, setStatusFilter] = useState<'all' | 'arrived' | 'preparing' | 'ready'>('all');
   const [searchQuery, setSearchQuery] = useState('');
-  const [selectedOrderDetail, setSelectedOrderDetail] = useState<Order | null>(null);
+  const [selectedOrderDetailSnapshot, setSelectedOrderDetail] = useState<Order | null>(null);
   const [orderToCancel, setOrderToCancel] = useState<Order | null>(null);
   const [walkInModalOpen, setWalkInModalOpen] = useState(false);
-  const [selectedOrderForTimer, setSelectedOrderForTimer] = useState<Order | null>(null);
+  const [selectedOrderForTimerSnapshot, setSelectedOrderForTimer] = useState<Order | null>(null);
+  // The modals must act on the LIVE order, not the object captured at click time. After any
+  // poll/SSE update the snapshot went stale (old status/version), so its buttons silently did
+  // nothing or were rejected by the server until the page was refreshed.
+  const selectedOrderDetail = useMemo(
+    () =>
+      selectedOrderDetailSnapshot
+        ? orders.find((o) => o.id === selectedOrderDetailSnapshot.id) || selectedOrderDetailSnapshot
+        : null,
+    [selectedOrderDetailSnapshot, orders]
+  );
+  const selectedOrderForTimer = useMemo(
+    () =>
+      selectedOrderForTimerSnapshot
+        ? orders.find((o) => o.id === selectedOrderForTimerSnapshot.id) || selectedOrderForTimerSnapshot
+        : null,
+    [selectedOrderForTimerSnapshot, orders]
+  );
   const [timerMinutesInput, setTimerMinutesInput] = useState<number>(3);
 
   // Check if rider is currently out for delivery on an active delivery trip
@@ -123,7 +140,8 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
     return users.filter((u) => {
       if (u.role !== 'delivery_staff') return false;
       if (u.status !== 'active') return false;
-      if (u.riderAvailability === 'offline') return false;
+      // Busy/offline riders cannot take new orders (they are assignable again once they mark themselves free).
+      if (u.riderAvailability === 'offline' || u.riderAvailability === 'busy') return false;
       if (bId && bId !== 'all' && u.branchId && normalizeBranchId(u.branchId) !== bId) return false;
       // When rider has accepted an order and is out for delivery, cashier desk must not show him as available and cannot be assigned
       if (isRiderOutForDelivery(u.id)) return false;

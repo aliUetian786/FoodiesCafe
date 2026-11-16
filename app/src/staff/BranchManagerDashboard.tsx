@@ -310,13 +310,16 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
         );
         const shiftIds = cashierShifts.map((s) => s.id);
 
+        // Cashier card = takeaway money only. Delivery cash belongs to the rider card and
+        // dine-in cash to the waiter card; counting them here double-counted collections.
         matchedOrders = bPaidOrdersToday.filter((o) => {
+          if (o.type !== 'takeaway') return false;
           if (o.cashierId === user.id) return true;
           if ((o as any).staffId === user.id) return true;
           if (o.shiftId && shiftIds.includes(o.shiftId)) return true;
           if (user.name && o.cashierName && o.cashierName.toLowerCase().includes(user.name.toLowerCase())) return true;
           if (!o.cashierId && !o.shiftId && branchCashiers[0]?.id === user.id) {
-            return o.isWalkIn || o.type === 'takeaway' || (!o.assignedRiderId && !o.assignedWaiterId);
+            return true;
           }
           return false;
         });
@@ -342,13 +345,8 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
 
       const rawCash = uniqueOrders.filter(isOrderCash).reduce((sum, o) => sum + (Number(o.total) || 0), 0);
 
-      // For cashier: consider shift cashCollected if higher
-      let effectiveCash = rawCash;
-      if (roleCategory === 'cashier') {
-        const userShifts = (shifts || []).filter((s) => s.cashierId === user.id);
-        const shiftCashTotal = userShifts.reduce((sum, s) => sum + (Number(s.cashCollected) || 0), 0);
-        effectiveCash = Math.max(rawCash, shiftCashTotal);
-      }
+      // Order-based only: the shift's cashCollected also includes rider/waiter hand-ins.
+      const effectiveCash = rawCash;
 
       const digitalCollected = uniqueOrders.filter((o) => !isOrderCash(o)).reduce((sum, o) => sum + (Number(o.total) || 0), 0);
       const totalCollected = effectiveCash + digitalCollected;

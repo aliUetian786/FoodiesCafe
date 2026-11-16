@@ -19,6 +19,7 @@ import { MenuPricesScreen } from '@/staff/MenuAndPrices';
 import { ReportsScreen } from '@/staff/ReportsAndReconciliation';
 import { AuditLogScreen } from '@/staff/AuditLogView';
 import { CustomersOrdersScreen } from '@/staff/CustomersAndOrders';
+import { AnnouncementsBoardScreen } from '@/staff/AnnouncementsBoard';
 import { Smartphone } from 'lucide-react';
 import { useHasMounted } from '@/lib/useHasMounted';
 import { AppBootSplash } from '@/components/common/AppBootSplash';
@@ -198,6 +199,8 @@ function StaffPortalMainPageInner() {
         return <ReportsScreen key={currentView} />;
       case 'mgmt-audit':
         return <AuditLogScreen key={currentView} />;
+      case 'mgmt-announcements':
+        return <AnnouncementsBoardScreen key={currentView} />;
       case 'mgmt-customers':
       case 'mgmt-customers-pending':
         return (

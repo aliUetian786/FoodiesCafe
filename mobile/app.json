@@ -26,6 +26,15 @@
       "favicon": "./assets/favicon.png",
       "bundler": "metro"
     },
+    "plugins": [
+      [
+        "expo-notifications",
+        {
+          "icon": "./assets/notification-icon.png",
+          "color": "#EA580C"
+        }
+      ]
+    ],
     "extra": {
       "apiUrl": "https://foodies-cafe-aliraza8.vercel.app",
       "customerWebUrl": "https://foodies-cafe-aliraza8.vercel.app/",

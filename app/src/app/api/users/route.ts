@@ -391,6 +391,46 @@ export async function PATCH(request: Request) {
       try { updatedUser.assignedTableNumbers = JSON.parse(updatedUser.assignedTableNumbers); } catch {}
     }
 
+    // A rider going busy/offline gives back every order the cashier assigned to them that
+    // they have NOT accepted yet. Those orders return to the cashier's "ready to dispatch"
+    // pool and can be assigned to another rider (or to this rider again once they are free).
+    // Accepted / on-trip orders stay with the rider.
+    let releasedOrders: Array<{ id: string; orderNumber: string; branchId: string }> = [];
+    if (
+      updatedUser?.role === 'delivery_staff' &&
+      (riderAvailability === 'busy' || riderAvailability === 'offline')
+    ) {
+      try {
+        const rel = await query(
+          `UPDATE orders
+              SET assigned_rider_id = NULL,
+                  assigned_rider_name = NULL,
+                  rider_status = NULL,
+                  version = COALESCE(version, 1) + 1,
+                  updated_at = CURRENT_TIMESTAMP
+            WHERE assigned_rider_id = $1
+              AND (rider_status IS NULL OR rider_status = 'assigned')
+              AND status NOT IN ('out_for_delivery', 'delivered', 'completed', 'cancelled')
+            RETURNING id, order_number as "orderNumber", branch_id as "branchId"`,
+          [targetId]
+        );
+        releasedOrders = rel.rows || [];
+        if (releasedOrders.length > 0) {
+          await cacheInvalidatePrefix('orders:').catch(() => {});
+          for (const o of releasedOrders) {
+            broadcastRealtimeEvent({
+              type: 'ORDER_UPDATED',
+              branchId: o.branchId,
+              orderId: o.id,
+              data: { riderReleased: true, riderId: targetId },
+            });
+          }
+        }
+      } catch (relErr) {
+        console.warn('[users PATCH] Could not release unaccepted rider orders:', relErr);
+      }
+    }
+
     if (role !== undefined || status !== undefined) {
       await writeAuditLog({
         actorId: auth.userId,
@@ -407,7 +447,7 @@ export async function PATCH(request: Request) {
       await cacheInvalidatePrefix('sync:payload');
       broadcastRealtimeEvent({ type: 'USER_UPDATED', branchId: updatedUser?.branchId, data: updatedUser });
     } catch {}
-    return NextResponse.json({ success: true, user: updatedUser });
+    return NextResponse.json({ success: true, user: updatedUser, releasedOrderIds: releasedOrders.map((o) => o.id) });
   } catch (error: any) {
     return NextResponse.json(
       { error: 'Failed to update user in PostgreSQL', details: error.message },

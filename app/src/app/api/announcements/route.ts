@@ -2,7 +2,8 @@ import { NextResponse } from 'next/server';
 import crypto from 'crypto';
 import { query } from '@/lib/db';
 import { cacheGet, cacheSet, cacheInvalidatePrefix } from '@/lib/redis';
-import { requireAuth, normalizeBranchId } from '@/lib/auth';
+import { requireAuth, normalizeBranchId, writeAuditLog } from '@/lib/auth';
+import { broadcastRealtimeEvent } from '@/lib/realtime';
 
 export async function GET(request: Request) {
   try {
@@ -98,6 +99,15 @@ export async function POST(request: Request) {
 
     const annId = id || `ann-${Date.now()}`;
 
+    // A manager may only create/edit announcements for their own branch.
+    if (auth.role === 'branch_manager' && id) {
+      const existing = await query(`SELECT branch_id FROM announcements WHERE id = $1`, [id]);
+      const existingBranch = existing.rows[0]?.branch_id ?? undefined;
+      if (existing.rows.length > 0 && normalizeBranchId(existingBranch || '') !== targetBranch) {
+        return NextResponse.json({ error: 'You can only edit announcements for your own branch' }, { status: 403 });
+      }
+    }
+
     const sql = `
       INSERT INTO announcements (id, title, tag, description, valid_until, branch_id, branch_name, discount_percent, badge_color)
       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
@@ -136,6 +146,17 @@ export async function POST(request: Request) {
       cacheInvalidatePrefix('catalog:'),
     ]);
 
+    await writeAuditLog({
+      actorId: auth.userId,
+      actorName: auth.userName || auth.role,
+      actorRole: auth.role,
+      branchId: targetBranch,
+      action: 'announcement_posted',
+      details: `Announcement "${String(title).slice(0, 80)}" posted${targetBranch ? ` for ${targetBranch}` : ' for all branches'}`,
+      newValue: String(description).slice(0, 500),
+    });
+    broadcastRealtimeEvent({ type: 'SYNC_TRIGGER', branchId: targetBranch || undefined, data: { scope: 'announcements' } });
+
     return NextResponse.json({
       success: true,
       announcement: res.rows[0],
@@ -167,11 +188,36 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: 'Announcement ID is required' }, { status: 400 });
     }
 
+    const existing = await query(`SELECT title, branch_id FROM announcements WHERE id = $1`, [id]);
+    const row = existing.rows[0];
+    if (auth.role === 'branch_manager' && row) {
+      const managerBranch = auth.branchId ? normalizeBranchId(auth.branchId) : 'gulberg-lahore';
+      if (!row.branch_id || normalizeBranchId(row.branch_id) !== managerBranch) {
+        return NextResponse.json(
+          { error: 'Only the owner can remove all-branch or other-branch announcements' },
+          { status: 403 }
+        );
+      }
+    }
+
     await query(`DELETE FROM announcements WHERE id = $1`, [id]);
     await Promise.all([
       cacheInvalidatePrefix('announcements:'),
       cacheInvalidatePrefix('catalog:'),
     ]);
+
+    if (row) {
+      await writeAuditLog({
+        actorId: auth.userId,
+        actorName: auth.userName || auth.role,
+        actorRole: auth.role,
+        branchId: row.branch_id || null,
+        action: 'announcement_deleted',
+        details: `Announcement "${String(row.title || id).slice(0, 80)}" removed`,
+        oldValue: String(row.title || ''),
+      });
+    }
+    broadcastRealtimeEvent({ type: 'SYNC_TRIGGER', branchId: row?.branch_id || undefined, data: { scope: 'announcements' } });
 
     return NextResponse.json({
       success: true,

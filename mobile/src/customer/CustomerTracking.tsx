@@ -29,6 +29,7 @@ import {
 import { CustomerLoginModal } from './CustomerLoginModal';
 import { OpenStreetMapView } from '../components/OpenStreetMapView';
 import { calculateHaversineKm, getOsmDirectionsUrl } from '../utils/openStreetMap';
+import { orderBelongsToCustomer } from '../utils/orderOwnership';
 
 const { height } = Dimensions.get('window');
 
@@ -110,13 +111,11 @@ export function CustomerTracking({ onBackToMenu, onViewHistory }: CustomerTracki
         return false;
       }
       // Strictly link to authenticated customer account
-      const matchesId = (customerUser?.id && o.customerId === customerUser.id) || (currentUser?.id && currentUser.id !== 'guest' && o.customerId === currentUser.id);
-      const matchesPhone = cleanPhone && normalizePhone(o.customerPhone) === cleanPhone;
-      const matchesEmail = (customerUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === customerUser.email.toLowerCase()) ||
-        (currentUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === currentUser.email.toLowerCase());
-      const matchesName = (customerUser?.name && o.customerName === customerUser.name) ||
-        (currentUser?.name && currentUser.name !== 'Guest Customer' && o.customerName === currentUser.name);
-      return matchesId || matchesPhone || matchesEmail || matchesName;
+      return orderBelongsToCustomer(o, {
+        ids: [customerUser?.id, currentUser?.id],
+        emails: [customerUser?.email, currentUser?.email],
+        phone: cleanPhone,
+      });
     });
 
     return filtered.sort((a, b) => parseOrderTimeMs(b.createdAt) - parseOrderTimeMs(a.createdAt));
@@ -126,13 +125,11 @@ export function CustomerTracking({ onBackToMenu, onViewHistory }: CustomerTracki
     return orders
       .filter((o) => {
         if (o.status !== 'cancelled') return false;
-        const matchesId = (customerUser?.id && o.customerId === customerUser.id) || (currentUser?.id && currentUser.id !== 'guest' && o.customerId === currentUser.id);
-        const matchesPhone = cleanPhone && normalizePhone(o.customerPhone) === cleanPhone;
-        const matchesEmail = (customerUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === customerUser.email.toLowerCase()) ||
-          (currentUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === currentUser.email.toLowerCase());
-        const matchesName = (customerUser?.name && o.customerName === customerUser.name) ||
-          (currentUser?.name && currentUser.name !== 'Guest Customer' && o.customerName === currentUser.name);
-        return matchesId || matchesPhone || matchesEmail || matchesName;
+        return orderBelongsToCustomer(o, {
+          ids: [customerUser?.id, currentUser?.id],
+          emails: [customerUser?.email, currentUser?.email],
+          phone: cleanPhone,
+        });
       })
       .sort((a, b) => parseOrderTimeMs(b.createdAt) - parseOrderTimeMs(a.createdAt));
   }, [orders, currentUser, customerUser, isCustomerLoggedIn, cleanPhone]);

@@ -441,8 +441,8 @@ interface AppContextType {
 
   // Announcements & Real Info
   announcements: Announcement[];
-  addAnnouncement: (a: Omit<Announcement, 'id'>) => Promise<void>;
-  deleteAnnouncement: (id: string) => Promise<void>;
+  addAnnouncement: (a: Omit<Announcement, 'id'>) => Promise<boolean>;
+  deleteAnnouncement: (id: string) => Promise<boolean>;
 
   // Live Notifications (Web + Mobile)
   notifications: AppNotification[];
@@ -6453,7 +6453,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
-  const addAnnouncement = async (a: Omit<Announcement, 'id'>) => {
+  const addAnnouncement = async (a: Omit<Announcement, 'id'>): Promise<boolean> => {
     const newA: Announcement = {
       ...a,
       id: `ann-${Date.now()}`,
@@ -6461,39 +6461,48 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     };
     setAnnouncements((prev) => [newA, ...prev.filter((item) => item.id !== newA.id)]);
     store.dispatch(addReduxAnnouncement(newA));
-    addToast({
-      type: 'success',
-      title: 'Announcement Posted',
-      message: 'New announcement / info has been published.',
-    });
     try {
-      await fetch('/api/announcements', {
+      const res = await appFetch('/api/announcements', {
         method: 'POST',
-        headers: getClientAuthHeaders(),
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newA),
       });
-      broadcastStateMutation('SYNC_ANNOUNCEMENTS', [newA]);
-    } catch (err) {
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
+      const saved: Announcement = { ...newA, ...(data?.announcement || {}) };
+      setAnnouncements((prev) => [saved, ...prev.filter((item) => item.id !== saved.id)]);
+      store.dispatch(addReduxAnnouncement(saved));
+      broadcastStateMutation('SYNC_ANNOUNCEMENTS', [saved]);
+      addToast({ type: 'success', title: 'Announcement Posted', message: `"${saved.title}" is now live.` });
+      return true;
+    } catch (err: any) {
       console.error('Failed to post announcement:', err);
+      setAnnouncements((prev) => prev.filter((item) => item.id !== newA.id));
+      store.dispatch(deleteReduxAnnouncement(newA.id));
+      addToast({ type: 'error', title: 'Announcement Not Posted', message: err?.message || 'Could not save the announcement.' });
+      return false;
     }
   };
 
-  const deleteAnnouncement = async (id: string) => {
+  const deleteAnnouncement = async (id: string): Promise<boolean> => {
+    const removed = announcements.find((a) => a.id === id);
     setAnnouncements((prev) => prev.filter((a) => a.id !== id));
     store.dispatch(deleteReduxAnnouncement(id));
-    addToast({
-      type: 'info',
-      title: 'Announcement Removed',
-      message: 'Announcement has been deleted.',
-    });
     try {
-      await fetch(`/api/announcements?id=${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-        headers: getClientAuthHeaders(),
-      });
+      const res = await appFetch(`/api/announcements?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const data = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(data?.error || `HTTP ${res.status}`);
       broadcastStateMutation('SYNC_ANNOUNCEMENTS', { deletedId: id });
-    } catch (err) {
+      addToast({ type: 'info', title: 'Announcement Removed', message: 'Announcement has been deleted.' });
+      return true;
+    } catch (err: any) {
       console.error('Failed to delete announcement:', err);
+      if (removed) {
+        setAnnouncements((prev) => [removed, ...prev.filter((a) => a.id !== id)]);
+        store.dispatch(addReduxAnnouncement(removed));
+      }
+      addToast({ type: 'error', title: 'Not Removed', message: err?.message || 'Could not delete the announcement.' });
+      return false;
     }
   };
 
@@ -6795,7 +6804,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         const desktopNotif = new Notification(notif.title, {
           body: notif.message,
           tag: notif.id,
-          icon: '/favicon.ico',
+          icon: '/notification-icon.png',
+          badge: '/notification-badge.png',
         });
         desktopNotif.onclick = () => {
           window.focus();

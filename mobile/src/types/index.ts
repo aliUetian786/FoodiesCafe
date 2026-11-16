@@ -196,6 +196,7 @@ export interface Announcement {
   branchName?: string;
   discountPercent?: number;
   badgeColor?: string;
+  createdAt?: string;
 }
 
 export interface CartItem extends OrderItem {}

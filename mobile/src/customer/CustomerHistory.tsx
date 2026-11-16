@@ -6,6 +6,7 @@ import { Order, getCancellationAttribution } from '../types';
 import { Receipt, RotateCcw, X, Printer, Calendar, Clock, MapPin, RefreshCw, ShoppingBag } from 'lucide-react-native';
 import { HistoricalLoadingModal } from '../components/HistoricalLoadingModal';
 import { CustomerLoginModal } from './CustomerLoginModal';
+import { orderBelongsToCustomer } from '../utils/orderOwnership';
 
 interface CustomerHistoryProps {
   onReorder: () => void;
@@ -71,15 +72,13 @@ export function CustomerHistory({ onReorder, onViewTracking }: CustomerHistoryPr
       return [];
     }
 
-    return orders.filter((o) => {
-      const matchesId = (customerUser?.id && o.customerId === customerUser.id) || (currentUser?.id && currentUser.id !== 'guest' && o.customerId === currentUser.id);
-      const matchesPhone = cleanPhone && normalizePhone(o.customerPhone) === cleanPhone;
-      const matchesEmail = (customerUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === customerUser.email.toLowerCase()) ||
-                           (currentUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === currentUser.email.toLowerCase());
-      const matchesName = (customerUser?.name && o.customerName === customerUser.name) ||
-                          (currentUser?.name && currentUser.name !== 'Guest Customer' && o.customerName === currentUser.name);
-      return matchesId || matchesPhone || matchesEmail || matchesName;
-    });
+    return orders.filter((o) =>
+      orderBelongsToCustomer(o, {
+        ids: [customerUser?.id, currentUser?.id],
+        emails: [customerUser?.email, currentUser?.email],
+        phone: cleanPhone,
+      })
+    );
   }, [orders, currentUser, customerUser, isCustomerLoggedIn, cleanPhone]);
 
   // Exclude in-tracking orders: only completed, delivered, served, taken, or cancelled appear in history

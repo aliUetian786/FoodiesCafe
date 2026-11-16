@@ -95,6 +95,16 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
     addToast,
   } = useApp();
 
+  // Text announcements for the selected branch (plus all-branch ones), newest first.
+  const visibleAnnouncements = useMemo(
+    () =>
+      (announcements || [])
+        .filter((a) => !a.branchId || a.branchId === currentBranchId)
+        .sort((a, b) => (new Date(b.createdAt || 0).getTime() || 0) - (new Date(a.createdAt || 0).getTime() || 0))
+        .slice(0, 6),
+    [announcements, currentBranchId]
+  );
+
   // Deal & Banner Photos synced with Browser Local Storage
   const [localDealPhotos, setLocalDealPhotos] = useState<string[]>(() => {
     const defaults = ['/food-biryani.jpg', '/hero-bg.jpg'];
@@ -251,6 +261,52 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
           ))}
         </div>
       </div>
+
+      {/* ================= 2. TEXT ANNOUNCEMENTS (posted by owner / branch manager) ================= */}
+      {visibleAnnouncements.length > 0 && (
+        <div>
+          <h3 style={{ margin: '0 0 10px', fontSize: isDesktop ? '20px' : '17px', fontWeight: 800, color: 'var(--text-main)' }}>
+            Announcements
+          </h3>
+          <div
+            style={{
+              display: 'grid',
+              gridTemplateColumns: isDesktop ? 'repeat(auto-fill, minmax(280px, 1fr))' : '1fr',
+              gap: '12px',
+            }}
+          >
+            {visibleAnnouncements.map((a) => {
+              const color = a.badgeColor || '#EF4444';
+              return (
+                <div
+                  key={a.id}
+                  style={{
+                    backgroundColor: '#FFFFFF',
+                    border: '1px solid var(--border-color)',
+                    borderLeft: `4px solid ${color}`,
+                    borderRadius: '14px',
+                    padding: '12px 14px',
+                    boxShadow: '0 2px 8px rgba(0,0,0,0.04)',
+                  }}
+                >
+                  <span style={{ fontSize: '10.5px', fontWeight: 800, letterSpacing: '0.04em', color, backgroundColor: `${color}14`, padding: '2px 8px', borderRadius: '999px' }}>
+                    {(a.tag || 'ANNOUNCEMENT').toUpperCase()}
+                  </span>
+                  <div style={{ marginTop: '8px', fontSize: '15px', fontWeight: 800, color: 'var(--text-main)', wordBreak: 'break-word' }}>{a.title}</div>
+                  <div style={{ marginTop: '4px', fontSize: '13.5px', color: 'var(--text-secondary)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                    {a.description}
+                  </div>
+                  {(a.validUntil || a.branchName) && (
+                    <div style={{ marginTop: '6px', fontSize: '12px', color: '#64748B' }}>
+                      {[a.branchName, a.validUntil].filter(Boolean).join(' · ')}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {/* ================= 3. FEATURED SIGNATURE DISHES (SIGNATURE SPECIALS) ================= */}
       <div>

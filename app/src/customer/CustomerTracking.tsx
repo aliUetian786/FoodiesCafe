@@ -25,6 +25,7 @@ import { CustomerLoginModal } from './CustomerLoginModal';
 import { OpenStreetMapView } from '@/components/common/OpenStreetMapView';
 import { calculateHaversineKm, getOsmDirectionsUrl } from '@/utils/openStreetMap';
 import { resolveDishImage } from '@/lib/dishImages';
+import { orderBelongsToCustomer } from '@/lib/orderOwnership';
 
 interface OrderTrackingScreenProps {
   onNavigate: (view: string) => void;
@@ -116,19 +117,14 @@ export const OrderTrackingScreen: React.FC<OrderTrackingScreenProps> = ({ onNavi
       }
     });
 
-    return pool.filter((o) => {
-      // 1. Customer ID match
-      if (currentUser?.id && currentUser.id !== 'user-guest' && o.customerId === currentUser.id) return true;
-      // 2. Email match
-      if (currentUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === currentUser.email.toLowerCase()) return true;
-      // 3. Customer name match if authenticated
-      if (currentUser?.name && currentUser.name !== 'Guest Customer' && o.customerName === currentUser.name) return true;
-      // 4. Phone match
-      if (cleanPhone && normalizePhone(o.customerPhone) === cleanPhone) return true;
-      // 5. Placed on this device/browser
-      if (localPlacedIds.includes(o.id) || localPlacedIds.includes(o.orderNumber)) return true;
-      return false;
-    });
+    return pool.filter((o) =>
+      orderBelongsToCustomer(o, {
+        ids: [currentUser?.id],
+        emails: [currentUser?.email],
+        phone: currentUser?.phone,
+        devicePlacedIds: localPlacedIds,
+      })
+    );
   }, [orders, cleanPhone, currentUser, isCustomerLoggedIn]);
 
   // All active in-progress orders remain in tracking until confirmed received/completed

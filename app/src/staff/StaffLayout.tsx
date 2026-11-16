@@ -358,6 +358,7 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
         { id: 'mgmt-reports', label: 'Financial & Cash Reports', icon: FileSpreadsheet },
         { id: 'mgmt-audit', label: 'Audit Log', icon: FileClock },
         { id: 'mgmt-customers', label: 'Customer Orders', icon: ShoppingBag },
+        { id: 'mgmt-announcements', label: 'Announcements', icon: Megaphone },
       ];
     }
 
@@ -402,6 +403,12 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
           label: 'Orders',
           icon: ShoppingBag,
           canEdit: false,
+        },
+        {
+          id: 'mgmt-announcements',
+          label: 'Announcements',
+          icon: Megaphone,
+          canEdit: true,
         },
       ];
     }

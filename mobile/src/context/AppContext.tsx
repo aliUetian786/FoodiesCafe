@@ -142,8 +142,8 @@ interface AppContextType {
 
   // Announcements
   announcements: Announcement[];
-  addAnnouncement: (a: Omit<Announcement, 'id'>) => void;
-  deleteAnnouncement: (id: string) => void;
+  addAnnouncement: (a: Omit<Announcement, 'id'>) => Promise<boolean>;
+  deleteAnnouncement: (id: string) => Promise<boolean>;
 
   // Live Notifications (Web & Mobile Parity)
   notifications: AppNotification[];
@@ -375,6 +375,21 @@ function mergeNotificationSettings(
 }
 
 const AppContext = createContext<AppContextType | null>(null);
+
+// A newer server version with no rider means the order was really unassigned (cashier
+// unassign, or the rider went busy before accepting). Without this check the
+// `inc || existing` merge kept the old rider forever. Mirror of web ordersSlice.
+const riderClearedOnServer = (
+  existing: { assignedRiderId?: string; version?: number } | undefined,
+  inc: { assignedRiderId?: string; version?: number },
+  finished: boolean,
+  inFlight?: { riderStatus?: string } | null
+): boolean =>
+  !finished &&
+  !inFlight?.riderStatus &&
+  !inc.assignedRiderId &&
+  Boolean(existing?.assignedRiderId) &&
+  (Number(inc.version) || 0) > (Number(existing?.version) || 0);
 
 export function AppProvider({ children }: { children: React.ReactNode }) {
   const [role, setRoleState] = useState<MobileRole>('customer');
@@ -868,11 +883,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   preparationStartedAt: inc.preparationStartedAt || existing.preparationStartedAt,
                   completedAt: isOrderFinished ? (inc.completedAt || existing.completedAt || new Date().toISOString()) : (inc.completedAt || existing.completedAt),
                   deliveredAt: isOrderFinished ? (inc.deliveredAt || existing.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
-                  assignedRiderId: inc.assignedRiderId || existing.assignedRiderId,
-                  assignedRiderName: inc.assignedRiderName || existing.assignedRiderName,
+                  assignedRiderId: riderClearedOnServer(existing, inc, isOrderFinished, inFlight) ? undefined : (inc.assignedRiderId || existing.assignedRiderId),
+                  assignedRiderName: riderClearedOnServer(existing, inc, isOrderFinished, inFlight) ? undefined : (inc.assignedRiderName || existing.assignedRiderName),
                   assignedWaiterId: inc.assignedWaiterId || existing.assignedWaiterId,
                   assignedWaiterName: inc.assignedWaiterName || existing.assignedWaiterName,
-                  riderStatus: (isOrderFinished && (inc.type === 'delivery' || existing.type === 'delivery')) ? 'delivered' : (inFlight?.riderStatus || inc.riderStatus || existing.riderStatus),
+                  riderStatus: (isOrderFinished && (inc.type === 'delivery' || existing.type === 'delivery')) ? 'delivered' : riderClearedOnServer(existing, inc, isOrderFinished, inFlight) ? undefined : (inFlight?.riderStatus || inc.riderStatus || existing.riderStatus),
                 });
               } else {
                 map.set(inc.id, isOrderFinished ? {
@@ -1028,11 +1043,11 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                     preparationStartedAt: inc.preparationStartedAt || existing.preparationStartedAt,
                     completedAt: isTerminalSettled ? (inc.completedAt || existing.completedAt || new Date().toISOString()) : (inc.completedAt || existing.completedAt),
                     deliveredAt: isTerminalSettled ? (inc.deliveredAt || existing.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
-                    assignedRiderId: inc.assignedRiderId || existing.assignedRiderId,
-                    assignedRiderName: inc.assignedRiderName || existing.assignedRiderName,
+                    assignedRiderId: riderClearedOnServer(existing, inc, isTerminalSettled, inFlight) ? undefined : (inc.assignedRiderId || existing.assignedRiderId),
+                    assignedRiderName: riderClearedOnServer(existing, inc, isTerminalSettled, inFlight) ? undefined : (inc.assignedRiderName || existing.assignedRiderName),
                     assignedWaiterId: inc.assignedWaiterId || existing.assignedWaiterId,
                     assignedWaiterName: inc.assignedWaiterName || existing.assignedWaiterName,
-                    riderStatus: (isTerminalSettled && (inc.type === 'delivery' || existing?.type === 'delivery')) ? 'delivered' : (inFlight?.riderStatus || inc.riderStatus || existing.riderStatus),
+                    riderStatus: (isTerminalSettled && (inc.type === 'delivery' || existing?.type === 'delivery')) ? 'delivered' : riderClearedOnServer(existing, inc, isTerminalSettled, inFlight) ? undefined : (inFlight?.riderStatus || inc.riderStatus || existing.riderStatus),
                   });
                 } else {
                   map.set(inc.id, isTerminalSettled ? {
@@ -1385,27 +1400,40 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setFlyingItem(null);
   };
 
-  const addAnnouncement = async (a: Omit<Announcement, 'id'>) => {
-    const newA: Announcement = { ...a, id: `ann-${Date.now()}` };
+  const addAnnouncement = async (a: Omit<Announcement, 'id'>): Promise<boolean> => {
+    const newA: Announcement = { ...a, id: `ann-${Date.now()}`, createdAt: new Date().toISOString() };
     setAnnouncements((prev) => [newA, ...prev.filter((item) => item.id !== newA.id)]);
-    showToast('Announcement posted successfully!', 'success');
     try {
-      await apiFetch('/api/announcements', {
+      const res = await apiFetch('/api/announcements', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(newA),
       });
-    } catch (_err) { }
+      if (!res.ok) throw new Error(res.error || 'Could not post the announcement');
+      const saved: Announcement = { ...newA, ...(res.data?.announcement || {}) };
+      setAnnouncements((prev) => [saved, ...prev.filter((item) => item.id !== saved.id)]);
+      showToast('Announcement posted', 'success');
+      return true;
+    } catch (err: any) {
+      setAnnouncements((prev) => prev.filter((item) => item.id !== newA.id));
+      showToast(err?.message || 'Could not post the announcement', 'danger');
+      return false;
+    }
   };
 
-  const deleteAnnouncement = async (id: string) => {
-    setAnnouncements((prev) => prev.filter((a) => a.id !== id));
-    showToast('Announcement removed', 'info');
+  const deleteAnnouncement = async (id: string): Promise<boolean> => {
+    const removed = announcements.find((x) => x.id === id);
+    setAnnouncements((prev) => prev.filter((x) => x.id !== id));
     try {
-      await apiFetch(`/api/announcements?id=${encodeURIComponent(id)}`, {
-        method: 'DELETE',
-      });
-    } catch (_err) { }
+      const res = await apiFetch(`/api/announcements?id=${encodeURIComponent(id)}`, { method: 'DELETE' });
+      if (!res.ok) throw new Error(res.error || 'Could not remove the announcement');
+      showToast('Announcement removed', 'info');
+      return true;
+    } catch (err: any) {
+      if (removed) setAnnouncements((prev) => [removed, ...prev.filter((x) => x.id !== id)]);
+      showToast(err?.message || 'Could not remove the announcement', 'danger');
+      return false;
+    }
   };
 
   const setRole = (newRole: MobileRole) => {
@@ -4109,13 +4137,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     riderAvailabilityChangedAtRef.current = Date.now();
     setRiderAvailability(status);
 
-    setUsers((prev) =>
-      prev.map((u) =>
-        u.id === targetId || (u.role === 'delivery_staff' && !riderId)
-          ? { ...u, riderAvailability: status }
-          : u
-      )
-    );
+    // Only this rider's record (previously every rider was flipped when riderId was omitted).
+    setUsers((prev) => prev.map((u) => (u.id === targetId ? { ...u, riderAvailability: status } : u)));
+
+    // Busy/offline gives back every order assigned to this rider that they have NOT accepted.
+    // The server does the same (users PATCH), so the cashier sees it as ready to dispatch
+    // again and can assign it to another rider, or to this rider once they are free.
+    if (targetId && (status === 'busy' || status === 'offline')) {
+      setOrders((prev) => {
+        let changed = false;
+        const next = prev.map((o) => {
+          const unaccepted = !o.riderStatus || o.riderStatus === 'assigned';
+          const active = !['out_for_delivery', 'delivered', 'completed', 'cancelled'].includes(o.status);
+          if (o.assignedRiderId === targetId && unaccepted && active) {
+            changed = true;
+            return { ...o, assignedRiderId: undefined, assignedRiderName: undefined, riderStatus: undefined };
+          }
+          return o;
+        });
+        if (!changed) return prev;
+        AsyncStorage.setItem('@foodies_orders_permanent_store', JSON.stringify(next)).catch(() => { });
+        return next;
+      });
+    }
 
     if (staffUser && staffUser.role === 'delivery_staff') {
       const updatedStaff: MobileUser = { ...staffUser, riderAvailability: status };
@@ -4147,7 +4191,10 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         o.status !== 'completed' &&
         o.status !== 'delivered' &&
         o.status !== 'cancelled' &&
-        (!targetId || !o.assignedRiderId || o.assignedRiderId === targetId)
+        Boolean(targetId) &&
+        o.assignedRiderId === targetId &&
+        Boolean(o.riderStatus) &&
+        o.riderStatus !== 'assigned'
     );
 
     if (activeAssigned.length === 0) {

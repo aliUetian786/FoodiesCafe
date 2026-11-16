@@ -143,6 +143,15 @@ export function mergeSingleOrderMonotonically(existing: Order | undefined, inc: 
 
   const resolvedSentToKitchen = Boolean(existing.sentToKitchen || inc.sentToKitchen);
 
+  // A newer server version with no rider means the rider was really unassigned (cashier
+  // unassign, or the rider went busy before accepting). Without this, the
+  // `inc || existing` fallback below kept showing the old rider until a reload.
+  const serverClearedRider =
+    !isOrderFinished &&
+    !inc.assignedRiderId &&
+    Boolean(existing.assignedRiderId) &&
+    (Number(inc.version) || 0) > (Number(existing.version) || 0);
+
   return {
     ...existing,
     ...inc,
@@ -169,9 +178,13 @@ export function mergeSingleOrderMonotonically(existing: Order | undefined, inc: 
     deliveredAt: isOrderFinished
       ? inc.deliveredAt || existing.deliveredAt || new Date().toISOString()
       : inc.deliveredAt || existing.deliveredAt,
-    assignedRiderId: inc.assignedRiderId || existing.assignedRiderId,
-    assignedRiderName: inc.assignedRiderName || existing.assignedRiderName,
-    riderStatus: isOrderFinished && orderType === 'delivery' ? 'delivered' : resolvedRiderStatus,
+    assignedRiderId: serverClearedRider ? undefined : inc.assignedRiderId || existing.assignedRiderId,
+    assignedRiderName: serverClearedRider ? undefined : inc.assignedRiderName || existing.assignedRiderName,
+    riderStatus: isOrderFinished && orderType === 'delivery'
+      ? 'delivered'
+      : serverClearedRider
+        ? undefined
+        : resolvedRiderStatus,
   } as Order;
 }
 

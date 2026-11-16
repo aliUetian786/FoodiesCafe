@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { useApp } from '@/context/AppContext';
 import { getCancellationAttribution } from '@/types/cafe';
+import { orderBelongsToCustomer } from '@/lib/orderOwnership';
 import {
   Bell,
   Clock,
@@ -60,13 +61,9 @@ export const ProfileScreen: React.FC<{ onNavigate: (v: string) => void }> = ({ o
       } catch (e) {}
     }
 
-    return pool.filter((o) => {
-      if (currentUser?.id && currentUser.id !== 'user-guest' && o.customerId === currentUser.id) return true;
-      if (currentUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === currentUser.email.toLowerCase()) return true;
-      if (currentUser?.name && currentUser.name !== 'Guest Customer' && o.customerName === currentUser.name) return true;
-      if (cleanPhone && o.customerPhone && o.customerPhone.replace(/\D/g, '').slice(-10) === cleanPhone) return true;
-      return false;
-    }).slice(0, 5);
+    return pool.filter((o) =>
+      orderBelongsToCustomer(o, { ids: [currentUser?.id], emails: [currentUser?.email], phone: cleanPhone })
+    ).slice(0, 5);
   }, [orders, currentUser, cleanPhone]);
 
   // Real Customer Receiver Notification Settings State

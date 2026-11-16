@@ -199,13 +199,16 @@ export function ManagerDashboard({
         );
         const shiftIds = cashierShifts.map((s: any) => s.id);
 
+        // Cashier card = takeaway money only. Delivery cash belongs to the rider card and
+        // dine-in cash to the waiter card; counting them here double-counted collections.
         matchedOrders = bPaidOrdersToday.filter((o: any) => {
+          if (o.type !== 'takeaway') return false;
           if (o.cashierId === user.id) return true;
           if ((o as any).staffId === user.id) return true;
           if (o.shiftId && shiftIds.includes(o.shiftId)) return true;
           if (user.name && o.cashierName && o.cashierName.toLowerCase().includes(user.name.toLowerCase())) return true;
           if (!o.cashierId && !o.shiftId && bCashiers[0]?.id === user.id) {
-            return o.isWalkIn || o.type === 'takeaway' || (!o.assignedRiderId && !o.assignedWaiterId);
+            return true;
           }
           return false;
         });
@@ -229,12 +232,8 @@ export function ManagerDashboard({
       const uniqueOrders = Array.from(new Map(matchedOrders.map((o) => [o.id, o])).values());
       const rawCash = uniqueOrders.filter(isOrderCash).reduce((sum, o) => sum + (Number(o.total) || 0), 0);
 
-      let effectiveCash = rawCash;
-      if (roleCategory === 'cashier') {
-        const userShifts = (shifts || []).filter((s: any) => s.cashierId === user.id);
-        const shiftCashTotal = userShifts.reduce((sum: number, s: any) => sum + (Number(s.cashCollected) || 0), 0);
-        effectiveCash = Math.max(rawCash, shiftCashTotal);
-      }
+      // Order-based only: the shift's cashCollected also includes rider/waiter hand-ins.
+      const effectiveCash = rawCash;
 
       const digitalCollected = uniqueOrders.filter((o) => !isOrderCash(o)).reduce((sum, o) => sum + (Number(o.total) || 0), 0);
       const totalCollected = effectiveCash + digitalCollected;

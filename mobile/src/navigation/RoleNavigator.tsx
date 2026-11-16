@@ -19,6 +19,7 @@ import {
   ChefHat,
   Users,
   Banknote,
+  Megaphone,
 } from 'lucide-react-native';
 
 import { CustomerHome } from '../customer/CustomerHome';
@@ -38,6 +39,7 @@ import { OwnerDashboard } from '../owner/OwnerDashboard';
 import { OwnerBranches } from '../owner/OwnerBranches';
 import { OwnerMenu } from '../owner/OwnerMenu';
 import { OwnerAudit } from '../owner/OwnerAudit';
+import { AnnouncementsBoard } from '../components/AnnouncementsBoard';
 import { OwnerOrdersHistory } from '../owner/OwnerOrdersHistory';
 
 import { FloorTablesGrid } from '../floor/FloorTablesGrid';
@@ -79,9 +81,9 @@ export function RoleNavigator({
   } = useApp();
 
   const [customerTab, setCustomerTab] = useState<'home' | 'menu' | 'tracking' | 'history' | 'profile'>('home');
-  const [ownerTab, setOwnerTab] = useState<'dashboard' | 'branches' | 'menu' | 'staff' | 'audit' | 'orders'>('dashboard');
+  const [ownerTab, setOwnerTab] = useState<'dashboard' | 'branches' | 'menu' | 'staff' | 'audit' | 'orders' | 'announcements'>('dashboard');
   const [ownerOrdersFilter, setOwnerOrdersFilter] = useState<'all' | 'pending'>('all');
-  const [managerTab, setManagerTab] = useState<'dashboard' | 'kitchen' | 'orders' | 'staff' | 'financials' | 'tables' | 'menu'>('dashboard');
+  const [managerTab, setManagerTab] = useState<'dashboard' | 'kitchen' | 'orders' | 'staff' | 'financials' | 'tables' | 'menu' | 'announcements'>('dashboard');
   const [cashierTab, setCashierTab] = useState<'financials' | 'orders' | 'walkin' | 'menu'>('financials');
   const [floorTab, setFloorTab] = useState<'waiter' | 'tables' | 'orders' | 'walkin'>('waiter');
   const [riderTab, setRiderTab] = useState<'console' | 'history'>('console');
@@ -264,6 +266,7 @@ export function RoleNavigator({
     { id: 'menu', label: 'Menu & Prices', icon: Utensils },
     { id: 'staff', label: 'Staff Team', icon: Users },
     { id: 'audit', label: 'Audit Log', icon: FileClock },
+    { id: 'announcements', label: 'Announcements', icon: Megaphone },
   ];
 
   // Manager Navigation Tabs
@@ -273,6 +276,7 @@ export function RoleNavigator({
     { id: 'staff', label: 'Staff Team', icon: Users },
     { id: 'financials', label: 'Cash Desk', icon: Banknote },
     { id: 'menu', label: 'Menu Stock', icon: ListOrdered },
+    { id: 'announcements', label: 'Announcements', icon: Megaphone },
   ];
 
   // Cashier Navigation Tabs
@@ -365,6 +369,7 @@ export function RoleNavigator({
                 {ownerTab === 'menu' && <OwnerMenu />}
                 {ownerTab === 'staff' && <ManagerStaffManagement allowAllBranches={true} />}
                 {ownerTab === 'audit' && <OwnerAudit />}
+                {ownerTab === 'announcements' && <AnnouncementsBoard />}
                 {ownerTab === 'orders' && (
                   <OwnerOrdersHistory
                     onBack={() => setOwnerTab('dashboard')}
@@ -400,6 +405,7 @@ export function RoleNavigator({
                   />
                 )}
                 {managerTab === 'menu' && <OwnerMenu />}
+                {managerTab === 'announcements' && <AnnouncementsBoard />}
               </>
             )}
 

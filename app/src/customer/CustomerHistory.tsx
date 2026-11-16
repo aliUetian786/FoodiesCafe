@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { HistoricalLoadingModal } from '@/components/common/HistoricalLoadingModal';
 import { CustomerLoginModal } from './CustomerLoginModal';
+import { orderBelongsToCustomer } from '@/lib/orderOwnership';
 
 interface CustomerHistoryProps {
   onNavigate: (view: string) => void;
@@ -103,19 +104,14 @@ export const OrderHistoryScreen: React.FC<CustomerHistoryProps> = ({ onNavigate 
       }
     });
 
-    return pool.filter((o) => {
-      // 1. Customer ID match
-      if (currentUser?.id && currentUser.id !== 'user-guest' && o.customerId === currentUser.id) return true;
-      // 2. Email match
-      if (currentUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === currentUser.email.toLowerCase()) return true;
-      // 3. Customer name match if authenticated
-      if (currentUser?.name && currentUser.name !== 'Guest Customer' && o.customerName === currentUser.name) return true;
-      // 4. Phone match
-      if (userPhoneClean && normalizePhone(o.customerPhone) === userPhoneClean) return true;
-      // 5. Placed on this device/browser
-      if (localPlacedIds.includes(o.id) || localPlacedIds.includes(o.orderNumber)) return true;
-      return false;
-    });
+    return pool.filter((o) =>
+      orderBelongsToCustomer(o, {
+        ids: [currentUser?.id],
+        emails: [currentUser?.email],
+        phone: currentUser?.phone,
+        devicePlacedIds: localPlacedIds,
+      })
+    );
   }, [orders, userPhoneClean, currentUser, isCustomerLoggedIn]);
 
   // Exclude in-tracking and unpaid orders: strictly only paid orders appear in history

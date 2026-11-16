@@ -120,11 +120,9 @@ export function RiderConsole({ onNavigateToHistory }: RiderConsoleProps = {}) {
     return orders.filter((o) => {
       if (o.type !== 'delivery') return false;
       if (o.status === 'delivered' || o.status === 'completed' || o.status === 'cancelled') return false;
-      // When an order is assigned to a rider, it must strictly display ONLY to that specific rider
-      if (o.assignedRiderId) {
-        return o.assignedRiderId === currentUser?.id;
-      }
-      return true;
+      // A rider only sees orders the cashier assigned to them (no unassigned pool).
+      // If they go busy before accepting, the order is released back to the cashier.
+      return Boolean(currentUser?.id) && o.assignedRiderId === currentUser?.id;
     });
   }, [orders, currentUser?.id]);
 

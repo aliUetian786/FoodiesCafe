@@ -1102,6 +1102,34 @@ export async function PATCH(request: Request) {
             currentOrder: formatOrderRow(currentOrder),
           };
         }
+
+        // A rider who marked themselves busy/offline cannot receive a NEW assignment
+        // (they become assignable again once they mark themselves free).
+        // Pure assignments get a 409; for a combined write (e.g. a self-heal that also
+        // carries status/payment) only the rider change is dropped.
+        const isSelfAccept = riderStatus === 'accepted' && effectiveActorRole === 'delivery_staff';
+        if (nextRiderId && nextRiderId !== currentRiderId && !isSelfAccept) {
+          const riderRes = await client.query(
+            `SELECT name, rider_availability FROM users WHERE id = $1`,
+            [nextRiderId]
+          );
+          const availability = String(riderRes.rows[0]?.rider_availability || 'available');
+          if (availability === 'busy' || availability === 'offline') {
+            const riderLabel = String(riderRes.rows[0]?.name || assignedRiderName || 'This rider');
+            const isPureAssignment =
+              status === undefined && paymentStatus === undefined && paymentCollected === undefined;
+            if (isPureAssignment) {
+              return {
+                status: 409,
+                error: `${riderLabel} is ${availability === 'busy' ? 'busy' : 'offline'} and cannot be assigned new orders right now.`,
+                currentOrder: formatOrderRow(currentOrder),
+              };
+            }
+            effectiveAssignedRiderId = undefined;
+            effectiveAssignedRiderName = undefined;
+            if (effectiveRiderStatus === 'assigned') effectiveRiderStatus = undefined;
+          }
+        }
       }
 
       // 4. Server State Machine Validation for Status Transitions

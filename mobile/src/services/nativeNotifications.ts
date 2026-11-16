@@ -115,7 +115,8 @@ export async function presentNativeNotification(
         const webNotif = new Notification(notif.title, {
           body: notif.message,
           tag: notif.id,
-          icon: '/favicon.ico',
+          icon: '/notification-icon.png',
+          badge: '/notification-badge.png',
         });
         activeWebNotifications.set(notif.id, webNotif);
       } catch {}

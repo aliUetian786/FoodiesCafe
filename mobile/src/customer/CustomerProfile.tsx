@@ -15,6 +15,7 @@ import { User, Phone, Mail, Pencil, X, Shield, LogOut, Check, LogIn, Plus, Trash
 import { CustomerLoginModal } from './CustomerLoginModal';
 import { DeliveryMapModal } from '../components/DeliveryMapModal';
 import { getCancellationAttribution } from '../types';
+import { orderBelongsToCustomer } from '../utils/orderOwnership';
 
 export function CustomerProfile() {
   const {
@@ -56,13 +57,11 @@ export function CustomerProfile() {
   const customerRecentOrders = useMemo(() => {
     return orders
       .filter((o) => {
-        const matchesId = (customerUser?.id && o.customerId === customerUser.id) || (currentUser?.id && currentUser.id !== 'guest' && o.customerId === currentUser.id);
-        const matchesPhone = cleanPhone && o.customerPhone && o.customerPhone.replace(/\D/g, '').slice(-10) === cleanPhone;
-        const matchesEmail = (customerUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === customerUser.email.toLowerCase()) ||
-                             (currentUser?.email && o.customerEmail && o.customerEmail.toLowerCase() === currentUser.email.toLowerCase());
-        const matchesName = (customerUser?.name && o.customerName === customerUser.name) ||
-                            (currentUser?.name && currentUser.name !== 'Guest Customer' && o.customerName === currentUser.name);
-        return matchesId || matchesPhone || matchesEmail || matchesName;
+        return orderBelongsToCustomer(o, {
+          ids: [customerUser?.id, currentUser?.id],
+          emails: [customerUser?.email, currentUser?.email],
+          phone: cleanPhone,
+        });
       })
       .slice(0, 3);
   }, [orders, currentUser, customerUser, cleanPhone]);
