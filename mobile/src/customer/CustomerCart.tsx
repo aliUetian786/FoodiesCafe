@@ -7,11 +7,10 @@ import {
   ScrollView,
   TouchableOpacity,
   TextInput,
-  Modal,
   Dimensions,
-  KeyboardAvoidingView,
   Platform,
 } from 'react-native';
+import { KeyboardSafeModal as Modal } from '../components/KeyboardSafeModal';
 import { Colors } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import { OrderType, Branch } from '../types';
@@ -465,10 +464,7 @@ export function CustomerCart({ visible, onClose, onOrderPlaced }: CustomerCartPr
 
   return (
     <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent={true} navigationBarTranslucent={true}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.backdrop}
-      >
+      <View style={styles.backdrop}>
         <TouchableOpacity style={styles.dismissArea} activeOpacity={1} onPress={onClose} />
         {/* Bottom sheet covering ~74% from bottom to middle/upper screen */}
         <View style={styles.sheetContainer}>
@@ -1128,7 +1124,7 @@ export function CustomerCart({ visible, onClose, onOrderPlaced }: CustomerCartPr
             </View>
           </Modal>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
   );
 }

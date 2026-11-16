@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { View, StyleSheet } from 'react-native';
+import { KeyboardAvoidingView, StyleSheet } from 'react-native';
 import { StatusBar } from 'expo-status-bar';
 import { AppProvider } from './src/context/AppContext';
 import { Colors } from './src/theme/colors';
@@ -17,7 +17,8 @@ export default function App() {
 
   return (
     <AppProvider>
-      <View style={styles.root}>
+      {/* Lifts screens above the keyboard (Android is edge-to-edge, so the window no longer resizes). */}
+      <KeyboardAvoidingView behavior="padding" style={styles.root}>
         <StatusBar style="dark" />
         <Header
           onOpenCart={() => setCartModalVisible(true)}
@@ -38,7 +39,7 @@ export default function App() {
         />
         <BranchItemUnavailableModal />
         <Toast />
-      </View>
+      </KeyboardAvoidingView>
     </AppProvider>
   );
 }

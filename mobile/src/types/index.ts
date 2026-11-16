@@ -181,6 +181,7 @@ export interface AuditLog {
   timestamp: string;
   actorName: string;
   actorRole: string;
+  branchId?: string | null;
   action: string;
   details: string;
 }

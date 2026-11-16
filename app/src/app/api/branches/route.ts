@@ -289,6 +289,46 @@ export async function PATCH(request: Request) {
         actorName: auth.role === 'platform_owner' ? 'The owner' : 'The branch manager',
       }).catch(() => {});
     }
+    if (formattedBranch) {
+      const changedKeys = Object.keys(settings).filter(
+        (k) => !['branchId', 'id', 'settings', 'actorId', 'actorName', 'actorRole'].includes(k) && settings[k] !== undefined
+      );
+      const statusToggled = wasOpen !== undefined && Boolean(formattedBranch.isOpen) !== wasOpen;
+      const busyTouched = settings.isBusy !== undefined || settings.is_busy !== undefined;
+      const timingTouched =
+        openingHours !== undefined ||
+        autoSchedule !== undefined ||
+        settings.prepTimeEstimateMin !== undefined ||
+        settings.fullEditWindowMin !== undefined ||
+        settings.stopAddOnsMinBeforeReady !== undefined;
+      const action = statusToggled
+        ? 'branch_status_changed'
+        : busyTouched
+        ? 'branch_busy_toggled'
+        : timingTouched
+        ? 'branch_timing_updated'
+        : 'branch_settings_updated';
+      const parts: string[] = [];
+      if (statusToggled) parts.push(formattedBranch.isOpen ? 'opened the branch' : 'closed the branch');
+      if (busyTouched) parts.push(formattedBranch.isBusy ? 'busy mode ON' : 'busy mode OFF');
+      if (openingHours !== undefined) parts.push(`hours set to ${String(openingHours).trim()}`);
+      if (autoSchedule !== undefined) parts.push(`auto open/close ${autoSchedule ? 'ON' : 'OFF'}`);
+      const otherKeys = changedKeys.filter(
+        (k) => !['isOpen', 'is_open', 'isBusy', 'is_busy', 'openingHours', 'opening_hours', 'autoScheduleEnabled', 'auto_schedule_enabled'].includes(k)
+      );
+      if (otherKeys.length) parts.push(`updated ${otherKeys.join(', ')}`);
+      await writeAuditLog({
+        actorId: auth.userId,
+        actorName: auth.userName || auth.role,
+        actorRole: auth.role,
+        branchId: normBranchId,
+        action,
+        details: `${formattedBranch.name || normBranchId}: ${parts.length ? parts.join('; ') : 'settings updated'}`,
+        oldValue: statusToggled ? (wasOpen ? 'open' : 'closed') : null,
+        newValue: statusToggled ? (formattedBranch.isOpen ? 'open' : 'closed') : null,
+      });
+    }
+
     if (autoSchedule !== undefined || openingHours !== undefined) {
       await applyBranchSchedules(true);
       const fresh = await query(`SELECT is_open FROM branches WHERE id = $1 LIMIT 1`, [normBranchId]).catch(() => ({ rows: [] as any[] }));

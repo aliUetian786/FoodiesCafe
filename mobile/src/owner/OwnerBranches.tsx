@@ -6,10 +6,10 @@ import {
   ScrollView,
   TouchableOpacity,
   Switch,
-  Modal,
   TextInput,
   Linking,
 } from 'react-native';
+import { KeyboardSafeModal as Modal } from '../components/KeyboardSafeModal';
 import { Colors } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import { Branch } from '../types';

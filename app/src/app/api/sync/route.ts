@@ -355,7 +355,9 @@ export async function GET(request: Request) {
         sessionParams
       ).catch(() => ({ rows: [] }));
 
-      // Never return password_hash in sync payload
+      // Never return password_hash in sync payload.
+      // Staff only: customer accounts live in the same table, and once they pushed the row count past
+      // the cap, riders created later fell off the list and the Cashier Orders Hub had no riders to pick.
       usersPromise = query(`
         SELECT id, name, phone, email, address, role,
                branch_id as "branchId", status, no_show_count as "noShowCount",
@@ -366,7 +368,8 @@ export async function GET(request: Request) {
                assigned_table_numbers as "assignedTableNumbers",
                created_at as "createdAt", updated_at as "updatedAt"
         FROM users
-        ORDER BY created_at ASC LIMIT 200
+        WHERE role IS NULL OR role <> 'customer'
+        ORDER BY created_at ASC LIMIT 500
       `).catch(() => ({ rows: [] }));
     }
 

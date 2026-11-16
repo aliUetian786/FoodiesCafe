@@ -157,8 +157,43 @@ export async function PATCH(request: Request) {
     }
 
     values.push(itemId);
+    const beforeRes = await query(
+      `SELECT name, base_price, is_available FROM menu_items WHERE id = $1`,
+      [itemId]
+    ).catch(() => ({ rows: [] as any[] }));
+    const before = beforeRes.rows[0];
     const sql = `UPDATE menu_items SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = $${idx} RETURNING *`;
     const res = await query(sql, values);
+    const after = res.rows[0];
+
+    if (after) {
+      const changed: string[] = [];
+      const oldPrice = before ? Number(before.base_price) : undefined;
+      const newPrice = Number(after.base_price);
+      const priceChanged = oldPrice !== undefined && oldPrice !== newPrice;
+      if (priceChanged) changed.push(`price Rs. ${oldPrice} -> Rs. ${newPrice}`);
+      if (before && Boolean(before.is_available) !== Boolean(after.is_available)) {
+        changed.push(after.is_available ? 'marked available' : 'marked unavailable');
+      }
+      if (body.branchPriceOverrides !== undefined || body.branch_price_overrides !== undefined) changed.push('branch price overrides');
+      if (body.branchAvailability !== undefined || body.branch_availability !== undefined) changed.push('branch availability');
+      if (body.name !== undefined && before && before.name !== after.name) changed.push(`renamed from "${before.name}"`);
+      if (body.category !== undefined) changed.push('category');
+      if (body.description !== undefined) changed.push('description');
+      if (body.image !== undefined) changed.push('image');
+      if (body.sizes !== undefined) changed.push('sizes');
+      if (body.extras !== undefined) changed.push('extras');
+      await writeAuditLog({
+        actorId: auth.userId,
+        actorName: auth.userName || auth.role,
+        actorRole: auth.role,
+        branchId: auth.role === 'platform_owner' ? null : auth.branchId,
+        action: priceChanged ? 'menu_price_changed' : 'menu_item_updated',
+        details: `Menu item "${after.name}" updated: ${changed.length ? changed.join(', ') : 'details edited'}`,
+        oldValue: priceChanged ? String(oldPrice) : null,
+        newValue: priceChanged ? String(newPrice) : null,
+      });
+    }
 
     await Promise.all([
       cacheInvalidatePrefix('menu:'),
@@ -242,6 +277,15 @@ export async function POST(request: Request) {
     ];
 
     const res = await query(sql, values);
+    await writeAuditLog({
+      actorId: auth.userId,
+      actorName: auth.userName || auth.role,
+      actorRole: auth.role,
+      branchId: auth.role === 'platform_owner' ? null : auth.branchId,
+      action: 'menu_item_created',
+      details: `Menu item "${name}" saved in ${category} at Rs. ${Number(basePrice)}`,
+      newValue: String(Number(basePrice)),
+    });
     await Promise.all([
       cacheInvalidatePrefix('menu:'),
       cacheInvalidatePrefix('catalog:'),
@@ -272,7 +316,15 @@ export async function DELETE(request: Request) {
       return NextResponse.json({ error: 'itemId or id is required' }, { status: 400 });
     }
 
-    await query(`DELETE FROM menu_items WHERE id = $1`, [itemId]);
+    const delRes = await query(`DELETE FROM menu_items WHERE id = $1 RETURNING name`, [itemId]);
+    await writeAuditLog({
+      actorId: auth.userId,
+      actorName: auth.userName || auth.role,
+      actorRole: auth.role,
+      branchId: auth.role === 'platform_owner' ? null : auth.branchId,
+      action: 'menu_item_deleted',
+      details: `Menu item "${delRes.rows[0]?.name || itemId}" deleted`,
+    });
     await Promise.all([
       cacheInvalidatePrefix('menu:'),
       cacheInvalidatePrefix('catalog:'),

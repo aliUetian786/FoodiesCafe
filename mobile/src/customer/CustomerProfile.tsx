@@ -6,9 +6,9 @@ import {
   ScrollView,
   TextInput,
   TouchableOpacity,
-  Modal,
   Linking,
 } from 'react-native';
+import { KeyboardSafeModal as Modal } from '../components/KeyboardSafeModal';
 import { Colors } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import { User, Phone, Mail, Pencil, X, Shield, LogOut, Check, LogIn, Plus, Trash2, MapPin, PhoneCall, AlertTriangle, Clock, XCircle, ShoppingBag, Bell, CheckCheck } from 'lucide-react-native';

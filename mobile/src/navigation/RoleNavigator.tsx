@@ -4,6 +4,7 @@ import { Colors } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import { ExitAppConfirmModal } from '../components/ExitAppConfirmModal';
 import { BranchShutdownModal } from '../components/BranchShutdownModal';
+import { useKeyboardVisible } from '../components/KeyboardSafeModal';
 import {
   Home,
   Utensils,
@@ -85,6 +86,8 @@ export function RoleNavigator({
   const [floorTab, setFloorTab] = useState<'waiter' | 'tables' | 'orders' | 'walkin'>('waiter');
   const [riderTab, setRiderTab] = useState<'console' | 'history'>('console');
   const [exitModalVisible, setExitModalVisible] = useState(false);
+  // Hide the bottom tab bar while typing so the lifted input has the room above the keyboard.
+  const keyboardVisible = useKeyboardVisible();
 
   // Always reset all staff role tabs to their initial first option (Home/Overview type)
   const resetAllStaffRoleTabs = () => {
@@ -467,7 +470,7 @@ export function RoleNavigator({
       </View>
 
       {/* Dynamic Role Bottom Navigation Bar (Hidden when any modal/bottom sheet is active) */}
-      {!isAnyModalOpen && (
+      {!isAnyModalOpen && !keyboardVisible && (
         <View style={styles.bottomNavContainer}>
           {appMode === 'customer' && (
             <View style={styles.bottomNav}>

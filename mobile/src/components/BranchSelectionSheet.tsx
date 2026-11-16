@@ -3,7 +3,6 @@ import {
   View,
   Text,
   StyleSheet,
-  Modal,
   TouchableOpacity,
   ScrollView,
   TextInput,
@@ -11,6 +10,7 @@ import {
   Dimensions,
   Platform,
 } from 'react-native';
+import { KeyboardSafeModal as Modal } from './KeyboardSafeModal';
 import { Colors } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import { Branch } from '../types';

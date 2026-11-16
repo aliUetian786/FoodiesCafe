@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useState, useRef } from 'react';
 import {
-  Modal,
   View,
   Text,
   TouchableOpacity,
@@ -10,6 +9,7 @@ import {
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { KeyboardSafeModal as Modal } from './KeyboardSafeModal';
 import {
   Bell,
   X,

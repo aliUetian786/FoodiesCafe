@@ -86,6 +86,15 @@ export async function POST(request: Request) {
     ];
 
     const res = await query(sql, values);
+    await writeAuditLog({
+      actorId: auth.userId,
+      actorName: auth.userName || auth.role,
+      actorRole: auth.role,
+      branchId: targetBranch,
+      action: 'shift_opened',
+      details: `Cash shift opened with opening float Rs. ${Number(openingFloat) || 0}`,
+      newValue: String(Number(openingFloat) || 0),
+    });
     broadcastRealtimeEvent({ type: 'SHIFT_UPDATED', branchId: targetBranch });
     return NextResponse.json({ success: true, shift: res.rows[0] });
   } catch (error: any) {

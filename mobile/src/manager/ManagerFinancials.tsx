@@ -5,9 +5,9 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  Modal,
   TextInput,
 } from 'react-native';
+import { KeyboardSafeModal as Modal } from '../components/KeyboardSafeModal';
 import { Colors } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import { HistoricalLoadingModal } from '../components/HistoricalLoadingModal';

@@ -3,13 +3,13 @@ import {
   View,
   Text,
   StyleSheet,
-  Modal,
   TouchableOpacity,
   ScrollView,
   TextInput,
   Platform,
   ActivityIndicator,
 } from 'react-native';
+import { KeyboardSafeModal as Modal } from './KeyboardSafeModal';
 import { Colors } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import { apiFetch } from '../services/api';

@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useApp } from '@/context/AppContext';
 import { HistoricalLoadingModal } from '@/components/common/HistoricalLoadingModal';
 import {
@@ -26,7 +26,7 @@ export const AuditLogScreen: React.FC = () => {
 
   const [search, setSearch] = useState('');
   const [actionFilter, setActionFilter] = useState('all');
-  const [roleFilter, setRoleFilter] = useState<'all' | 'branch_manager' | 'cashier' | 'staff'>('branch_manager');
+  const [roleFilter, setRoleFilter] = useState<'mgr_cashier' | 'all' | 'branch_manager' | 'cashier' | 'staff'>('mgr_cashier');
   const [branchFilter, setBranchFilter] = useState('all');
   const [dateFilter, setDateFilter] = useState<'today' | 'yesterday' | 'week' | 'all'>('today');
   const [isRefreshing, setIsRefreshing] = useState(false);
@@ -36,6 +36,14 @@ export const AuditLogScreen: React.FC = () => {
     await refreshAuditLogs();
     setTimeout(() => setIsRefreshing(false), 500);
   };
+
+  // Load the trail as soon as the owner opens the screen and keep it fresh while it is open.
+  useEffect(() => {
+    void refreshAuditLogs();
+    const t = setInterval(() => void refreshAuditLogs(), 30000);
+    return () => clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   const isToday = (dateStr?: string) => {
     if (!dateStr) return false;
@@ -64,6 +72,9 @@ export const AuditLogScreen: React.FC = () => {
   };
 
   const filteredLogs = auditLogs.filter((log) => {
+    // Logins and staff-account registrations are not operational changes; keep them out of the trail.
+    if (log.action === 'staff_login' || log.action === 'staff_created') return false;
+
     // Search query
     const q = search.toLowerCase().trim();
     const matchesSearch =
@@ -75,7 +86,9 @@ export const AuditLogScreen: React.FC = () => {
 
     // Role filter (Focus on manager activity actions)
     let matchesRole = true;
-    if (roleFilter === 'branch_manager') {
+    if (roleFilter === 'mgr_cashier') {
+      matchesRole = log.actorRole === 'branch_manager' || log.actorRole === 'cashier';
+    } else if (roleFilter === 'branch_manager') {
       matchesRole = log.actorRole === 'branch_manager' || log.action.includes('manager');
     } else if (roleFilter === 'cashier') {
       matchesRole = log.actorRole === 'cashier';
@@ -101,6 +114,12 @@ export const AuditLogScreen: React.FC = () => {
         matchesAction = log.action.includes('manager_access');
       } else if (actionFilter === 'shifts') {
         matchesAction = log.action.includes('shift');
+      } else if (actionFilter === 'orders') {
+        matchesAction = log.action.startsWith('order_');
+      } else if (actionFilter === 'menu') {
+        matchesAction = log.action.startsWith('menu_');
+      } else if (actionFilter === 'branch') {
+        matchesAction = log.action.startsWith('branch_');
       } else {
         matchesAction = log.action === actionFilter;
       }
@@ -138,6 +157,24 @@ export const AuditLogScreen: React.FC = () => {
     }
     if (action.includes('shift')) {
       return { label: 'Shift Verification', color: '#0891B2', bg: '#CFFAFE' };
+    }
+    if (action.startsWith('order_payment')) {
+      return { label: 'Payment Change', color: '#15803D', bg: '#DCFCE7' };
+    }
+    if (action === 'order_cancelled') {
+      return { label: 'Order Cancelled', color: '#B91C1C', bg: '#FEE2E2' };
+    }
+    if (action.startsWith('order_')) {
+      return { label: 'Order Change', color: '#C2410C', bg: '#FFEDD5' };
+    }
+    if (action.startsWith('menu_')) {
+      return { label: 'Menu Change', color: '#D97706', bg: '#FEF3C7' };
+    }
+    if (action.startsWith('branch_')) {
+      return { label: 'Branch Settings', color: '#2563EB', bg: '#DBEAFE' };
+    }
+    if (action.includes('table')) {
+      return { label: 'Table Change', color: '#0F766E', bg: '#CCFBF1' };
     }
     return { label: action.replace(/_/g, ' '), color: 'var(--text-main)', bg: 'var(--bg-card-subtle)' };
   };
@@ -278,6 +315,7 @@ export const AuditLogScreen: React.FC = () => {
             fontWeight: 700,
           }}
         >
+          <option value="mgr_cashier">👔 Managers & Cashiers</option>
           <option value="branch_manager">👔 Branch Managers Actions</option>
           <option value="all">👥 All Authorized Staff</option>
           <option value="cashier">💰 Cashier Actions</option>
@@ -299,6 +337,9 @@ export const AuditLogScreen: React.FC = () => {
           }}
         >
           <option value="all">All Action Categories</option>
+          <option value="orders">Order & Payment Changes</option>
+          <option value="menu">Menu & Price Changes</option>
+          <option value="branch">Branch Open/Close & Hours</option>
           <option value="refunds">Refund Approvals</option>
           <option value="staff">Staff Provisioning & Status</option>
           <option value="pricing">Price Adjustments</option>

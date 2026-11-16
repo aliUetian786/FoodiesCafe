@@ -7,19 +7,22 @@ import {
   Image,
   TextInput,
   TouchableOpacity,
-  Modal,
+  Pressable,
   Dimensions,
   Platform,
   NativeSyntheticEvent,
   NativeScrollEvent,
 } from 'react-native';
+import { KeyboardSafeModal as Modal } from '../components/KeyboardSafeModal';
 import { Colors } from '../theme/colors';
 import { useApp } from '../context/AppContext';
-import { MenuItem, OrderType } from '../types';
+import { Branch, MenuItem, OrderType } from '../types';
 import { resolveDishImage, getItemMinPrice } from '../services/api';
 import { Search, Plus, Minus, Trash2, X, ShoppingBag, Utensils, Bike } from 'lucide-react-native';
 import { CustomerLoginModal } from './CustomerLoginModal';
 import { AllBranchesClosedModal } from '../components/AllBranchesClosedModal';
+import { BranchSelectionSheet } from '../components/BranchSelectionSheet';
+import { DeliveryMapModal } from '../components/DeliveryMapModal';
 
 const { width } = Dimensions.get('window');
 
@@ -47,6 +50,8 @@ export function CustomerMenu({ onOpenCheckout }: CustomerMenuProps) {
     setHasConfirmedOrderType,
     showToast,
     setBottomSheetOpen,
+    setBranchId,
+    setSelectedDeliveryAddress,
   } = useApp();
 
   const isDelivery = orderType === 'delivery';
@@ -72,10 +77,37 @@ export function CustomerMenu({ onOpenCheckout }: CustomerMenuProps) {
     setOrderTypeModalVisible(true);
   };
 
+  // Dine-In / Takeaway → ask which branch (branch list sheet). Delivery → GPS map picks the branch.
+  const [branchSheetVisible, setBranchSheetVisible] = useState(false);
+  const [branchSheetMode, setBranchSheetMode] = useState<'dine_in' | 'takeaway'>('takeaway');
+  const [deliveryMapVisible, setDeliveryMapVisible] = useState(false);
+
   const handleSelectOrderType = (type: OrderType) => {
+    setOrderTypeModalVisible(false);
+    if (type === 'delivery') {
+      setDeliveryMapVisible(true);
+    } else {
+      setBranchSheetMode(type as 'dine_in' | 'takeaway');
+      setBranchSheetVisible(true);
+    }
+  };
+
+  const handleBranchChosen = (b: Branch) => {
+    setBranchId(b.id);
+    setBranchSheetVisible(false);
+    confirmOrderType(branchSheetMode);
+  };
+
+  const handleDeliveryConfirmed = (addr: string, b: Branch) => {
+    setBranchId(b.id);
+    setSelectedDeliveryAddress(addr);
+    setDeliveryMapVisible(false);
+    confirmOrderType('delivery');
+  };
+
+  const confirmOrderType = (type: OrderType) => {
     setOrderType(type);
     setHasConfirmedOrderType(true);
-    setOrderTypeModalVisible(false);
 
     // If delivery is chosen and cart subtotal is less than minimum delivery amount:
     // Do NOT proceed to checkout. Show toast and display notice above checkout button.
@@ -101,7 +133,9 @@ export function CustomerMenu({ onOpenCheckout }: CustomerMenuProps) {
       selectedDishForModal ||
       orderTypeModalVisible ||
       loginModalVisible ||
-      closedCheckoutModalVisible
+      closedCheckoutModalVisible ||
+      branchSheetVisible ||
+      deliveryMapVisible
     );
     if (!isAnyModalActive) return;
     setBottomSheetOpen(true);
@@ -113,6 +147,8 @@ export function CustomerMenu({ onOpenCheckout }: CustomerMenuProps) {
     orderTypeModalVisible,
     loginModalVisible,
     closedCheckoutModalVisible,
+    branchSheetVisible,
+    deliveryMapVisible,
     setBottomSheetOpen,
   ]);
 
@@ -458,7 +494,22 @@ export function CustomerMenu({ onOpenCheckout }: CustomerMenuProps) {
         context="checkout_blocked"
       />
 
-      {/* 3 Clickable Buttons Pop-up Modal Asking for Order Type */}
+      {/* Branch list for Dine-In / Takeaway (asked right after the order type) */}
+      <BranchSelectionSheet
+        visible={branchSheetVisible}
+        onClose={() => setBranchSheetVisible(false)}
+        orderMode={branchSheetMode}
+        onBranchSelected={handleBranchChosen}
+      />
+
+      {/* Delivery: GPS map picks the address and the serving branch */}
+      <DeliveryMapModal
+        visible={deliveryMapVisible}
+        onClose={() => setDeliveryMapVisible(false)}
+        onConfirmDelivery={handleDeliveryConfirmed}
+      />
+
+      {/* Order type pop-up (same as web): centred card, one horizontal row with the 3 order types */}
       <Modal
         visible={orderTypeModalVisible}
         transparent
@@ -466,104 +517,29 @@ export function CustomerMenu({ onOpenCheckout }: CustomerMenuProps) {
         statusBarTranslucent={true}
         onRequestClose={() => setOrderTypeModalVisible(false)}
       >
-        <View style={styles.orderTypeModalBackdrop}>
-          <View style={styles.orderTypeModalCard}>
-            {/* Modal Header */}
-            <View style={styles.orderTypeHeader}>
-              <View style={{ flex: 1 }}>
-                <Text style={styles.orderTypeTitle}>🍽️ Select Order Type</Text>
-                <Text style={styles.orderTypeSub}>
-                  How would you like to receive your food? Select an option to proceed to checkout.
-                </Text>
-              </View>
-              <TouchableOpacity
-                onPress={() => setOrderTypeModalVisible(false)}
-                style={styles.orderTypeCloseBtn}
-                hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-              >
-                <X size={20} color={Colors.textMuted} />
-              </TouchableOpacity>
+        <Pressable style={styles.orderTypeModalBackdrop} onPress={() => setOrderTypeModalVisible(false)}>
+          <Pressable style={styles.orderTypeModalCard} onPress={() => { }}>
+            <Text style={styles.orderTypeTitle}>Select Order Type</Text>
+            <View style={styles.orderTypeRow}>
+              {([
+                { id: 'dine_in', label: 'Dine-In' },
+                { id: 'takeaway', label: 'Takeaway' },
+                { id: 'delivery', label: 'Delivery' },
+              ] as { id: OrderType; label: string }[]).map((opt) => (
+                <TouchableOpacity
+                  key={opt.id}
+                  style={styles.orderTypeOptionBtn}
+                  onPress={() => handleSelectOrderType(opt.id)}
+                  activeOpacity={0.75}
+                >
+                  <Text style={styles.orderTypeOptionLabel} numberOfLines={1} adjustsFontSizeToFit>
+                    {opt.label}
+                  </Text>
+                </TouchableOpacity>
+              ))}
             </View>
-
-            {/* 3 Clickable Buttons */}
-            <View style={styles.orderTypeButtonsList}>
-              {/* Button 1: Dine-In */}
-              <TouchableOpacity
-                style={styles.orderTypeOptionCard}
-                onPress={() => handleSelectOrderType('dine_in')}
-                activeOpacity={0.78}
-              >
-                <View style={styles.orderTypeIconWrap}>
-                  <Utensils size={22} color={Colors.primary} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={styles.orderTypeOptionTitleRow}>
-                    <Text style={styles.orderTypeOptionTitle}>Dine-In</Text>
-                    <View style={[styles.orderTypePill, { backgroundColor: '#FEF3C7' }]}>
-                      <Text style={[styles.orderTypePillText, { color: '#92400E' }]}>Table Service</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.orderTypeOptionDesc}>
-                    Food served fresh directly to your branch table
-                  </Text>
-                </View>
-                <View style={styles.orderTypeSelectBtn}>
-                  <Text style={styles.orderTypeSelectBtnText}>Select ➔</Text>
-                </View>
-              </TouchableOpacity>
-
-              {/* Button 2: Takeaway */}
-              <TouchableOpacity
-                style={styles.orderTypeOptionCard}
-                onPress={() => handleSelectOrderType('takeaway')}
-                activeOpacity={0.78}
-              >
-                <View style={styles.orderTypeIconWrap}>
-                  <ShoppingBag size={22} color={Colors.primary} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={styles.orderTypeOptionTitleRow}>
-                    <Text style={styles.orderTypeOptionTitle}>Takeaway</Text>
-                    <View style={[styles.orderTypePill, { backgroundColor: '#EFF6FF' }]}>
-                      <Text style={[styles.orderTypePillText, { color: '#1D4ED8' }]}>Counter Pickup</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.orderTypeOptionDesc}>
-                    Packed fresh to collect at the cafe counter
-                  </Text>
-                </View>
-                <View style={styles.orderTypeSelectBtn}>
-                  <Text style={styles.orderTypeSelectBtnText}>Select ➔</Text>
-                </View>
-              </TouchableOpacity>
-
-              {/* Button 3: Delivery */}
-              <TouchableOpacity
-                style={styles.orderTypeOptionCard}
-                onPress={() => handleSelectOrderType('delivery')}
-                activeOpacity={0.78}
-              >
-                <View style={styles.orderTypeIconWrap}>
-                  <Bike size={22} color={Colors.primary} />
-                </View>
-                <View style={{ flex: 1 }}>
-                  <View style={styles.orderTypeOptionTitleRow}>
-                    <Text style={styles.orderTypeOptionTitle}>Delivery</Text>
-                    <View style={[styles.orderTypePill, { backgroundColor: '#DCFCE7' }]}>
-                      <Text style={[styles.orderTypePillText, { color: '#15803D' }]}>To Doorstep</Text>
-                    </View>
-                  </View>
-                  <Text style={styles.orderTypeOptionDesc}>
-                    Delivered to your home or office with live rider GPS
-                  </Text>
-                </View>
-                <View style={styles.orderTypeSelectBtn}>
-                  <Text style={styles.orderTypeSelectBtnText}>Select ➔</Text>
-                </View>
-              </TouchableOpacity>
-            </View>
-          </View>
-        </View>
+          </Pressable>
+        </Pressable>
       </Modal>
 
       {/* Dish Customizer Modal */}
@@ -1095,89 +1071,44 @@ const styles = StyleSheet.create({
   },
   orderTypeModalCard: {
     backgroundColor: Colors.bgCard,
-    borderRadius: 22,
+    borderRadius: 20,
     borderWidth: 1.5,
     borderColor: Colors.borderColor,
     width: '100%',
-    maxWidth: 420,
-    padding: 20,
-  },
-  orderTypeHeader: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'flex-start',
-    marginBottom: 16,
+    maxWidth: 380,
+    padding: 24,
+    shadowColor: '#000',
+    shadowOpacity: 0.28,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 14,
   },
   orderTypeTitle: {
     fontSize: 18,
     fontWeight: '900',
     color: Colors.textMain,
-    marginBottom: 4,
+    textAlign: 'center',
+    marginBottom: 16,
   },
-  orderTypeSub: {
-    fontSize: 12,
-    color: Colors.textMuted,
-    lineHeight: 16,
-  },
-  orderTypeCloseBtn: {
-    padding: 4,
-    marginLeft: 10,
-  },
-  orderTypeButtonsList: {
-    gap: 12,
-  },
-  orderTypeOptionCard: {
+  orderTypeRow: {
     flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: Colors.bgCard,
+    gap: 10,
+  },
+  orderTypeOptionBtn: {
+    flex: 1,
+    paddingVertical: 14,
+    paddingHorizontal: 6,
+    borderRadius: 12,
     borderWidth: 1.5,
     borderColor: Colors.borderColor,
-    borderRadius: 16,
-    padding: 14,
-    gap: 12,
-  },
-  orderTypeIconWrap: {
-    width: 44,
-    height: 44,
-    borderRadius: 12,
-    backgroundColor: Colors.primaryLight,
+    backgroundColor: Colors.bgSubtle,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  orderTypeOptionTitleRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 8,
-    marginBottom: 2,
-  },
-  orderTypeOptionTitle: {
-    fontSize: 15,
+  orderTypeOptionLabel: {
+    fontSize: 14,
     fontWeight: '800',
     color: Colors.textMain,
-  },
-  orderTypePill: {
-    paddingHorizontal: 7,
-    paddingVertical: 2,
-    borderRadius: 10,
-  },
-  orderTypePillText: {
-    fontSize: 9.5,
-    fontWeight: '800',
-  },
-  orderTypeOptionDesc: {
-    fontSize: 11.5,
-    color: Colors.textMuted,
-    lineHeight: 15,
-  },
-  orderTypeSelectBtn: {
-    backgroundColor: Colors.primaryLight,
-    paddingHorizontal: 10,
-    paddingVertical: 6,
-    borderRadius: 8,
-  },
-  orderTypeSelectBtnText: {
-    fontSize: 11,
-    fontWeight: '800',
-    color: Colors.primary,
+    textAlign: 'center',
   },
 });

@@ -7173,7 +7173,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
   const refreshAuditLogs = async () => {
     try {
-      const res = await fetch('/api/audit-logs');
+      const res = await fetch('/api/audit-logs?limit=200', { headers: getClientAuthHeaders(), cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (Array.isArray(data.logs)) {

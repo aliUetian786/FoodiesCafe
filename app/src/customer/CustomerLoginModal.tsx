@@ -239,7 +239,7 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ isOpen, 
   return (
     <>
     <div
-      className="foodies-modal-overlay"
+      className="foodies-modal-overlay foodies-modal-centered"
       style={{
         position: 'fixed',
         inset: 0,
@@ -264,7 +264,7 @@ export const CustomerLoginModal: React.FC<CustomerLoginModalProps> = ({ isOpen, 
 
       {/* Main Login Card - Fixed 420px height & 420px max-width for identical card size in both Gmail and OTP steps */}
       <div
-        className="foodies-modal-card"
+        className="foodies-modal-card foodies-login-card"
         style={{
           position: 'relative',
           zIndex: 10,

@@ -1,16 +1,18 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
+import * as Location from 'expo-location';
 import {
   View,
   Text,
   StyleSheet,
-  Modal,
   TouchableOpacity,
   ScrollView,
   TextInput,
   Dimensions,
   Switch,
   Platform,
+  ActivityIndicator,
 } from 'react-native';
+import { KeyboardSafeModal as Modal } from './KeyboardSafeModal';
 import { Colors } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import { SavedDeliveryAddress, Branch } from '../types';
@@ -29,6 +31,7 @@ import {
   Sparkles,
 } from 'lucide-react-native';
 import { OpenStreetMapView } from './OpenStreetMapView';
+import { reverseGeocodeOpenStreetMap } from '../utils/openStreetMap';
 
 const { width, height } = Dimensions.get('window');
 
@@ -77,9 +80,7 @@ export function DeliveryMapModal({
     savedAddresses,
     addSavedAddress,
     deleteSavedAddress,
-    customerCoordinates,
     setCustomerCoordinates,
-    selectedDeliveryAddress,
     setSelectedDeliveryAddress,
     calculateDistanceKm,
     setBranchId,
@@ -93,39 +94,84 @@ export function DeliveryMapModal({
     savedAddresses[0]?.id || ''
   );
 
-  // OpenStreetMap Interactive Pin coordinates
-  const [pinCoords, setPinCoords] = useState<{ lat: number; lng: number }>(
-    customerCoordinates || { lat: 31.5204, lng: 74.3587 }
-  );
+  // OpenStreetMap Interactive Pin coordinates. The map opens on the customer's LIVE GPS position
+  // (fetched below each time it opens), never on a previously saved location.
+  const DEFAULT_PIN = { lat: 31.5204, lng: 74.3587 };
+  const [pinCoords, setPinCoords] = useState<{ lat: number; lng: number }>(DEFAULT_PIN);
   const [pinCity, setPinCity] = useState<string>('Lahore');
   const [pinConfirmed, setPinConfirmed] = useState(false);
 
   // Written Address input (auto-fetched from OpenStreetMap, editable)
-  const [writtenAddress, setWrittenAddress] = useState(
-    selectedDeliveryAddress || 'House #14, Street 5, Gulberg III, Lahore'
-  );
+  const [writtenAddress, setWrittenAddress] = useState('');
   const [addressLabel, setAddressLabel] = useState<'Home' | 'Work' | 'Other'>('Home');
   const [saveToProfile, setSaveToProfile] = useState(true);
 
-  // Sync state when modal becomes visible: ALWAYS open in 'map' mode first
+  // Live-location lookup state: 'asking' = permission prompt, 'locating' = waiting for a GPS fix.
+  const [liveStatus, setLiveStatus] = useState<'idle' | 'asking' | 'locating' | 'found' | 'denied' | 'failed'>('idle');
+  const liveRunRef = useRef(0);
+
+  // 1) ask for location permission, 2) get a fresh GPS fix (not a cached/saved one), 3) pin it and fill the address.
+  const locateLive = async () => {
+    const runId = ++liveRunRef.current;
+    const stale = () => runId !== liveRunRef.current;
+    try {
+      setLiveStatus('asking');
+      const { status } = await Location.requestForegroundPermissionsAsync();
+      if (stale()) return;
+      if (status !== 'granted') {
+        setLiveStatus('denied');
+        showToast('Location permission denied. Tap the map or search to set your delivery spot.', 'warning');
+        return;
+      }
+
+      // Android: if GPS / location services are switched off, ask the OS to turn them on.
+      const servicesOn = await Location.hasServicesEnabledAsync().catch(() => true);
+      if (!servicesOn && Platform.OS === 'android') {
+        await Location.enableNetworkProviderAsync().catch(() => { });
+      }
+      if (stale()) return;
+
+      setLiveStatus('locating');
+      const position = await Location.getCurrentPositionAsync({ accuracy: Location.Accuracy.High });
+      if (stale()) return;
+      const coords = {
+        lat: Number(position.coords.latitude.toFixed(6)),
+        lng: Number(position.coords.longitude.toFixed(6)),
+      };
+      setPinCoords(coords);
+      setCustomerCoordinates(coords);
+      setLiveStatus('found');
+
+      const geo = await reverseGeocodeOpenStreetMap(coords.lat, coords.lng);
+      if (stale()) return;
+      if (geo?.address) setWrittenAddress(geo.address);
+      if (geo?.city) setPinCity(geo.city);
+    } catch {
+      if (stale()) return;
+      setLiveStatus('failed');
+      showToast('Could not get your live location. Turn on GPS, or tap the map to set it.', 'warning');
+    }
+  };
+
+  // Every time the modal opens: map view first, then ask permission and jump to the live location.
   useEffect(() => {
-    if (!visible) return;
+    if (!visible) {
+      liveRunRef.current += 1; // cancel any lookup still running
+      return;
+    }
     setBottomSheetOpen(true);
     setViewMode('map');
     setPinConfirmed(false);
-    if (customerCoordinates) {
-      setPinCoords(customerCoordinates);
-    }
-    if (selectedDeliveryAddress) {
-      setWrittenAddress(selectedDeliveryAddress);
-    }
+    setWrittenAddress('');
     if (savedAddresses.length > 0) {
       setSelectedSavedId(savedAddresses[0].id);
     }
+    locateLive();
     return () => {
       setBottomSheetOpen(false);
     };
-  }, [visible, savedAddresses.length, setBottomSheetOpen, customerCoordinates, selectedDeliveryAddress]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [visible]);
 
   // Find nearest branch to coordinates
   const findNearestBranch = (coords: { lat: number; lng: number }): { branch: Branch; dist: number } => {
@@ -324,8 +370,39 @@ export function DeliveryMapModal({
             /* ================= VIEW 2: INTERACTIVE MAP & WRITTEN ADDRESS ================= */
             <ScrollView
               contentContainerStyle={styles.mapScrollContainer}
+              keyboardShouldPersistTaps="handled"
               showsVerticalScrollIndicator={false}
             >
+              {/* Live location status (permission → GPS fix) */}
+              {liveStatus !== 'idle' && liveStatus !== 'found' && (
+                <View
+                  style={[
+                    styles.liveBanner,
+                    (liveStatus === 'denied' || liveStatus === 'failed') && styles.liveBannerWarn,
+                  ]}
+                >
+                  {liveStatus === 'asking' || liveStatus === 'locating' ? (
+                    <ActivityIndicator size="small" color={Colors.primary} />
+                  ) : (
+                    <Compass size={16} color="#B45309" />
+                  )}
+                  <Text style={styles.liveBannerText}>
+                    {liveStatus === 'asking'
+                      ? 'Allow location access to find you on the map…'
+                      : liveStatus === 'locating'
+                        ? 'Getting your live location…'
+                        : liveStatus === 'denied'
+                          ? 'Location permission is off. Tap the map or search instead.'
+                          : 'Could not get your live location.'}
+                  </Text>
+                  {(liveStatus === 'denied' || liveStatus === 'failed') && (
+                    <TouchableOpacity onPress={locateLive} style={styles.liveRetryBtn} activeOpacity={0.8}>
+                      <Text style={styles.liveRetryText}>Try again</Text>
+                    </TouchableOpacity>
+                  )}
+                </View>
+              )}
+
               {/* Live OpenStreetMap Canvas + Search + GPS */}
               <OpenStreetMapView
                 center={pinCoords}
@@ -565,6 +642,39 @@ export function DeliveryMapModal({
 }
 
 const styles = StyleSheet.create({
+  liveBanner: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    backgroundColor: Colors.primaryLight,
+    borderWidth: 1,
+    borderColor: Colors.primaryBorder,
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    marginBottom: 10,
+  },
+  liveBannerWarn: {
+    backgroundColor: '#FFFBEB',
+    borderColor: '#FDE68A',
+  },
+  liveBannerText: {
+    flex: 1,
+    fontSize: 12,
+    fontWeight: '700',
+    color: Colors.textMain,
+  },
+  liveRetryBtn: {
+    backgroundColor: Colors.primary,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  liveRetryText: {
+    color: Colors.textWhite,
+    fontSize: 11,
+    fontWeight: '800',
+  },
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(0,0,0,0.5)',

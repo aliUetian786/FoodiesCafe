@@ -77,9 +77,7 @@ export const DeliveryMapModal: React.FC<DeliveryMapModalProps> = ({
     branches,
     savedAddresses,
     addSavedAddress,
-    customerCoordinates,
     setCustomerCoordinates,
-    selectedDeliveryAddress,
     setSelectedDeliveryAddress,
     setCurrentBranchId,
     addToast,
@@ -89,59 +87,73 @@ export const DeliveryMapModal: React.FC<DeliveryMapModalProps> = ({
     savedAddresses[0]?.id || ''
   );
 
-  const [pinCoords, setPinCoords] = useState<{ lat: number; lng: number }>(
-    customerCoordinates || { lat: 31.5204, lng: 74.3587 }
-  );
+  // The map opens on the customer's LIVE position (fetched each time it opens), never on a saved one.
+  const [pinCoords, setPinCoords] = useState<{ lat: number; lng: number }>({ lat: 31.5204, lng: 74.3587 });
   const [pinCity, setPinCity] = useState<string>('Lahore');
   const [pinConfirmed, setPinConfirmed] = useState(false);
 
-  const [writtenAddress, setWrittenAddress] = useState<string>(
-    selectedDeliveryAddress || 'Main Boulevard, Gulberg III, Lahore'
-  );
+  const [writtenAddress, setWrittenAddress] = useState<string>('');
   const [addressLabel, setAddressLabel] = useState<'Home' | 'Work' | 'Other'>('Home');
   const [saveToProfile, setSaveToProfile] = useState<boolean>(true);
 
-  // Sync state whenever modal opens: map opens directly every time
-  useEffect(() => {
-    if (!isOpen) return;
-    setPinConfirmed(false);
-    if (customerCoordinates) {
-      setPinCoords(customerCoordinates);
-    }
-    if (selectedDeliveryAddress) {
-      setWrittenAddress(selectedDeliveryAddress);
-    }
-    if (savedAddresses.length > 0) {
-      setSelectedSavedId(savedAddresses[0].id);
-    }
-  }, [isOpen, customerCoordinates, selectedDeliveryAddress, savedAddresses]);
-
-  // Open the map on the customer's real position: ask for GPS once if we don't have it yet.
+  // 1) ask for location permission (the browser prompt), 2) take a fresh GPS fix (maximumAge 0, so no
+  // cached position), 3) pin it and fill the written address from OpenStreetMap.
   const [locating, setLocating] = useState(false);
-  const gpsAskedRef = React.useRef(false);
-  useEffect(() => {
-    if (!isOpen || customerCoordinates || gpsAskedRef.current) return;
-    if (typeof navigator === 'undefined' || !navigator.geolocation) return;
-    gpsAskedRef.current = true;
+  const [locationDenied, setLocationDenied] = useState(false);
+  const liveRunRef = React.useRef(0);
+  const locateLive = React.useCallback(() => {
+    if (typeof navigator === 'undefined' || !navigator.geolocation) {
+      setLocationDenied(true);
+      return;
+    }
+    const runId = ++liveRunRef.current;
     setLocating(true);
+    setLocationDenied(false);
     navigator.geolocation.getCurrentPosition(
-      (pos) => {
-        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+      async (pos) => {
+        if (runId !== liveRunRef.current) return;
+        const coords = {
+          lat: Number(pos.coords.latitude.toFixed(6)),
+          lng: Number(pos.coords.longitude.toFixed(6)),
+        };
         setPinCoords(coords);
         if (setCustomerCoordinates) setCustomerCoordinates(coords);
         setLocating(false);
+        try {
+          const geo = await reverseGeocodeOpenStreetMap(coords.lat, coords.lng);
+          if (runId !== liveRunRef.current) return;
+          if (geo?.address) setWrittenAddress(geo.address);
+          if (geo?.city) setPinCity(geo.city);
+        } catch { }
       },
-      () => {
+      (err) => {
+        if (runId !== liveRunRef.current) return;
         setLocating(false);
+        setLocationDenied(true);
         addToast({
           type: 'info',
-          title: 'Location not shared',
-          message: 'Drag the pin or pick an area to set your delivery location.',
+          title: err?.code === 1 ? 'Location permission denied' : 'Live location unavailable',
+          message: 'Drag the pin, search, or pick an area to set your delivery location.',
         });
       },
-      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+      { enableHighAccuracy: true, timeout: 15000, maximumAge: 0 }
     );
-  }, [isOpen, customerCoordinates, setCustomerCoordinates, addToast]);
+  }, [setCustomerCoordinates, addToast]);
+
+  // Every time the modal opens: reset, then ask permission and jump to the live location.
+  useEffect(() => {
+    if (!isOpen) {
+      liveRunRef.current += 1; // cancel a lookup still running
+      return;
+    }
+    setPinConfirmed(false);
+    setWrittenAddress('');
+    if (savedAddresses.length > 0) {
+      setSelectedSavedId(savedAddresses[0].id);
+    }
+    locateLive();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isOpen]);
 
   // Nearest branch that can actually take a delivery right now (open + delivery enabled);
   // falls back to all branches only if none qualifies, so the customer still sees a result.
@@ -296,8 +308,27 @@ export const DeliveryMapModal: React.FC<DeliveryMapModalProps> = ({
                 Confirm Delivery Location
               </h3>
               <p style={{ margin: 0, fontSize: '11.5px', color: locating ? 'var(--primary)' : 'var(--text-muted)', fontWeight: locating ? 700 : 400 }}>
-                {locating ? '📍 Finding your current location…' : 'Drag pin or search • Fulfilled by nearest open branch'}
+                {locating ? '📍 Finding your live location…' : 'Drag pin or search • Fulfilled by nearest open branch'}
               </p>
+              {locationDenied && !locating && (
+                <button
+                  type="button"
+                  onClick={locateLive}
+                  style={{
+                    marginTop: '4px',
+                    padding: '3px 10px',
+                    borderRadius: '999px',
+                    border: '1px solid var(--primary)',
+                    backgroundColor: 'transparent',
+                    color: 'var(--primary)',
+                    fontSize: '11px',
+                    fontWeight: 800,
+                    cursor: 'pointer',
+                  }}
+                >
+                  📍 Use my live location
+                </button>
+              )}
             </div>
           </div>
           <button

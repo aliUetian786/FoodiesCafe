@@ -465,6 +465,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         : 72
   );
   const [riderAvailability, setRiderAvailability] = useState<'available' | 'busy' | 'offline'>('available');
+  // When the rider last changed duty status on this device. Polls ignore the server value for a few
+  // seconds after that so an in-flight PATCH is not overwritten by an older snapshot.
+  const riderAvailabilityChangedAtRef = useRef(0);
   const [customerCoordinates, setCustomerCoordinatesState] = useState<{ lat: number; lng: number }>({
     lat: 31.5204,
     lng: 74.3587,
@@ -589,6 +592,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
             const u = JSON.parse(savedStaff);
             setStaffUserState(u);
             setRoleState(u.role);
+            if (u.role === 'delivery_staff' && u.riderAvailability) {
+              setRiderAvailability(u.riderAvailability);
+            }
             if (u.branchId) {
               const normB = normalizeBranchId(u.branchId);
               setCurrentBranchId(normB);
@@ -1077,6 +1083,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                 (u: MobileUser) => u.id === staffUser.id || u.email.toLowerCase() === staffUser.email.toLowerCase()
               );
               if (freshSelf) {
+                // Keep the rider console's duty badge equal to what the server (and the cashier) sees.
+                if (
+                  freshSelf.role === 'delivery_staff' &&
+                  freshSelf.riderAvailability &&
+                  Date.now() - riderAvailabilityChangedAtRef.current > 8000
+                ) {
+                  setRiderAvailability(freshSelf.riderAvailability);
+                }
                 if (freshSelf.status !== 'active') {
                   setStaffUserState(null);
                   setAppModeState('customer');
@@ -1209,6 +1223,22 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       if (pwd !== expPwd && pwd !== (liveUser as any).pin) {
         showToast('Invalid staff password or credentials.', 'danger');
         return;
+      }
+    }
+
+    // A rider who signs in is going on duty. Their duty status used to stay at whatever the server last
+    // had (often 'offline') while the console showed "Online", so the cashier saw no free riders.
+    if (liveUser.role === 'delivery_staff') {
+      const serverAvailability = (liveUser as any).riderAvailability as 'available' | 'busy' | 'offline' | undefined;
+      const onDuty: 'available' | 'busy' = serverAvailability === 'busy' ? 'busy' : 'available';
+      liveUser = { ...liveUser, riderAvailability: onDuty } as MobileUser;
+      riderAvailabilityChangedAtRef.current = Date.now();
+      setRiderAvailability(onDuty);
+      if (serverAvailability !== onDuty) {
+        apiFetch('/api/users', {
+          method: 'PATCH',
+          body: JSON.stringify({ id: liveUser.id, riderAvailability: onDuty }),
+        }).catch(() => { });
       }
     }
 
@@ -4028,6 +4058,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   // Rider Actions
   const updateRiderAvailability = (status: 'available' | 'busy' | 'offline', riderId?: string) => {
     const targetId = riderId || currentUser?.id;
+    riderAvailabilityChangedAtRef.current = Date.now();
     setRiderAvailability(status);
 
     setUsers((prev) =>

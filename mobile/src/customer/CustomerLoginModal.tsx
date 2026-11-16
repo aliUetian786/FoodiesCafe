@@ -3,14 +3,12 @@ import {
   View,
   Text,
   StyleSheet,
-  Modal,
   TextInput,
   TouchableOpacity,
   ActivityIndicator,
   ScrollView,
-  KeyboardAvoidingView,
-  Platform,
 } from 'react-native';
+import { KeyboardSafeModal as Modal } from '../components/KeyboardSafeModal';
 import { Colors } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import { apiFetch } from '../services/api';
@@ -164,12 +162,10 @@ export function CustomerLoginModal({ visible, onClose, onSuccess }: CustomerLogi
 
   return (
     <>
-    <Modal visible={visible} transparent animationType="slide" onRequestClose={onClose} statusBarTranslucent={true}>
-      <KeyboardAvoidingView
-        behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-        style={styles.backdrop}
-      >
-        <View style={styles.sheet}>
+    <Modal visible={visible} transparent animationType="fade" onRequestClose={onClose} statusBarTranslucent={true}>
+      {/* Centred pop-up card (not a bottom sheet). KeyboardSafeModal re-centres it above the keyboard. */}
+      <View style={styles.backdrop}>
+        <View style={styles.card}>
           {/* Header */}
           <View style={styles.headerRow}>
             <View>
@@ -183,7 +179,11 @@ export function CustomerLoginModal({ visible, onClose, onSuccess }: CustomerLogi
             </TouchableOpacity>
           </View>
 
-          <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.scrollContent}>
+          <ScrollView
+            showsVerticalScrollIndicator={false}
+            keyboardShouldPersistTaps="handled"
+            contentContainerStyle={styles.scrollContent}
+          >
             {step === 'info' ? (
               <View>
                 <Text style={styles.instructions}>
@@ -302,7 +302,7 @@ export function CustomerLoginModal({ visible, onClose, onSuccess }: CustomerLogi
             )}
           </ScrollView>
         </View>
-      </KeyboardAvoidingView>
+      </View>
     </Modal>
     <HistoricalLoadingModal visible={loading && visible} />
     </>
@@ -313,15 +313,23 @@ const styles = StyleSheet.create({
   backdrop: {
     flex: 1,
     backgroundColor: 'rgba(0, 0, 0, 0.5)',
-    justifyContent: 'flex-end',
-  },
-  sheet: {
-    backgroundColor: Colors.bgCard,
-    borderTopLeftRadius: 24,
-    borderTopRightRadius: 24,
+    justifyContent: 'center',
+    alignItems: 'center',
     padding: 20,
-    paddingBottom: Platform.OS === 'ios' ? 34 : 24,
-    maxHeight: '90%',
+  },
+  card: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: Colors.bgCard,
+    borderRadius: 22,
+    padding: 20,
+    paddingBottom: 8,
+    maxHeight: '88%',
+    shadowColor: '#000',
+    shadowOpacity: 0.25,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 12,
   },
   headerRow: {
     flexDirection: 'row',
@@ -352,7 +360,7 @@ const styles = StyleSheet.create({
   },
   scrollContent: {
     paddingTop: 16,
-    paddingBottom: 30,
+    paddingBottom: 16,
   },
   instructions: {
     fontSize: 12,

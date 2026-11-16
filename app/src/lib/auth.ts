@@ -297,6 +297,17 @@ export async function writeAuditLog(params: {
   newValue?: string | null;
 }): Promise<void> {
   try {
+    // Token-authenticated requests carry no display name; resolve the real person so the owner
+    // sees "Ahmed (cashier)" instead of "cashier (cashier)".
+    let actorName = params.actorName;
+    const nameIsGeneric =
+      !actorName || actorName === params.actorRole || actorName.toLowerCase() === 'cashier' || actorName.toLowerCase() === 'staff';
+    if (nameIsGeneric && params.actorId && params.actorId !== 'system') {
+      try {
+        const u = await query(`SELECT name FROM users WHERE id = $1 LIMIT 1`, [params.actorId]);
+        if (u.rows[0]?.name) actorName = u.rows[0].name;
+      } catch {}
+    }
     const logId = `aud-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
     await query(
       `INSERT INTO audit_logs (
@@ -305,7 +316,7 @@ export async function writeAuditLog(params: {
       [
         logId,
         params.actorId || 'system',
-        params.actorName || 'System',
+        actorName || 'System',
         params.actorRole || 'system',
         params.branchId ? normalizeBranchId(params.branchId) : null,
         params.action,

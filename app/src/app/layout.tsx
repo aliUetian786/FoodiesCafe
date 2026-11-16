@@ -1,7 +1,8 @@
-import type { Metadata } from 'next';
+import type { Metadata, Viewport } from 'next';
 import './globals.css';
 import { StoreProvider } from '@/redux/StoreProvider';
 import { AppProvider } from '@/context/AppContext';
+import { KeyboardInputLift } from '@/components/common/KeyboardInputLift';
 
 export const metadata: Metadata = {
   title: 'FoodiesCafe',
@@ -13,6 +14,14 @@ export const metadata: Metadata = {
     ],
     apple: '/apple-icon.png',
   },
+};
+
+// Phone keyboards shrink the page instead of covering it, so centred pop-ups (login, OTP, checkout)
+// re-centre above the keyboard and the focused input stays visible.
+export const viewport: Viewport = {
+  width: 'device-width',
+  initialScale: 1,
+  interactiveWidget: 'resizes-content',
 };
 
 export default function RootLayout({
@@ -30,6 +39,7 @@ export default function RootLayout({
       <body>
         <StoreProvider>
           <AppProvider>
+            <KeyboardInputLift />
             {children}
           </AppProvider>
         </StoreProvider>

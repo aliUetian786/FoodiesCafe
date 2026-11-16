@@ -684,6 +684,18 @@ export async function POST(request: Request) {
           title: 'Order Placed Successfully!',
           message: `Order #${txResult.order.orderNumber} has been received at ${txResult.order.branchId}.`,
         });
+
+        if (auth.authenticated && (auth.role === 'cashier' || auth.role === 'branch_manager')) {
+          await writeAuditLog({
+            actorId: auth.userId,
+            actorName: auth.userName || auth.role,
+            actorRole: auth.role,
+            branchId: txResult.order.branchId,
+            action: 'order_created_by_staff',
+            details: `Order #${txResult.order.orderNumber} (${txResult.order.type}) created at the counter: Rs. ${txResult.order.total}, payment ${txResult.order.paymentStatus}`,
+            newValue: String(txResult.order.total),
+          });
+        }
       } catch {}
     }
 
@@ -1337,6 +1349,8 @@ export async function PATCH(request: Request) {
 
       return {
         status: 200,
+        changeType,
+        oldTotal: currentTotal,
         oldStatus: currentStatus,
         oldPaymentStatus: currentPaymentStatus,
         previousWaiterId: currentOrder.assigned_waiter_id || null,
@@ -1434,6 +1448,38 @@ export async function PATCH(request: Request) {
               details: `Order #${updatedOrder.orderNumber} cancelled from status '${txResult.oldStatus}'. Notes: ${notes || 'N/A'}`,
               oldValue: txResult.oldStatus,
               newValue: 'cancelled',
+            });
+          }
+        }
+
+        // Owner audit trail: every change a cashier or branch manager makes to an order
+        const auditActorRole = txResult.actorRole;
+        if (
+          (auditActorRole === 'cashier' || auditActorRole === 'branch_manager') &&
+          updatedOrder.status !== 'cancelled'
+        ) {
+          const tx: any = txResult;
+          const paymentChanged = updatedOrder.paymentStatus !== txResult.oldPaymentStatus;
+          const statusChanged = updatedOrder.status !== txResult.oldStatus;
+          const itemsEdited = tx.changeType === 'items_edited';
+          if (paymentChanged || statusChanged || itemsEdited) {
+            const parts: string[] = [];
+            if (itemsEdited) parts.push(`items edited (total Rs. ${tx.oldTotal} -> Rs. ${updatedOrder.total})`);
+            if (statusChanged) parts.push(`status '${txResult.oldStatus}' -> '${updatedOrder.status}'`);
+            if (paymentChanged) parts.push(`payment '${txResult.oldPaymentStatus}' -> '${updatedOrder.paymentStatus}' (Rs. ${updatedOrder.total})`);
+            await writeAuditLog({
+              actorId: txResult.actorId,
+              actorName: txResult.actorName || auditActorRole,
+              actorRole: auditActorRole,
+              branchId: updatedOrder.branchId,
+              action: paymentChanged
+                ? `order_payment_${updatedOrder.paymentStatus}`
+                : itemsEdited
+                ? 'order_items_edited'
+                : 'order_status_changed',
+              details: `Order #${updatedOrder.orderNumber}: ${parts.join('; ')}`,
+              oldValue: paymentChanged ? txResult.oldPaymentStatus : txResult.oldStatus,
+              newValue: paymentChanged ? updatedOrder.paymentStatus : updatedOrder.status,
             });
           }
         }
