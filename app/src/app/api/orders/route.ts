@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import type { PoolClient } from 'pg';
 import { query, withTransaction } from '@/lib/db';
 import { createOrderSchema, updateOrderSchema } from '@/lib/validations';
 import { broadcastRealtimeEvent } from '@/lib/realtime';
@@ -187,6 +188,18 @@ export async function GET(request: Request) {
   }
 }
 
+/** Allocates an unused order number (FC-#### first, widening to more digits if that space is crowded). */
+async function generateUniqueOrderNumber(client: PoolClient): Promise<string> {
+  for (let attempt = 0; attempt < 20; attempt++) {
+    const digits = attempt < 8 ? 4 : attempt < 14 ? 5 : 6;
+    const min = 10 ** (digits - 1);
+    const candidate = `FC-${Math.floor(min + Math.random() * 9 * min)}`;
+    const taken = await client.query(`SELECT 1 FROM orders WHERE order_number = $1 LIMIT 1`, [candidate]);
+    if (taken.rows.length === 0) return candidate;
+  }
+  return `FC-${Date.now().toString().slice(-8)}`;
+}
+
 export async function POST(request: Request) {
   const startTime = Date.now();
   const requestId = generateRequestId(request);
@@ -231,7 +244,7 @@ export async function POST(request: Request) {
 
     const {
       id,
-      orderNumber,
+      orderNumber: requestedOrderNumber,
       branchId,
       customerId = 'user-guest',
       customerName,
@@ -272,6 +285,8 @@ export async function POST(request: Request) {
 
     const normBranchId = normalizeBranchId(branchId);
     const finalOrderId = id || `ord-${Date.now()}`;
+    // May be replaced inside the transaction if another order already uses this number.
+    let orderNumber: string = requestedOrderNumber;
 
     const auth = getAuthFromRequest(request, body);
     const allowCustomPricing =
@@ -326,16 +341,20 @@ export async function POST(request: Request) {
         }
       }
 
-      const existingById = await client.query(
-        `SELECT * FROM orders WHERE id = $1 OR order_number = $2 LIMIT 1`,
-        [finalOrderId, orderNumber]
-      );
+      const existingById = await client.query(`SELECT * FROM orders WHERE id = $1 LIMIT 1`, [finalOrderId]);
       if (existingById.rows.length > 0) {
         return {
           status: 200,
           idempotentReplay: true,
           order: formatOrderRow(existingById.rows[0]),
         };
+      }
+
+      // Clients pick a random 4-digit FC-#### number, so two different orders can collide.
+      // Previously a collision was treated as a "replay" and the NEW order was silently dropped.
+      const numberTaken = await client.query(`SELECT id FROM orders WHERE order_number = $1 LIMIT 1`, [orderNumber]);
+      if (numberTaken.rows.length > 0) {
+        orderNumber = await generateUniqueOrderNumber(client);
       }
 
       // 2. Validate Branch Open, Busy Pause & Hours (cached for 20s, invalidated on branch edits)
