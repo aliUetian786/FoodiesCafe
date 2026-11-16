@@ -1,0 +1,1037 @@
+-- ============================================================================
+
+-- FoodiesCafe Complete All-In-One Database Setup for Supabase
+
+-- Instructions: Open Supabase Dashboard -> SQL Editor -> New Query
+
+-- Paste this entire file and click "Run" (Ctrl+Enter / Cmd+Enter)
+
+-- ============================================================================
+
+
+
+-- ============================================================================
+-- FoodiesCafe PostgreSQL Database Schema (schema.sql)
+-- Multi-Branch Real-Time Cafe Management System
+-- Compatible with PostgreSQL 13+ (including AWS RDS, Supabase, Neon, Local PG)
+-- ============================================================================
+
+-- Extensions (UUID generation)
+CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
+
+-- 1. Branches Table
+CREATE TABLE IF NOT EXISTS branches (
+    id VARCHAR(64) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    city VARCHAR(100) NOT NULL,
+    address TEXT NOT NULL,
+    phone VARCHAR(50) NOT NULL,
+    opening_hours VARCHAR(100) NOT NULL,
+    is_open BOOLEAN NOT NULL DEFAULT true,
+    is_busy BOOLEAN NOT NULL DEFAULT false,
+    prep_time_estimate_min INT NOT NULL DEFAULT 25,
+    full_edit_window_min INT NOT NULL DEFAULT 10,
+    stop_add_ons_min_before_ready INT NOT NULL DEFAULT 5,
+    delivery_enabled BOOLEAN NOT NULL DEFAULT true,
+    latitude DOUBLE PRECISION,
+    longitude DOUBLE PRECISION,
+    max_order_distance_km DOUBLE PRECISION NOT NULL DEFAULT 50,
+    table_qr_max_distance_meters INT NOT NULL DEFAULT 300,
+    min_delivery_amount INT NOT NULL DEFAULT 500,
+    payment_settings JSONB NOT NULL DEFAULT '{"dine_in":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"takeaway":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"delivery":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false}}',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+ALTER TABLE branches ADD COLUMN IF NOT EXISTS min_delivery_amount INT NOT NULL DEFAULT 500;
+
+-- 2. Users Table (Staff & Customers)
+CREATE TABLE IF NOT EXISTS users (
+    id VARCHAR(64) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    phone VARCHAR(50) NOT NULL,
+    email VARCHAR(255),
+    address TEXT,
+    role VARCHAR(50) NOT NULL,
+    branch_id VARCHAR(64) REFERENCES branches(id) ON DELETE SET NULL,
+    status VARCHAR(20) NOT NULL DEFAULT 'active',
+    no_show_count INT NOT NULL DEFAULT 0,
+    password_hash VARCHAR(255),
+    rider_availability VARCHAR(30) DEFAULT 'available',
+    rider_total_deliveries INT DEFAULT 0,
+    rider_active_order_id VARCHAR(64),
+    assigned_floor VARCHAR(100),
+    assigned_table_numbers JSONB DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_users_phone ON users(phone);
+CREATE INDEX IF NOT EXISTS idx_users_branch_id ON users(branch_id);
+CREATE INDEX IF NOT EXISTS idx_users_role ON users(role);
+
+-- 3. Menu Categories Table
+CREATE TABLE IF NOT EXISTS categories (
+    id VARCHAR(64) PRIMARY KEY,
+    name VARCHAR(100) NOT NULL UNIQUE,
+    display_order INT NOT NULL DEFAULT 0
+);
+
+-- 4. Menu Items Table
+CREATE TABLE IF NOT EXISTS menu_items (
+    id VARCHAR(64) PRIMARY KEY,
+    name VARCHAR(255) NOT NULL,
+    category VARCHAR(100) NOT NULL,
+    description TEXT NOT NULL,
+    base_price NUMERIC(10, 2) NOT NULL,
+    image TEXT NOT NULL,
+    is_available BOOLEAN NOT NULL DEFAULT true,
+    branch_availability JSONB NOT NULL DEFAULT '{}'::jsonb,
+    branch_price_overrides JSONB NOT NULL DEFAULT '{}'::jsonb,
+    sizes JSONB NOT NULL DEFAULT '[]'::jsonb,
+    extras JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_menu_items_category ON menu_items(category);
+
+-- 5. Restaurant Tables Table
+CREATE TABLE IF NOT EXISTS tables (
+    id VARCHAR(64) PRIMARY KEY,
+    number VARCHAR(20) NOT NULL,
+    branch_id VARCHAR(64) NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+    capacity INT NOT NULL DEFAULT 4,
+    chairs INT NOT NULL DEFAULT 4,
+    floor VARCHAR(100) NOT NULL DEFAULT 'Ground Floor',
+    status VARCHAR(30) NOT NULL DEFAULT 'available',
+    current_order_id VARCHAR(64),
+    seated_at TIMESTAMPTZ,
+    reserved_for VARCHAR(255),
+    pin VARCHAR(10),
+    qr_code TEXT,
+    qr_expires_at TIMESTAMPTZ,
+    allow_qr_reserved BOOLEAN DEFAULT false,
+    assigned_waiter_id VARCHAR(64),
+    assigned_waiter_name VARCHAR(255),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    UNIQUE(branch_id, number)
+);
+CREATE INDEX IF NOT EXISTS idx_tables_branch_status ON tables(branch_id, status);
+
+-- 6. Orders Table
+CREATE TABLE IF NOT EXISTS orders (
+    id VARCHAR(64) PRIMARY KEY,
+    order_number VARCHAR(50) NOT NULL UNIQUE,
+    branch_id VARCHAR(64) NOT NULL REFERENCES branches(id),
+    customer_id VARCHAR(64) NOT NULL,
+    customer_name VARCHAR(255) NOT NULL,
+    customer_phone VARCHAR(50) NOT NULL,
+    customer_email VARCHAR(255),
+    type VARCHAR(30) NOT NULL,
+    table_number VARCHAR(20),
+    table_pin VARCHAR(10),
+    pickup_time VARCHAR(100),
+    status VARCHAR(30) NOT NULL DEFAULT 'placed',
+    payment_status VARCHAR(30) NOT NULL DEFAULT 'unpaid',
+    payment_method VARCHAR(50) NOT NULL DEFAULT 'Cash',
+    items JSONB NOT NULL DEFAULT '[]'::jsonb,
+    original_subtotal NUMERIC(10, 2) NOT NULL DEFAULT 0,
+    add_on_subtotal NUMERIC(10, 2) NOT NULL DEFAULT 0,
+    tax NUMERIC(10, 2) NOT NULL DEFAULT 0,
+    total NUMERIC(10, 2) NOT NULL DEFAULT 0,
+    preparation_started_at TIMESTAMPTZ,
+    ready_time_estimated TIMESTAMPTZ,
+    completed_at TIMESTAMPTZ,
+    notes TEXT,
+    delivery_address TEXT,
+    version INT NOT NULL DEFAULT 1,
+    cashier_id VARCHAR(64),
+    cashier_name VARCHAR(255),
+    is_walk_in BOOLEAN DEFAULT false,
+    assigned_rider_id VARCHAR(64),
+    assigned_rider_name VARCHAR(255),
+    rider_status VARCHAR(30),
+    delivered_at TIMESTAMPTZ,
+    payment_collected BOOLEAN DEFAULT false,
+    customer_coordinates JSONB,
+    assigned_waiter_id VARCHAR(64),
+    assigned_waiter_name VARCHAR(255),
+    is_table_qr BOOLEAN DEFAULT false,
+    waiter_notified BOOLEAN DEFAULT false,
+    sent_to_kitchen BOOLEAN DEFAULT false,
+    sent_to_kitchen_at TIMESTAMPTZ,
+    forward_to_kitchen_at TIMESTAMPTZ,
+    auto_forward_custom_min INT,
+    idempotency_key VARCHAR(128),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_order_number_unique ON orders(order_number);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_idempotency_key_unique ON orders(idempotency_key) WHERE idempotency_key IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_orders_branch_status_created_at ON orders(branch_id, status, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_orders_customer_created_at ON orders(customer_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_orders_branch_id ON orders(branch_id);
+CREATE INDEX IF NOT EXISTS idx_orders_status ON orders(status);
+CREATE INDEX IF NOT EXISTS idx_orders_customer_id ON orders(customer_id);
+CREATE INDEX IF NOT EXISTS idx_orders_created_at ON orders(created_at DESC);
+
+-- 7. Cash Register Shifts Table
+CREATE TABLE IF NOT EXISTS cash_shifts (
+    id VARCHAR(64) PRIMARY KEY,
+    cashier_id VARCHAR(64) NOT NULL,
+    cashier_name VARCHAR(255) NOT NULL,
+    branch_id VARCHAR(64) NOT NULL REFERENCES branches(id),
+    opened_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    closed_at TIMESTAMPTZ,
+    opening_float NUMERIC(10, 2) NOT NULL DEFAULT 0,
+    cash_collected NUMERIC(10, 2) NOT NULL DEFAULT 0,
+    expected_cash NUMERIC(10, 2) NOT NULL DEFAULT 0,
+    counted_cash NUMERIC(10, 2),
+    difference NUMERIC(10, 2),
+    difference_reason TEXT,
+    status VARCHAR(20) NOT NULL DEFAULT 'open'
+);
+CREATE INDEX IF NOT EXISTS idx_cash_shifts_branch_status ON cash_shifts(branch_id, status);
+
+-- 9. Refund Requests Table
+CREATE TABLE IF NOT EXISTS refund_requests (
+    id VARCHAR(64) PRIMARY KEY,
+    order_id VARCHAR(64) NOT NULL,
+    order_number VARCHAR(50) NOT NULL,
+    branch_id VARCHAR(64) NOT NULL REFERENCES branches(id),
+    amount NUMERIC(10, 2) NOT NULL,
+    reason TEXT NOT NULL,
+    requested_by VARCHAR(255) NOT NULL,
+    status VARCHAR(30) NOT NULL DEFAULT 'requested',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    approved_by VARCHAR(255),
+    approved_at TIMESTAMPTZ
+);
+CREATE INDEX IF NOT EXISTS idx_refund_requests_branch ON refund_requests(branch_id);
+
+-- 10. Audit Logs Table
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id VARCHAR(64) PRIMARY KEY,
+    timestamp TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    actor_id VARCHAR(64) NOT NULL,
+    actor_name VARCHAR(255) NOT NULL,
+    actor_role VARCHAR(50) NOT NULL,
+    branch_id VARCHAR(64),
+    action VARCHAR(50) NOT NULL,
+    details TEXT NOT NULL,
+    old_value TEXT,
+    new_value TEXT
+);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_branch_created_at ON audit_logs(branch_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_timestamp ON audit_logs(timestamp DESC);
+
+-- 11. Marketing Hero Banners
+CREATE TABLE IF NOT EXISTS hero_banners (
+    id VARCHAR(64) PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    subtitle TEXT NOT NULL,
+    badge VARCHAR(100),
+    image_url TEXT NOT NULL,
+    category_link VARCHAR(100),
+    active BOOLEAN NOT NULL DEFAULT true,
+    display_order INT NOT NULL DEFAULT 0
+);
+
+-- 12. Deals Table
+CREATE TABLE IF NOT EXISTS deal_cards (
+    id VARCHAR(64) PRIMARY KEY DEFAULT 'primary-deal',
+    title VARCHAR(255) NOT NULL,
+    subtitle TEXT NOT NULL,
+    price VARCHAR(50) NOT NULL,
+    tag VARCHAR(50) NOT NULL,
+    image_url TEXT NOT NULL,
+    category_link VARCHAR(100)
+);
+
+-- 13. Banner & Deal Approval Requests (Representative Workflow)
+CREATE TABLE IF NOT EXISTS banner_deal_approval_requests (
+    id VARCHAR(64) PRIMARY KEY,
+    type VARCHAR(20) NOT NULL,
+    action VARCHAR(20) NOT NULL,
+    target_id VARCHAR(64),
+    submitted_by VARCHAR(255) NOT NULL,
+    submitted_by_role VARCHAR(50) NOT NULL,
+    submitted_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    status VARCHAR(20) NOT NULL DEFAULT 'pending',
+    banner_data JSONB,
+    deal_data JSONB,
+    decision_by VARCHAR(255),
+    decision_at TIMESTAMPTZ,
+    notes TEXT
+);
+
+-- 14. Global Footer Settings Table
+CREATE TABLE IF NOT EXISTS footer_settings (
+    id VARCHAR(64) PRIMARY KEY DEFAULT 'default',
+    helpline VARCHAR(50) NOT NULL,
+    email VARCHAR(255) NOT NULL,
+    hours VARCHAR(100) NOT NULL,
+    address_lahore TEXT NOT NULL,
+    address_islamabad TEXT NOT NULL,
+    address_karachi TEXT NOT NULL,
+    tagline TEXT NOT NULL,
+    copyright_text TEXT NOT NULL,
+    whatsapp VARCHAR(50),
+    instagram VARCHAR(100),
+    facebook VARCHAR(100),
+    tiktok VARCHAR(100),
+    order_routing_support_first BOOLEAN NOT NULL DEFAULT true,
+    auto_forward_kitchen_min INT NOT NULL DEFAULT 3,
+    auto_forward_mode VARCHAR(30) NOT NULL DEFAULT 'timed',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS whatsapp VARCHAR(50);
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS instagram VARCHAR(100);
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS facebook VARCHAR(100);
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS tiktok VARCHAR(100);
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS order_routing_support_first BOOLEAN DEFAULT true;
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS auto_forward_kitchen_min INT DEFAULT 3;
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS auto_forward_mode VARCHAR(30) DEFAULT 'timed';
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_enabled BOOLEAN DEFAULT true;
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_badge VARCHAR(64);
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_title TEXT;
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_message TEXT;
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_type VARCHAR(30) DEFAULT 'promo';
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_updated_by VARCHAR(150);
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_updated_at VARCHAR(100);
+
+
+-- 15. Table Occupancy Sessions (Manager & Floor Tracking)
+CREATE TABLE IF NOT EXISTS table_sessions (
+    id VARCHAR(64) PRIMARY KEY,
+    table_id VARCHAR(64) NOT NULL,
+    table_number VARCHAR(20) NOT NULL,
+    branch_id VARCHAR(64) NOT NULL REFERENCES branches(id) ON DELETE CASCADE,
+    floor VARCHAR(100) NOT NULL DEFAULT 'Ground Floor',
+    started_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    ended_at TIMESTAMPTZ,
+    duration_min INT,
+    customer_name VARCHAR(255),
+    order_id VARCHAR(64),
+    order_number VARCHAR(50),
+    waiter_name VARCHAR(255) DEFAULT 'Kashif Ali (Floor Staff)',
+    total_amount NUMERIC(10, 2) DEFAULT 0,
+    status VARCHAR(30) NOT NULL DEFAULT 'occupied',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_table_sessions_branch ON table_sessions(branch_id);
+CREATE INDEX IF NOT EXISTS idx_table_sessions_started ON table_sessions(started_at DESC);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_table_sessions_one_active_per_table ON table_sessions(branch_id, table_number) WHERE status = 'occupied';
+
+-- 15b. Order Status & Edit History Table
+CREATE TABLE IF NOT EXISTS order_history (
+    id VARCHAR(64) PRIMARY KEY,
+    order_id VARCHAR(64) NOT NULL REFERENCES orders(id) ON DELETE CASCADE,
+    order_number VARCHAR(50) NOT NULL,
+    branch_id VARCHAR(64) NOT NULL,
+    actor_id VARCHAR(64) NOT NULL DEFAULT 'system',
+    actor_name VARCHAR(255) NOT NULL DEFAULT 'System',
+    actor_role VARCHAR(50) NOT NULL DEFAULT 'system',
+    change_type VARCHAR(50) NOT NULL,
+    old_status VARCHAR(30),
+    new_status VARCHAR(30),
+    old_payment_status VARCHAR(30),
+    new_payment_status VARCHAR(30),
+    old_total NUMERIC(10, 2),
+    new_total NUMERIC(10, 2),
+    version INT NOT NULL DEFAULT 1,
+    details TEXT,
+    payload JSONB,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_order_history_order_id_created_at ON order_history(order_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_order_history_branch_created_at ON order_history(branch_id, created_at DESC);
+
+-- 16. Announcements & Info Table
+CREATE TABLE IF NOT EXISTS announcements (
+    id VARCHAR(64) PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    tag VARCHAR(64) NOT NULL DEFAULT 'ANNOUNCEMENT',
+    description TEXT NOT NULL,
+    valid_until VARCHAR(100),
+    branch_id VARCHAR(64) REFERENCES branches(id) ON DELETE SET NULL,
+    branch_name VARCHAR(100),
+    discount_percent INT,
+    badge_color VARCHAR(50) DEFAULT '#EF4444',
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+CREATE INDEX IF NOT EXISTS idx_announcements_branch ON announcements(branch_id);
+CREATE INDEX IF NOT EXISTS idx_announcements_created ON announcements(created_at DESC);
+
+-- 17. Email OTP Verifications Table
+CREATE TABLE IF NOT EXISTS email_otps (
+    email VARCHAR(255) PRIMARY KEY,
+    code VARCHAR(10) NOT NULL,
+    expires_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_email_otps_email ON email_otps(email);
+
+-- 18. Real-Time Notifications Table
+CREATE TABLE IF NOT EXISTS notifications (
+    id VARCHAR(100) PRIMARY KEY,
+    title VARCHAR(255) NOT NULL,
+    message TEXT NOT NULL,
+    type VARCHAR(30) NOT NULL DEFAULT 'info',
+    category VARCHAR(50) NOT NULL DEFAULT 'system',
+    branch_id VARCHAR(100) DEFAULT 'all',
+    order_id VARCHAR(100),
+    order_number VARCHAR(64),
+    order_type VARCHAR(30),
+    sender_id VARCHAR(100),
+    sender_name VARCHAR(150),
+    sender_role VARCHAR(50),
+    target_roles JSONB NOT NULL DEFAULT '["all"]'::jsonb,
+    target_platform VARCHAR(20) NOT NULL DEFAULT 'all',
+    target_user_id VARCHAR(100),
+    target_customer_phone VARCHAR(50),
+    target_customer_name VARCHAR(150),
+    target_waiter_id VARCHAR(100),
+    target_waiter_name VARCHAR(150),
+    target_rider_id VARCHAR(100),
+    target_rider_name VARCHAR(150),
+    read_by JSONB NOT NULL DEFAULT '[]'::jsonb,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_platform VARCHAR(20) DEFAULT 'all';
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_waiter_id VARCHAR(100);
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_waiter_name VARCHAR(150);
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_rider_id VARCHAR(100);
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_rider_name VARCHAR(150);
+CREATE INDEX IF NOT EXISTS idx_notifications_created_at ON notifications(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_notifications_branch_id ON notifications(branch_id);
+
+-- 19. Automated Notification Settings Table (Persistent Across Restarts)
+CREATE TABLE IF NOT EXISTS notification_settings (
+    id VARCHAR(64) PRIMARY KEY DEFAULT 'global',
+    default_platform VARCHAR(20) NOT NULL DEFAULT 'all',
+    notify_customer BOOLEAN NOT NULL DEFAULT true,
+    notify_concerned_rider BOOLEAN NOT NULL DEFAULT true,
+    notify_concerned_waiter BOOLEAN NOT NULL DEFAULT true,
+    notify_kitchen BOOLEAN NOT NULL DEFAULT true,
+    notify_cashier_and_manager BOOLEAN NOT NULL DEFAULT true,
+    events JSONB NOT NULL DEFAULT '{"orderPlaced":true,"sentToKitchen":true,"cooking":true,"orderReady":true,"outForDelivery":true,"orderServed":true,"orderCompleted":true,"orderCancelled":true,"waiterAssigned":true,"riderAssigned":true,"paymentReceived":true}'::jsonb,
+    recipient_rules JSONB NOT NULL DEFAULT '{"customer":{"orderPlaced":true,"cooking":true,"orderReady":true,"outForDelivery":true,"orderCompleted":true,"orderCancelled":true},"rider":{"orderAssigned":true,"orderReady":true,"orderCancelled":true},"waiter":{"orderAssigned":true,"orderReady":true,"orderCancelled":true},"kitchen":{"newOrderPlaced":true,"orderCancelled":true},"cashierAndManager":{"orderPlaced":true,"orderCancelled":true,"paymentReceived":true}}'::jsonb,
+    updated_by VARCHAR(150),
+    updated_by_role VARCHAR(50),
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS recipient_rules JSONB;
+INSERT INTO notification_settings (id, default_platform, notify_customer, notify_concerned_rider, notify_concerned_waiter, notify_kitchen, notify_cashier_and_manager)
+VALUES ('global', 'all', true, true, true, true, true)
+ON CONFLICT (id) DO NOTHING;
+
+-- 20. Custom Receiver Notification Settings Table
+CREATE TABLE IF NOT EXISTS receiver_notification_settings (
+    receiver_key VARCHAR(150) PRIMARY KEY,
+    settings JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+
+
+
+
+
+
+-- ============================================================================
+-- Extra Columns and Auxiliary Tables Migration (Idempotent)
+-- ============================================================================
+ALTER TABLE branches ADD COLUMN IF NOT EXISTS min_delivery_amount INT NOT NULL DEFAULT 500;
+ALTER TABLE tables ADD COLUMN IF NOT EXISTS assigned_waiter_id VARCHAR(64);
+ALTER TABLE tables ADD COLUMN IF NOT EXISTS assigned_waiter_name VARCHAR(255);
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS whatsapp VARCHAR(50);
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS instagram VARCHAR(100);
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS facebook VARCHAR(100);
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS tiktok VARCHAR(100);
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS order_routing_support_first BOOLEAN DEFAULT true;
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS auto_forward_kitchen_min INT DEFAULT 3;
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS auto_forward_mode VARCHAR(30) DEFAULT 'timed';
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_enabled BOOLEAN DEFAULT true;
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_badge VARCHAR(64);
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_title TEXT;
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_message TEXT;
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_type VARCHAR(30) DEFAULT 'promo';
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_updated_by VARCHAR(150);
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_updated_at VARCHAR(100);
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_platform VARCHAR(20) DEFAULT 'all';
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_waiter_id VARCHAR(100);
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_waiter_name VARCHAR(150);
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_rider_id VARCHAR(100);
+ALTER TABLE notifications ADD COLUMN IF NOT EXISTS target_rider_name VARCHAR(150);
+ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS recipient_rules JSONB;
+
+CREATE TABLE IF NOT EXISTS receiver_notification_settings (
+    receiver_key VARCHAR(150) PRIMARY KEY,
+    settings JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+
+-- ============================================================================
+-- FoodiesCafe PostgreSQL Database Seed Data (seed.sql)
+-- Initial master data for branches, menu items, users, tables, and settings
+-- ============================================================================
+
+-- 1. Branches Seed
+INSERT INTO branches (id, name, city, address, phone, opening_hours, is_open, is_busy, prep_time_estimate_min, full_edit_window_min, stop_add_ons_min_before_ready, delivery_enabled, max_order_distance_km, table_qr_max_distance_meters, min_delivery_amount, payment_settings)
+VALUES
+(
+    'gulberg-lahore',
+    'Gulberg Branch (Flagship)',
+    'Lahore',
+    '92-B2, Mian Mehmood Ali Kasoori Rd, Gulberg III, Lahore',
+    '+92 42 3578 9101',
+    '11:00 AM - 1:00 AM',
+    true,
+    false,
+    20,
+    15,
+    10,
+    true,
+    50,
+    300,
+    500,
+    '{"dine_in":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"takeaway":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"delivery":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":true}}'::jsonb
+),
+(
+    'f7-islamabad',
+    'F-7 Markaz Branch',
+    'Islamabad',
+    'Shop 4-B, College Road, F-7 Markaz, Islamabad',
+    '+92 51 2654 321',
+    '12:00 PM - 12:00 AM',
+    true,
+    true,
+    30,
+    15,
+    10,
+    true,
+    50,
+    300,
+    500,
+    '{"dine_in":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"takeaway":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"delivery":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false}}'::jsonb
+),
+(
+    'clifton-karachi',
+    'Clifton Block 4 Branch',
+    'Karachi',
+    'Plot 12-C, 26th Street, Block 4, Clifton, Karachi',
+    '+92 21 3587 6543',
+    '1:00 PM - 2:00 AM',
+    true,
+    false,
+    25,
+    15,
+    10,
+    true,
+    50,
+    300,
+    500,
+    '{"dine_in":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"takeaway":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"delivery":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":true}}'::jsonb
+)
+ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    city = EXCLUDED.city,
+    address = EXCLUDED.address,
+    phone = EXCLUDED.phone,
+    opening_hours = EXCLUDED.opening_hours,
+    payment_settings = EXCLUDED.payment_settings;
+
+-- 2. Categories Seed
+INSERT INTO categories (id, name, display_order)
+VALUES
+('cat-1', 'Biryani & Rice', 1),
+('cat-2', 'Karahi & Handi', 2),
+('cat-3', 'BBQ & Kebabs', 3),
+('cat-4', 'Burgers & Fast Food', 4),
+('cat-5', 'Tandoor & Breads', 5),
+('cat-6', 'Beverages & Desserts', 6)
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, display_order = EXCLUDED.display_order;
+
+-- 3. Users Seed
+INSERT INTO users (id, name, phone, email, address, role, branch_id, status, no_show_count, password_hash, rider_availability, rider_total_deliveries, rider_active_order_id)
+VALUES
+('user-cust', 'Zeeshan Ahmed', '+92 301 5551234', 'zeeshan@example.com', 'House 14, Street 9, Model Town, Lahore', 'customer', NULL, 'active', 0, 'password123', NULL, 0, NULL),
+('user-owner', 'Malik Jahangir', '+92 300 0000001', 'owner@foodiescafe.pk', NULL, 'platform_owner', NULL, 'active', 0, 'password123', NULL, 0, NULL),
+('user-bm', 'Rashid Mehmood', '+92 300 2223344', 'manager.gulberg@foodiescafe.pk', NULL, 'branch_manager', 'gulberg-lahore', 'active', 0, 'password123', NULL, 0, NULL),
+('user-kitchen', 'Chef Ustaad Aslam', '+92 300 6667788', 'kitchen.gulberg@foodiescafe.pk', NULL, 'kitchen_staff', 'gulberg-lahore', 'active', 0, 'password123', NULL, 0, NULL),
+('user-cashier', 'Bilal Farooq', '+92 300 8889900', 'cashier.gulberg@foodiescafe.pk', NULL, 'cashier', 'gulberg-lahore', 'active', 0, 'password123', NULL, 0, NULL),
+('user-floor', 'Kashif Ali', '+92 300 1112233', 'floor.gulberg@foodiescafe.pk', NULL, 'floor_staff', 'gulberg-lahore', 'active', 0, 'password123', NULL, 0, NULL),
+('user-rider-1', 'Tariq Mehmood', '+92 301 9991122', 'rider1.gulberg@foodiescafe.pk', NULL, 'delivery_staff', 'gulberg-lahore', 'active', 0, 'password123', 'available', 0, NULL),
+('user-rider-2', 'Usman Ghani', '+92 302 8882233', 'rider2.gulberg@foodiescafe.pk', NULL, 'delivery_staff', 'gulberg-lahore', 'active', 0, 'password123', 'available', 0, NULL),
+-- Islamabad Staff
+('user-bm-isb', 'Noman Bashir', '+92 300 3334455', 'manager.islamabad@foodiescafe.pk', NULL, 'branch_manager', 'f7-islamabad', 'active', 0, 'password123', NULL, 0, NULL),
+('user-cashier-isb', 'Hamza Tariq', '+92 300 3338899', 'cashier.islamabad@foodiescafe.pk', NULL, 'cashier', 'f7-islamabad', 'active', 0, 'password123', NULL, 0, NULL),
+('user-kitchen-isb', 'Chef Imran Khan', '+92 300 3337766', 'kitchen.islamabad@foodiescafe.pk', NULL, 'kitchen_staff', 'f7-islamabad', 'active', 0, 'password123', NULL, 0, NULL),
+('user-floor-isb', 'Fahad Mustafa', '+92 300 3336655', 'floor.islamabad@foodiescafe.pk', NULL, 'floor_staff', 'f7-islamabad', 'active', 0, 'password123', NULL, 0, NULL),
+-- Karachi Staff
+('user-bm-khi', 'Kamran Siddiqui', '+92 300 5556677', 'manager.karachi@foodiescafe.pk', NULL, 'branch_manager', 'clifton-karachi', 'active', 0, 'password123', NULL, 0, NULL),
+('user-cashier-khi', 'Saad Ali', '+92 300 5558899', 'cashier.karachi@foodiescafe.pk', NULL, 'cashier', 'clifton-karachi', 'active', 0, 'password123', NULL, 0, NULL),
+('user-kitchen-khi', 'Chef Zakir Hussain', '+92 300 5557766', 'kitchen.karachi@foodiescafe.pk', NULL, 'kitchen_staff', 'clifton-karachi', 'active', 0, 'password123', NULL, 0, NULL),
+('user-floor-khi', 'Rizwan Ahmed', '+92 300 5556655', 'floor.karachi@foodiescafe.pk', NULL, 'floor_staff', 'clifton-karachi', 'active', 0, 'password123', NULL, 0, NULL)
+ON CONFLICT (id) DO UPDATE SET name = EXCLUDED.name, role = EXCLUDED.role, branch_id = EXCLUDED.branch_id, password_hash = EXCLUDED.password_hash, rider_availability = COALESCE(users.rider_availability, EXCLUDED.rider_availability);
+
+-- 4. Menu Items Seed (Full 20-Item Authentic Menu across all categories)
+INSERT INTO menu_items (id, name, category, description, base_price, image, is_available, branch_availability, branch_price_overrides, sizes, extras)
+VALUES
+(
+    'm1',
+    'Royal Chicken Dum Biryani',
+    'Biryani & Rice',
+    'Fragrant long-grain basmati cooked with saffron, marinated chicken, caramelised onions & secret house spices in a sealed copper handi.',
+    650,
+    '/food-biryani.jpg',
+    true,
+    '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{"gulberg-lahore":750,"f7-islamabad":620,"clifton-karachi":680}'::jsonb,
+    '[{"name":"Regular (Single)","priceDelta":0},{"name":"Jumbo (Double)","priceDelta":350}]'::jsonb,
+    '[{"name":"Extra Zeera Raita","price":60},{"name":"Fresh Kachumber Salad","price":70},{"name":"Extra Boiled Egg","price":50}]'::jsonb
+),
+(
+    'm8',
+    'Mutton Special Dum Biryani',
+    'Biryani & Rice',
+    'Slow-cooked succulent baby mutton pieces layered with aged basmati rice, whole cardamoms, fried onions and saffron steam.',
+    950,
+    '/food-biryani.jpg',
+    true,
+    '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{"gulberg-lahore":1050,"f7-islamabad":920,"clifton-karachi":990}'::jsonb,
+    '[{"name":"Single Pot","priceDelta":0},{"name":"Family Platter (Serves 3)","priceDelta":850}]'::jsonb,
+    '[{"name":"Extra Zeera Raita","price":60},{"name":"Fresh Kachumber Salad","price":70}]'::jsonb
+),
+(
+    'm9',
+    'Matka Dum Biryani with Chicken',
+    'Biryani & Rice',
+    'Traditional earthen clay pot chicken biryani sealed with dough, delivering intense smoky aroma, spiced potatoes and tender chicken.',
+    720,
+    '/food-biryani.jpg',
+    true,
+    '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
+    '[{"name":"Standard Matka","priceDelta":0},{"name":"Jumbo Matka","priceDelta":320}]'::jsonb,
+    '[{"name":"Mint Raita","price":60},{"name":"Spicy Chutney","price":50}]'::jsonb
+),
+(
+    'm2',
+    'Desi Ghee Shinwari Chicken Karahi',
+    'Karahi & Handi',
+    'Fresh country chicken wok-tossed in pure organic desi ghee, ripe tomatoes, coarse crushed black pepper and ginger juliennes.',
+    1250,
+    '/hero-bg.jpg',
+    true,
+    '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{"gulberg-lahore":1350,"f7-islamabad":1180,"clifton-karachi":1280}'::jsonb,
+    '[{"name":"Half (serves 2)","priceDelta":0},{"name":"Full (serves 4)","priceDelta":1100}]'::jsonb,
+    '[{"name":"Roghni Naan","price":80},{"name":"Garlic Butter Naan","price":110},{"name":"Mint Chutney","price":50}]'::jsonb
+),
+(
+    'm10',
+    'Boneless Chicken Makhni Handi',
+    'Karahi & Handi',
+    'Velvety smooth tomato cream gravy with tender boneless chicken breast cubes, topped with fresh dairy butter and kasuri methi.',
+    1180,
+    '/hero-bg.jpg',
+    true,
+    '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
+    '[{"name":"Half (serves 2)","priceDelta":0},{"name":"Full (serves 4)","priceDelta":970}]'::jsonb,
+    '[{"name":"Garlic Butter Naan","price":110},{"name":"Extra Makhni Gravy","price":150}]'::jsonb
+),
+(
+    'm11',
+    'Peshawari Mutton Shinwari Karahi',
+    'Karahi & Handi',
+    'Prime mutton cuts simmered in pure animal fat and butter with salt, green chilies and fresh tomatoes in a traditional charcoal wok.',
+    1850,
+    '/hero-bg.jpg',
+    true,
+    '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
+    '[{"name":"Half KG (serves 2)","priceDelta":0},{"name":"Full KG (serves 4)","priceDelta":1600}]'::jsonb,
+    '[{"name":"Tandoori Roti (2 pcs)","price":70},{"name":"Roghni Naan","price":80}]'::jsonb
+),
+(
+    'm3',
+    'Smoky Beef Seekh Kebabs (4 Pcs)',
+    'BBQ & Kebabs',
+    'Melt-in-mouth prime beef mince seasoned with roasted cumin, brown onion paste, coriander seeds and charcoal grilled over hot embers.',
+    780,
+    '/hero-bg.jpg',
+    true,
+    '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
+    '[{"name":"Standard (4 pcs)","priceDelta":0},{"name":"Platter (8 pcs)","priceDelta":680}]'::jsonb,
+    '[{"name":"Tandoori Paratha","price":90},{"name":"Mint Coriander Dip","price":40}]'::jsonb
+),
+(
+    'm12',
+    'Charcoal Grilled Chicken Malai Boti',
+    'BBQ & Kebabs',
+    'Creamy boneless chicken thigh cubes marinated in heavy malai, crushed green chilies, white pepper, and seared over charcoal.',
+    820,
+    '/hero-bg.jpg',
+    true,
+    '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
+    '[{"name":"Single Skewer (8 pcs)","priceDelta":0},{"name":"Double Skewer (16 pcs)","priceDelta":740}]'::jsonb,
+    '[{"name":"Garlic Naan","price":110},{"name":"Imli Chutney","price":50}]'::jsonb
+),
+(
+    'm13',
+    'Mutton Balochi Chops (3 Pcs)',
+    'BBQ & Kebabs',
+    'Tender mutton chops marinated in Balochi dried spices, ginger garlic paste and slow grilled till charred and crispy outside.',
+    1450,
+    '/hero-bg.jpg',
+    true,
+    '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
+    '[{"name":"Standard (3 pcs)","priceDelta":0},{"name":"Feast (6 pcs)","priceDelta":1350}]'::jsonb,
+    '[{"name":"Peshawari Chutney","price":60},{"name":"Roghni Naan","price":80}]'::jsonb
+),
+(
+    'm4',
+    'The Foodies Crunch Burger',
+    'Burgers & Fast Food',
+    'Crispy fried buttermilk chicken fillet tossed in spicy glaze, topped with cheddar cheese, tangy coleslaw, garlic aioli on a toasted brioche.',
+    620,
+    '/hero-bg.jpg',
+    true,
+    '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
+    '[{"name":"Single Fillet","priceDelta":0},{"name":"Double Monster Fillet","priceDelta":280}]'::jsonb,
+    '[{"name":"Seasoned Masala Fries","price":160},{"name":"Cheese Dip Shot","price":90}]'::jsonb
+),
+(
+    'm14',
+    'Double Beef Smashed Cheeseburger',
+    'Burgers & Fast Food',
+    'Two seared prime beef patties, double melted cheddar, caramelized onions, crisp iceberg lettuce and house secret sauce on potato bun.',
+    840,
+    '/hero-bg.jpg',
+    true,
+    '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{"gulberg-lahore":890,"f7-islamabad":790,"clifton-karachi":850}'::jsonb,
+    '[{"name":"Double Patty","priceDelta":0},{"name":"Triple Monster Patty","priceDelta":310}]'::jsonb,
+    '[{"name":"Crispy Curly Fries","price":190},{"name":"Truffle Mayo","price":80}]'::jsonb
+),
+(
+    'm15',
+    'Peri Peri Loaded Crispy Fries',
+    'Burgers & Fast Food',
+    'Skin-on golden fries smothered with spicy crispy chicken chunks, warm cheddar cheese sauce, garlic ranch and pickled jalapeños.',
+    420,
+    '/hero-bg.jpg',
+    true,
+    '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
+    '[{"name":"Regular Box","priceDelta":0},{"name":"Party Sharing Platter","priceDelta":340}]'::jsonb,
+    '[{"name":"Extra Cheddar Sauce","price":80},{"name":"Jalapeño Bombs (4 pcs)","price":140}]'::jsonb
+),
+(
+    'm5',
+    'Fresh Tandoori Roghni Naan',
+    'Tandoor & Breads',
+    'Soft leavened bread brushed with clarified butter, toasted white sesame seeds and baked against clay tandoor walls.',
+    80,
+    '/food-biryani.jpg',
+    true,
+    '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
+    '[]'::jsonb,
+    '[]'::jsonb
+),
+(
+    'm16',
+    'Roasted Garlic Butter Naan',
+    'Tandoor & Breads',
+    'Fresh clay oven tandoori bread slathered in melted butter, roasted minced garlic, and chopped coriander leaves.',
+    110,
+    '/food-biryani.jpg',
+    true,
+    '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
+    '[]'::jsonb,
+    '[]'::jsonb
+),
+(
+    'm17',
+    'Cheese Stuffed Tandoori Naan',
+    'Tandoor & Breads',
+    'Crispy outside, molten inside! Stuffed with mozzarella & mild cheddar cheese, herbs and brushed with butter.',
+    240,
+    '/food-biryani.jpg',
+    true,
+    '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
+    '[]'::jsonb,
+    '[]'::jsonb
+),
+(
+    'm6',
+    'Traditional Peshawari Qahwa with Cardamom',
+    'Beverages & Desserts',
+    'Brewed green tea leaves infused with green cardamom pods, cinnamon bark, served with saffron candy crystals.',
+    120,
+    '/food-biryani.jpg',
+    true,
+    '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
+    '[]'::jsonb,
+    '[]'::jsonb
+),
+(
+    'm7',
+    'Shahi Malai Kulfi on Stick',
+    'Beverages & Desserts',
+    'Dense, creamy frozen dessert made from reduced whole milk, infused with roasted pistachios, almonds, and rose essence.',
+    220,
+    '/food-biryani.jpg',
+    true,
+    '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
+    '[]'::jsonb,
+    '[]'::jsonb
+),
+(
+    'm18',
+    'Artisanal Fresh Mint Margarita',
+    'Beverages & Desserts',
+    'Fresh mint leaves blended with fresh lime juice, black rock salt, and ice-cold soda. The ultimate refreshing palate cleanser.',
+    260,
+    '/food-biryani.jpg',
+    true,
+    '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
+    '[]'::jsonb,
+    '[]'::jsonb
+),
+(
+    'm19',
+    'Special Karak Doodh Patti Chai',
+    'Beverages & Desserts',
+    'Slow-simmered rich full-cream milk tea brewed with cardamom pods and premium CTC black tea leaves.',
+    130,
+    '/food-biryani.jpg',
+    true,
+    '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
+    '[]'::jsonb,
+    '[]'::jsonb
+),
+(
+    'm20',
+    'Hot Gulab Jamun with Rabri (2 Pcs)',
+    'Beverages & Desserts',
+    'Soft hot fried dumplings soaked in rose cardamom syrup, served on a chilled bed of thickened pistachio malai rabri.',
+    290,
+    '/food-biryani.jpg',
+    true,
+    '{"gulberg-lahore":true,"f7-islamabad":true,"clifton-karachi":true}'::jsonb,
+    '{}'::jsonb,
+    '[]'::jsonb,
+    '[]'::jsonb
+)
+ON CONFLICT (id) DO UPDATE SET
+    name = EXCLUDED.name,
+    category = EXCLUDED.category,
+    base_price = EXCLUDED.base_price,
+    description = EXCLUDED.description,
+    is_available = EXCLUDED.is_available,
+    branch_availability = EXCLUDED.branch_availability,
+    branch_price_overrides = EXCLUDED.branch_price_overrides,
+    sizes = EXCLUDED.sizes,
+    extras = EXCLUDED.extras;
+
+-- 5. Tables Seed
+INSERT INTO tables (id, number, branch_id, floor, capacity, chairs, status, pin)
+VALUES
+('t1', 'T-01', 'gulberg-lahore', 'Ground Floor (Main Dining)', 2, 2, 'available', '4921'),
+('t2', 'T-02', 'gulberg-lahore', 'Ground Floor (Main Dining)', 4, 4, 'available', '7182'),
+('t3', 'T-03', 'gulberg-lahore', 'Ground Floor (Main Dining)', 4, 4, 'available', '3941'),
+('t4', 'T-04', 'gulberg-lahore', 'Ground Floor (Main Dining)', 6, 6, 'available', '8812'),
+('t5', 'T-05', 'gulberg-lahore', '1st Floor (Family Hall)', 4, 4, 'available', '1092'),
+('t6', 'T-06', 'gulberg-lahore', '1st Floor (Family Hall)', 8, 8, 'available', '6523'),
+('t7', 'T-07', 'gulberg-lahore', 'Rooftop Terrace (Open Air)', 4, 4, 'available', '9901'),
+('t8', 'T-08', 'gulberg-lahore', 'Rooftop Terrace (Open Air)', 2, 2, 'available', '2311'),
+('t9', 'T-01', 'f7-islamabad', 'Ground Floor (Main Dining)', 4, 4, 'available', '3312'),
+('t10', 'T-02', 'f7-islamabad', 'Ground Floor (Main Dining)', 6, 6, 'available', '4419'),
+('t11', 'T-03', 'f7-islamabad', '1st Floor (Family Hall)', 4, 4, 'available', '5521'),
+('t12', 'T-01', 'clifton-karachi', 'Ground Floor (Main Dining)', 4, 4, 'available', '6618'),
+('t13', 'T-02', 'clifton-karachi', 'Rooftop Terrace (Open Air)', 6, 6, 'available', '7729')
+ON CONFLICT (id) DO UPDATE SET status = EXCLUDED.status, pin = EXCLUDED.pin;
+
+-- 6. Footer Settings Seed
+INSERT INTO footer_settings (id, helpline, email, hours, address_lahore, address_islamabad, address_karachi, tagline, copyright_text)
+VALUES
+(
+    'default',
+    '+92 42 111-FOODIES',
+    'feedback@foodiescafe.pk',
+    'Daily 11:00 AM - 1:00 AM',
+    '92-B2, Mian Mehmood Ali Kasoori Rd, Gulberg III, Lahore',
+    'Shop 4-B, College Road, F-7 Markaz, Islamabad',
+    'Plot 12-C, 26th Street, Block 4, Clifton, Karachi',
+    'Quality multi-branch cafe experience in Pakistan. Authentic recipes, spotless kitchens, and friendly hospitality.',
+    '© 2026 Foodies Cafe Pakistan.'
+)
+ON CONFLICT (id) DO UPDATE SET
+    helpline = EXCLUDED.helpline,
+    email = EXCLUDED.email,
+    hours = EXCLUDED.hours,
+    tagline = EXCLUDED.tagline;
+
+-- 7. Hero Banners Seed
+INSERT INTO hero_banners (id, title, subtitle, badge, image_url, category_link, active, display_order)
+VALUES
+('b-1', 'Eat Fresh & Healthy, Cooked with Passion', 'Authentic clay oven dum biryanis, organic desi ghee Shinwari karahi, and gourmet smash burgers across Lahore, Islamabad & Karachi.', 'Multi-Branch Pakistani Fine Dining & Fast Casual', '/hero-bg.jpg', 'Biryani & Rice', true, 1),
+('b-2', 'Royal Handi & Desi Ghee Shinwari Karahi', 'Tender mutton & chicken simmered in copper handis with freshly crushed peppercorns and pure organic butter.', '🔥 Chef Handi Special', '/food-biryani.jpg', 'Karahi & Handi', true, 2),
+('b-3', 'Juicy Gourmet Smash Burgers & Loaded Fries', 'Crispy seasoned fillets & smashed patties layered with molten cheddar, house pickles, and brioche buns.', '🍔 Signature Fast-Casual Bites', '/hero-bg.jpg', 'Burgers & Fast Food', true, 3),
+('b-4', 'Traditional Tandoor Naans & Cold Refreshers', 'Garlic butter naans, roghni naans, artisanal mint margaritas, and slow-brewed Karak Chai.', '❄️ Drinks & Fresh Breads', '/food-biryani.jpg', 'Beverages & Desserts', true, 4)
+ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, subtitle = EXCLUDED.subtitle, image_url = EXCLUDED.image_url;
+
+-- 8. Deals Seed
+INSERT INTO deal_cards (id, title, subtitle, price, tag, image_url, category_link)
+VALUES
+('primary-deal', 'Royal Chicken Dum Biryani', 'Slow-steamed in copper handi with saffron & house spices', 'Rs. 650', '🌟 TODAY''S CHEF SPECIAL', '/food-biryani.jpg', 'Biryani & Rice')
+ON CONFLICT (id) DO UPDATE SET title = EXCLUDED.title, price = EXCLUDED.price;
+
+-- 9. Legacy Mock Cleanup
+DELETE FROM cash_shifts WHERE id IN ('sh-yesterday-1', 'sh-yesterday-2');
+
+-- 10. Cash Shifts Seed (Clean Initial Drawer - Zero Mock Collections)
+INSERT INTO cash_shifts (
+    id, cashier_id, cashier_name, branch_id, opened_at, closed_at,
+    opening_float, cash_collected, expected_cash, counted_cash, difference, difference_reason, status
+) VALUES
+(
+    'sh-today-1',
+    'user-cashier',
+    'Bilal Farooq',
+    'gulberg-lahore',
+    CURRENT_TIMESTAMP,
+    NULL,
+    0,
+    0,
+    0,
+    NULL,
+    NULL,
+    NULL,
+    'open'
+),
+(
+    'sh-today-isb',
+    'user-cashier-isb',
+    'Hamza Tariq',
+    'f7-islamabad',
+    CURRENT_TIMESTAMP,
+    NULL,
+    0,
+    0,
+    0,
+    NULL,
+    NULL,
+    NULL,
+    'open'
+),
+(
+    'sh-today-khi',
+    'user-cashier-khi',
+    'Adeel Murtaza',
+    'clifton-karachi',
+    CURRENT_TIMESTAMP,
+    NULL,
+    0,
+    0,
+    0,
+    NULL,
+    NULL,
+    NULL,
+    'open'
+)
+ON CONFLICT (id) DO UPDATE SET
+    opening_float = 0,
+    cash_collected = 0,
+    expected_cash = 0,
+    status = 'open';
+
+-- 11. Announcements & Real Info Seed
+INSERT INTO announcements (
+    id, title, tag, description, valid_until, branch_id, branch_name, discount_percent, badge_color
+) VALUES
+(
+    'ann-1',
+    'Midnight Biryani & Karahi Feast: Flat 20% Off',
+    'HOT DEAL',
+    'Enjoy 20% off all Mutton & Chicken Karahi orders between 10:00 PM and 2:00 AM across all branches.',
+    'Tonight 02:00 AM',
+    NULL,
+    NULL,
+    20,
+    '#EF4444'
+),
+(
+    'ann-2',
+    'Gulberg Rooftop Terrace Live BBQ Night',
+    'BRANCH SPECIAL',
+    'Join us on the Gulberg Rooftop for live open-flame charcoal Seekh Kababs & Mutton Chops every Friday & Saturday.',
+    'Every Weekend',
+    'gulberg-lahore',
+    'Gulberg Lahore',
+    NULL,
+    '#F59E0B'
+),
+(
+    'ann-3',
+    'Free Delivery on Doorstep Orders above Rs. 1500',
+    'ANNOUNCEMENT',
+    'Zero delivery fee on all online delivery orders exceeding Rs. 1500 via the mobile app.',
+    'Valid this Month',
+    NULL,
+    NULL,
+    NULL,
+    '#10B981'
+)
+ON CONFLICT (id) DO NOTHING;
+
+
+
+
+-- ============================================================================
+-- Supabase Permissions & Row-Level Security
+-- Disables RLS so server queries with postgres/service role execute smoothly
+-- ============================================================================
+ALTER TABLE branches DISABLE ROW LEVEL SECURITY;
+ALTER TABLE users DISABLE ROW LEVEL SECURITY;
+ALTER TABLE categories DISABLE ROW LEVEL SECURITY;
+ALTER TABLE menu_items DISABLE ROW LEVEL SECURITY;
+ALTER TABLE tables DISABLE ROW LEVEL SECURITY;
+ALTER TABLE orders DISABLE ROW LEVEL SECURITY;
+ALTER TABLE cash_shifts DISABLE ROW LEVEL SECURITY;
+ALTER TABLE refund_requests DISABLE ROW LEVEL SECURITY;
+ALTER TABLE audit_logs DISABLE ROW LEVEL SECURITY;
+ALTER TABLE hero_banners DISABLE ROW LEVEL SECURITY;
+ALTER TABLE deal_cards DISABLE ROW LEVEL SECURITY;
+ALTER TABLE banner_deal_approval_requests DISABLE ROW LEVEL SECURITY;
+ALTER TABLE footer_settings DISABLE ROW LEVEL SECURITY;
+ALTER TABLE table_sessions DISABLE ROW LEVEL SECURITY;
+ALTER TABLE order_history DISABLE ROW LEVEL SECURITY;
+ALTER TABLE announcements DISABLE ROW LEVEL SECURITY;
+ALTER TABLE email_otps DISABLE ROW LEVEL SECURITY;
+ALTER TABLE notifications DISABLE ROW LEVEL SECURITY;
+ALTER TABLE notification_settings DISABLE ROW LEVEL SECURITY;
+ALTER TABLE receiver_notification_settings DISABLE ROW LEVEL SECURITY;
+
+-- Grant full table & sequence permissions to standard Supabase roles
+GRANT ALL ON ALL TABLES IN SCHEMA public TO postgres, anon, authenticated, service_role;
+GRANT ALL ON ALL SEQUENCES IN SCHEMA public TO postgres, anon, authenticated, service_role;
+GRANT ALL ON ALL ROUTINES IN SCHEMA public TO postgres, anon, authenticated, service_role;
+
+SELECT 'FoodiesCafe database initialized successfully for Supabase!' AS status;
