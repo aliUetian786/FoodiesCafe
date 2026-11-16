@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { applyBranchSchedules } from '@/lib/branchSchedule';
 import crypto from 'crypto';
 import { query } from '@/lib/db';
 import { cacheGet, cacheSet } from '@/lib/redis';
@@ -37,7 +38,8 @@ async function getCachedCatalogData(includeFooter: boolean) {
            COALESCE(longitude, CASE WHEN id = 'gulberg-lahore' THEN 74.3436 WHEN id = 'f7-islamabad' THEN 73.0552 WHEN id = 'clifton-karachi' THEN 67.0305 ELSE 74.3436 END) as "longitude",
            COALESCE(max_order_distance_km, 50) as "maxOrderDistanceKm",
            COALESCE(table_qr_max_distance_meters, 300) as "tableQrMaxDistanceMeters",
-           payment_settings as "paymentSettings"
+           payment_settings as "paymentSettings",
+           COALESCE(auto_schedule_enabled, false) as "autoScheduleEnabled"
     FROM branches
     ORDER BY city ASC, name ASC
   `;
@@ -132,7 +134,7 @@ async function getCachedCatalogData(includeFooter: boolean) {
     footerSettings,
   };
 
-  await cacheSet(cacheKey, catalog, 60);
+  await cacheSet(cacheKey, catalog, 15); // short: branch open/closed must propagate quickly across instances
   return catalog;
 }
 
@@ -140,6 +142,7 @@ export async function GET(request: Request) {
   try {
     const { searchParams } = new URL(request.url);
     const scope = searchParams.get('scope') || 'live'; // 'live' | 'full'
+    await applyBranchSchedules(); // throttled; opens/closes branches whose scheduled time has passed
     const rawBranchId = searchParams.get('branchId');
     const customerId = searchParams.get('customerId');
     const customerPhone = searchParams.get('customerPhone');

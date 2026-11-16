@@ -1,4 +1,6 @@
 import { NextResponse } from 'next/server';
+import { applyBranchSchedules, parseOpeningHours } from '@/lib/branchSchedule';
+import { emitBranchStatusNotification } from '@/lib/notifications';
 import crypto from 'crypto';
 import { query } from '@/lib/db';
 import { cacheGet, cacheSet, cacheInvalidatePrefix } from '@/lib/redis';
@@ -7,6 +9,7 @@ import { requireAuth, writeAuditLog } from '@/lib/auth';
 
 export async function GET(request: Request) {
   try {
+    await applyBranchSchedules();
     let payload = await cacheGet<{ branches: any[]; etag: string }>('branches:all');
 
     if (!payload) {
@@ -24,7 +27,8 @@ export async function GET(request: Request) {
                   COALESCE(max_order_distance_km, 50) as "maxOrderDistanceKm",
                   COALESCE(table_qr_max_distance_meters, 300) as "tableQrMaxDistanceMeters",
                   COALESCE(min_delivery_amount, 500) as "minDeliveryAmount",
-                  payment_settings as "paymentSettings"
+                  payment_settings as "paymentSettings",
+                  COALESCE(auto_schedule_enabled, false) as "autoScheduleEnabled"
            FROM branches
            ORDER BY city ASC, name ASC`
         );
@@ -200,10 +204,30 @@ export async function PATCH(request: Request) {
       updates.push(`payment_settings = $${idx++}`);
       values.push(JSON.stringify(settings.paymentSettings ?? settings.payment_settings));
     }
+    const openingHours = settings.openingHours ?? settings.opening_hours;
+    if (openingHours !== undefined) {
+      if (!parseOpeningHours(String(openingHours))) {
+        return NextResponse.json({ error: 'openingHours must look like "11:00 AM - 01:00 AM"' }, { status: 400 });
+      }
+      updates.push(`opening_hours = $${idx++}`);
+      values.push(String(openingHours).trim());
+    }
+    const autoSchedule = settings.autoScheduleEnabled ?? settings.auto_schedule_enabled;
+    if (autoSchedule !== undefined) {
+      updates.push(`auto_schedule_enabled = $${idx++}`);
+      values.push(Boolean(autoSchedule));
+    }
+    if (openingHours !== undefined || autoSchedule !== undefined) {
+      // New schedule: let applyBranchSchedules re-evaluate from the current transition.
+      updates.push('schedule_last_applied = NULL');
+    }
 
     if (updates.length === 0) {
       return NextResponse.json({ message: 'No valid updates provided' });
     }
+
+    const before = await query(`SELECT is_open FROM branches WHERE id = $1 OR id = $2 LIMIT 1`, [normBranchId, rawBranchId]).catch(() => ({ rows: [] as any[] }));
+    const wasOpen = before.rows[0] ? Boolean(before.rows[0].is_open) : undefined;
 
     values.push(normBranchId, rawBranchId);
     const sql = `UPDATE branches SET ${updates.join(', ')}, updated_at = CURRENT_TIMESTAMP WHERE id = $${idx} OR id = $${idx + 1} RETURNING *`;
@@ -221,6 +245,7 @@ export async function PATCH(request: Request) {
       openingHours: r.opening_hours || r.openingHours,
       isOpen: r.is_open ?? r.isOpen,
       isBusy: r.is_busy ?? r.isBusy,
+      autoScheduleEnabled: Boolean(r.auto_schedule_enabled),
       prepTimeEstimateMin: Number(r.prep_time_estimate_min ?? r.prepTimeEstimateMin) || 20,
       fullEditWindowMin: Number(r.full_edit_window_min ?? r.fullEditWindowMin) || 15,
       stopAddOnsMinBeforeReady: Number(r.stop_add_ons_min_before_ready ?? r.stopAddOnsMinBeforeReady) || 10,
@@ -254,6 +279,21 @@ export async function PATCH(request: Request) {
         },
       });
     } catch {}
+
+    if (formattedBranch && wasOpen !== undefined && Boolean(formattedBranch.isOpen) !== wasOpen) {
+      await emitBranchStatusNotification({
+        branchId: normBranchId,
+        branchName: formattedBranch.name,
+        isOpen: Boolean(formattedBranch.isOpen),
+        reason: 'manual',
+        actorName: auth.role === 'platform_owner' ? 'The owner' : 'The branch manager',
+      }).catch(() => {});
+    }
+    if (autoSchedule !== undefined || openingHours !== undefined) {
+      await applyBranchSchedules(true);
+      const fresh = await query(`SELECT is_open FROM branches WHERE id = $1 LIMIT 1`, [normBranchId]).catch(() => ({ rows: [] as any[] }));
+      if (formattedBranch && fresh.rows[0]) formattedBranch.isOpen = Boolean(fresh.rows[0].is_open);
+    }
 
     return NextResponse.json({ success: true, branch: formattedBranch });
   } catch (error: any) {

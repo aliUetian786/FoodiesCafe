@@ -349,7 +349,13 @@ const initialState: CafeState = {
   lastFullSynced: null,
 };
 
-export const cafeSlice = createSlice({
+export function mergeReadBy(n: AppNotification, extraReadBy?: string[]): AppNotification {
+  if (!extraReadBy || extraReadBy.length === 0) return n;
+  const merged = Array.from(new Set([...(n.readBy || []), ...extraReadBy]));
+  return merged.length === (n.readBy || []).length ? n : { ...n, readBy: merged };
+}
+
+const cafeSlice = createSlice({
   name: 'cafe',
   initialState,
   reducers: {
@@ -511,11 +517,15 @@ export const cafeSlice = createSlice({
       state.announcements = state.announcements.filter((a) => a.id !== action.payload);
     },
     setNotifications: (state, action: PayloadAction<AppNotification[]>) => {
-      state.notifications = action.payload;
+      // Union read marks: a sync that started before "mark as read" reached the server must not
+      // flip already-read notifications back to unread.
+      const localReadBy = new Map(state.notifications.map((n) => [n.id, n.readBy || []]));
+      state.notifications = action.payload.map((n) => mergeReadBy(n, localReadBy.get(n.id)));
     },
     addNotificationInStore: (state, action: PayloadAction<AppNotification>) => {
+      const existing = state.notifications.find((n) => n.id === action.payload.id);
       state.notifications = [
-        action.payload,
+        mergeReadBy(action.payload, existing?.readBy),
         ...state.notifications.filter((n) => n.id !== action.payload.id),
       ].slice(0, 150);
     },

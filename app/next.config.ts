@@ -6,6 +6,10 @@ const allowedOrigins = (process.env.CORS_ALLOWED_ORIGINS || "http://localhost:30
   .filter(Boolean);
 
 const nextConfig: NextConfig = {
+  env: {
+    // Changes on every Vercel deploy; used to drop stale browser caches (src/lib/storageVersion.ts).
+    NEXT_PUBLIC_BUILD_ID: process.env.VERCEL_GIT_COMMIT_SHA || process.env.VERCEL_DEPLOYMENT_ID || 'dev',
+  },
   cacheComponents: true,
   partialPrefetching: true,
   compress: true,

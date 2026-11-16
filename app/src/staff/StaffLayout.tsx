@@ -41,6 +41,7 @@ import {
 import { StoreMapModal } from '../customer/StoreMapModal';
 import { BranchShutdownModal } from '../components/common/BranchShutdownModal';
 import { NotificationCenterModal } from '../components/common/NotificationCenterModal';
+import { BranchScheduleEditor } from '@/staff/BranchScheduleEditor';
 
 interface StaffLayoutProps {
   currentView: string;
@@ -1352,6 +1353,9 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
                 </div>
               )}
             </div>
+
+            {/* Branch opening schedule (manager: own branch, owner: all branches) */}
+            <BranchScheduleEditor />
 
             {/* Close Button */}
             <button

@@ -225,38 +225,23 @@ export async function PATCH(request: Request) {
       return NextResponse.json({ error: 'userId is required' }, { status: 400 });
     }
 
+    // Atomic, single-statement updates. Previously "mark all" read 150 rows and updated them one by one
+    // (~150 round trips, often timing out), and read-modify-write lost concurrent marks — so notifications
+    // came back as unread on the next sync.
     if (markAllRead) {
-      const res = await query(`SELECT id, read_by FROM notifications ORDER BY created_at DESC LIMIT 150`);
-      for (const row of res.rows) {
-        const currentReadBy: string[] = Array.isArray(row.read_by)
-          ? row.read_by
-          : typeof row.read_by === 'string'
-          ? JSON.parse(row.read_by || '[]')
-          : [];
-        if (!currentReadBy.includes(userId)) {
-          const nextReadBy = [...currentReadBy, userId];
-          await query(`UPDATE notifications SET read_by = $1::jsonb WHERE id = $2`, [
-            JSON.stringify(nextReadBy),
-            row.id,
-          ]);
-        }
-      }
+      await query(
+        `UPDATE notifications
+            SET read_by = COALESCE(read_by, '[]'::jsonb) || to_jsonb($1::text)
+          WHERE NOT (COALESCE(read_by, '[]'::jsonb) ? $1)`,
+        [userId]
+      );
     } else if (id) {
-      const res = await query(`SELECT id, read_by FROM notifications WHERE id = $1 LIMIT 1`, [id]);
-      if (res.rows.length > 0) {
-        const currentReadBy: string[] = Array.isArray(res.rows[0].read_by)
-          ? res.rows[0].read_by
-          : typeof res.rows[0].read_by === 'string'
-          ? JSON.parse(res.rows[0].read_by || '[]')
-          : [];
-        if (!currentReadBy.includes(userId)) {
-          const nextReadBy = [...currentReadBy, userId];
-          await query(`UPDATE notifications SET read_by = $1::jsonb WHERE id = $2`, [
-            JSON.stringify(nextReadBy),
-            id,
-          ]);
-        }
-      }
+      await query(
+        `UPDATE notifications
+            SET read_by = COALESCE(read_by, '[]'::jsonb) || to_jsonb($1::text)
+          WHERE id = $2 AND NOT (COALESCE(read_by, '[]'::jsonb) ? $1)`,
+        [userId, id]
+      );
     }
 
     try {

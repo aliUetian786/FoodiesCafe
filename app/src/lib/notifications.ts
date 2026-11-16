@@ -15,6 +15,7 @@ import {
   type RecipientNotificationRules,
   type Role,
 } from '@/types/cafe';
+import { orderNotificationId, normalizeStatusForNotification } from '@/lib/notificationIds';
 
 let tableInitialized = false;
 let tableInitPromise: Promise<void> | null = null;
@@ -552,9 +553,7 @@ export async function insertAndBroadcastNotification(
         $18, $19, $20, $21,
         $22::jsonb, $23
       )
-      ON CONFLICT (id) DO UPDATE SET
-        title = EXCLUDED.title,
-        message = EXCLUDED.message
+      ON CONFLICT (id) DO NOTHING
       RETURNING *`,
       [
         id,
@@ -582,6 +581,12 @@ export async function insertAndBroadcastNotification(
         createdAt,
       ]
     );
+
+    // Same event already stored (deterministic id): keep the original (and its read state), no re-broadcast.
+    if (!res.rows[0] && input.id) {
+      const existing = await query(`SELECT * FROM notifications WHERE id = $1 LIMIT 1`, [id]).catch(() => ({ rows: [] as any[] }));
+      return existing.rows[0] ? mapNotificationRow(existing.rows[0]) : null;
+    }
 
     const notification = res.rows[0]
       ? mapNotificationRow(res.rows[0])
@@ -638,6 +643,7 @@ function buildFilteredTargetRoles(
     includeWaiter?: boolean;
     includeRider?: boolean;
     includeCashierManager?: boolean;
+    includeCashier?: boolean;
     eventKey?: NotificationEventKey;
   }
 ): Array<Role | 'all'> {
@@ -714,6 +720,14 @@ function buildFilteredTargetRoles(
     }
   }
 
+  // Cashier only (order arrived / cancelled) — managers & owners get branch-status notifications instead.
+  if (opts.includeCashier && settings.notifyCashierAndManager) {
+    let cashierAllowed = true;
+    if (opts.eventKey === 'orderPlaced') cashierAllowed = rules.cashierAndManager.orderPlaced;
+    else if (opts.eventKey === 'orderCancelled') cashierAllowed = rules.cashierAndManager.orderCancelled;
+    if (cashierAllowed) roles.add('cashier');
+  }
+
   return Array.from(roles);
 }
 
@@ -746,18 +760,18 @@ export async function emitOrderPlacedNotification(order: any): Promise<void> {
     category = 'delivery';
   }
 
+  // Order arrived -> customer (confirmation), kitchen (new ticket), cashier (alert). Waiters/riders are
+  // notified when they are assigned / the food is ready, not on every new order.
   const targetRoles = buildFilteredTargetRoles(settings, orderType, {
     includeCustomer: true,
     includeKitchen: true,
-    includeWaiter: orderType === 'dine_in',
-    includeRider: orderType === 'delivery',
-    includeCashierManager: true,
+    includeCashier: true,
     eventKey: 'orderPlaced',
   });
   if (targetRoles.length === 0) return;
 
   await insertAndBroadcastNotification({
-    id: `notif-placed-${order.id}`,
+    id: orderNotificationId(order.id, { kind: 'placed' }),
     title,
     message,
     type: 'success',
@@ -796,6 +810,10 @@ export async function emitOrderUpdatedNotification(params: {
   actorId?: string;
   actorName?: string;
   actorRole?: string;
+  /** Values before this update: "assigned" notifications fire only when these change. */
+  previousWaiterId?: string | null;
+  previousRiderId?: string | null;
+  previousRiderStatus?: string | null;
 }): Promise<void> {
   const { order, oldStatus, newStatus, sentToKitchen, assignedWaiterId, assignedWaiterName, assignedRiderId, assignedRiderName, riderStatus, paymentStatus, oldPaymentStatus, actorId, actorName, actorRole } = params;
   if (!order) return;
@@ -814,15 +832,12 @@ export async function emitOrderUpdatedNotification(params: {
 
   if (sentToKitchen && newStatus !== 'preparing' && newStatus !== 'ready' && settings.events.sentToKitchen) {
     const targetRoles = buildFilteredTargetRoles(settings, orderType, {
-      includeCustomer: true,
       includeKitchen: true,
-      includeWaiter: orderType === 'dine_in',
-      includeRider: false,
-      includeCashierManager: true,
       eventKey: 'sentToKitchen',
     });
     if (targetRoles.length > 0) {
       await insertAndBroadcastNotification({
+        id: orderNotificationId(order.id, { kind: 'kitchen' }),
         title: `Order #${orderNumber} Sent to Kitchen`,
         message: `${orderType === 'takeaway' ? 'Takeaway' : orderType === 'delivery' ? 'Delivery' : 'Dine-In'} order #${orderNumber} has been forwarded to the kitchen for preparation.`,
         type: 'info',
@@ -860,10 +875,6 @@ export async function emitOrderUpdatedNotification(params: {
       category = 'kitchen';
       targetRoles = buildFilteredTargetRoles(settings, orderType, {
         includeCustomer: true,
-        includeKitchen: true,
-        includeWaiter: orderType === 'dine_in',
-        includeRider: orderType === 'delivery',
-        includeCashierManager: true,
         eventKey: 'cooking',
       });
     } else if (newStatus === 'ready') {
@@ -884,10 +895,8 @@ export async function emitOrderUpdatedNotification(params: {
       }
       targetRoles = buildFilteredTargetRoles(settings, orderType, {
         includeCustomer: true,
-        includeKitchen: false,
         includeWaiter: orderType === 'dine_in',
         includeRider: orderType === 'delivery',
-        includeCashierManager: true,
         eventKey: 'orderReady',
       });
     } else if (newStatus === 'out_for_delivery') {
@@ -897,8 +906,6 @@ export async function emitOrderUpdatedNotification(params: {
       category = 'delivery';
       targetRoles = buildFilteredTargetRoles(settings, 'delivery', {
         includeCustomer: true,
-        includeRider: true,
-        includeCashierManager: true,
         eventKey: 'outForDelivery',
       });
     } else if (newStatus === 'served') {
@@ -909,8 +916,6 @@ export async function emitOrderUpdatedNotification(params: {
       category = 'dine_in';
       targetRoles = buildFilteredTargetRoles(settings, 'dine_in', {
         includeCustomer: true,
-        includeWaiter: true,
-        includeCashierManager: true,
         eventKey: 'orderServed',
       });
     } else if (newStatus === 'completed' || newStatus === 'delivered' || newStatus === 'taken') {
@@ -925,9 +930,6 @@ export async function emitOrderUpdatedNotification(params: {
       message = `Your order #${orderNumber} has been completed. Thank you for dining with Foodies Cafe!`;
       targetRoles = buildFilteredTargetRoles(settings, orderType, {
         includeCustomer: true,
-        includeWaiter: orderType === 'dine_in',
-        includeRider: orderType === 'delivery',
-        includeCashierManager: true,
         eventKey: 'orderCompleted',
       });
     } else if (newStatus === 'cancelled') {
@@ -940,20 +942,17 @@ export async function emitOrderUpdatedNotification(params: {
         includeKitchen: true,
         includeWaiter: orderType === 'dine_in',
         includeRider: orderType === 'delivery',
-        includeCashierManager: true,
+        includeCashier: true,
         eventKey: 'orderCancelled',
       });
     } else {
-      targetRoles = buildFilteredTargetRoles(settings, orderType, {
-        includeCustomer: true,
-        includeWaiter: orderType === 'dine_in',
-        includeRider: orderType === 'delivery',
-        includeCashierManager: true,
-      });
+      // Intermediate states (e.g. "accepted") are not announced: "sent to kitchen" / "preparing" cover them.
+      eventEnabled = false;
     }
 
     if (eventEnabled && targetRoles.length > 0) {
       await insertAndBroadcastNotification({
+        id: orderNotificationId(order.id, { kind: 'status', status: normalizeStatusForNotification(newStatus) }),
         title,
         message,
         type,
@@ -978,15 +977,14 @@ export async function emitOrderUpdatedNotification(params: {
     }
   }
 
-  if (assignedWaiterId && newStatus !== 'cancelled' && settings.events.waiterAssigned) {
+  if (assignedWaiterId && assignedWaiterId !== params.previousWaiterId && newStatus !== 'cancelled' && settings.events.waiterAssigned) {
     const targetRoles = buildFilteredTargetRoles(settings, 'dine_in', {
-      includeCustomer: true,
       includeWaiter: true,
-      includeCashierManager: true,
       eventKey: 'waiterAssigned',
     });
     if (targetRoles.length > 0) {
       await insertAndBroadcastNotification({
+        id: orderNotificationId(order.id, { kind: 'waiter', waiterId: assignedWaiterId }),
         title: `Waiter Assigned • Order #${orderNumber}`,
         message: `${waiterName || 'Floor Staff'} is now serving Table ${order.tableNumber || ''} (Order #${orderNumber}).`,
         type: 'info',
@@ -1009,15 +1007,17 @@ export async function emitOrderUpdatedNotification(params: {
     }
   }
 
-  if ((assignedRiderId || riderStatus === 'accepted') && newStatus !== 'cancelled' && settings.events.riderAssigned) {
+  const riderNewlyAssigned = Boolean(assignedRiderId && assignedRiderId !== params.previousRiderId);
+  const riderNewlyAccepted = riderStatus === 'accepted' && params.previousRiderStatus !== 'accepted';
+  if ((riderNewlyAssigned || riderNewlyAccepted) && newStatus !== 'cancelled' && settings.events.riderAssigned) {
     const targetRoles = buildFilteredTargetRoles(settings, 'delivery', {
       includeCustomer: true,
       includeRider: true,
-      includeCashierManager: true,
       eventKey: 'riderAssigned',
     });
     if (targetRoles.length > 0) {
       await insertAndBroadcastNotification({
+        id: orderNotificationId(order.id, { kind: 'rider', riderId, accepted: riderNewlyAccepted && !riderNewlyAssigned }),
         title: riderStatus === 'accepted' ? `Rider Accepted Order #${orderNumber}` : `Rider Assigned • Order #${orderNumber}`,
         message: `${riderName || 'Delivery Rider'} ${riderStatus === 'accepted' ? 'accepted and started' : 'was assigned to'} Delivery Order #${orderNumber}.`,
         type: 'info',
@@ -1043,12 +1043,10 @@ export async function emitOrderUpdatedNotification(params: {
   if (paymentStatus === 'paid' && oldPaymentStatus !== 'paid' && settings.events.paymentReceived) {
     const targetRoles = buildFilteredTargetRoles(settings, orderType, {
       includeCustomer: true,
-      includeWaiter: orderType === 'dine_in',
-      includeRider: orderType === 'delivery',
-      includeCashierManager: true,
     });
     if (targetRoles.length > 0) {
       await insertAndBroadcastNotification({
+        id: orderNotificationId(order.id, { kind: 'paid' }),
         title: `Payment Received • Order #${orderNumber}`,
         message: `Rs. ${Number(order.total || 0).toLocaleString()} settled for Order #${orderNumber} (${order.paymentMethod || 'Cash'}).`,
         type: 'success',
@@ -1072,4 +1070,39 @@ export async function emitOrderUpdatedNotification(params: {
       });
     }
   }
+}
+
+/**
+ * Branch opened / closed -> that branch's manager + the owner (scheduled or manual).
+ * Deterministic id per transition so it is announced exactly once.
+ */
+export async function emitBranchStatusNotification(params: {
+  branchId: string;
+  branchName?: string;
+  isOpen: boolean;
+  reason: 'schedule' | 'manual';
+  actorName?: string;
+  transitionKey?: string;
+}): Promise<void> {
+  const { branchId, branchName, isOpen, reason, actorName, transitionKey } = params;
+  const name = branchName || branchId;
+  const id = transitionKey
+    ? `notif-branch-${branchId}-${transitionKey}`
+    : `notif-branch-${branchId}-${isOpen ? 'open' : 'closed'}-${new Date().toISOString().slice(0, 16)}`;
+  await insertAndBroadcastNotification({
+    id,
+    title: isOpen ? `${name} is now OPEN` : `${name} is now CLOSED`,
+    message:
+      reason === 'schedule'
+        ? `${name} ${isOpen ? 'opened' : 'closed'} automatically on its schedule. ${isOpen ? 'Customers can place orders.' : 'New orders are paused until the next opening.'}`
+        : `${actorName || 'A manager'} ${isOpen ? 'opened' : 'closed'} ${name}. ${isOpen ? 'Customers can place orders.' : 'New orders are paused.'}`,
+    type: isOpen ? 'success' : 'warning',
+    category: 'system',
+    branchId,
+    senderId: 'system',
+    senderName: reason === 'schedule' ? 'Branch Schedule' : actorName || 'Branch Manager',
+    senderRole: 'system' as any,
+    targetRoles: ['branch_manager', 'platform_owner'],
+    targetPlatform: 'all',
+  });
 }

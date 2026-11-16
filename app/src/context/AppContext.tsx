@@ -1,5 +1,9 @@
 'use client';
 
+// Must stay the first import: purges stale cached data before anything reads localStorage.
+import '@/lib/storageVersion';
+import { orderNotificationId } from '@/lib/notificationIds';
+
 import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from 'react';
 import {
   Role,
@@ -3254,7 +3258,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         }
 
         const optimisticStatusNotif: AppNotification = {
-          id: `notif-status-${existingOrdForStatus.id}-${newStatus}-${Date.now()}`,
+          // Same id the server uses for this event, so the optimistic copy and the server copy are one notification.
+          id: orderNotificationId(existingOrdForStatus.id, { kind: 'status', status: newStatus }),
           title: sTitle,
           message: sMsg,
           type: sType,
@@ -6605,11 +6610,12 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       // -------------------------------------------------------------
       // Platform owner sees overall platform and branch operations
       if (currentRole === 'platform_owner') {
-        // If it's a private 1-to-1 message targeted to someone else without owner or all in targetRoles:
-        if (n.targetUserId && currentUser?.id && n.targetUserId !== currentUser.id && n.senderId !== currentUser.id && !roles.includes('platform_owner') && !roles.includes('all')) {
-          return false;
-        }
-        return true;
+        // Owner inbox = what is addressed to the owner (branch opened/closed, broadcasts) + own messages.
+        // Previously this returned true for EVERY notification, flooding the owner with each order's
+        // customer/kitchen/waiter status updates.
+        if (isSender) return true;
+        if (n.targetUserId && currentUser?.id && n.targetUserId === currentUser.id) return true;
+        return roles.includes('all') || roles.includes('platform_owner');
       }
 
       // Staff must belong to the matching branch

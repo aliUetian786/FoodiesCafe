@@ -1,4 +1,5 @@
 import { NextResponse } from 'next/server';
+import { applyBranchSchedules } from '@/lib/branchSchedule';
 import type { PoolClient } from 'pg';
 import { query, withTransaction } from '@/lib/db';
 import { createOrderSchema, updateOrderSchema } from '@/lib/validations';
@@ -326,6 +327,9 @@ export async function POST(request: Request) {
       }
     }
 
+    // Apply any due scheduled open/close before validating that the branch accepts orders.
+    await applyBranchSchedules();
+
     const txResult = await withTransaction(async (client) => {
       // 1. Idempotency check (by Idempotency-Key, order id, or order_number)
       if (headerIdempotencyKey) {
@@ -367,7 +371,7 @@ export async function POST(request: Request) {
         );
         branch = branchRes.rows[0] || null;
         if (branch) {
-          await cacheSet(branchCacheKey, branch, 20);
+          await cacheSet(branchCacheKey, branch, 5); // short: a just-closed branch must stop taking orders quickly
         }
       }
       let branchPrepTimeMin = 20;
@@ -1354,6 +1358,9 @@ export async function PATCH(request: Request) {
         status: 200,
         oldStatus: currentStatus,
         oldPaymentStatus: currentPaymentStatus,
+        previousWaiterId: currentOrder.assigned_waiter_id || null,
+        previousRiderId: currentOrder.assigned_rider_id || null,
+        previousRiderStatus: currentOrder.rider_status || null,
         actorId: effectiveActorId,
         actorName: effectiveActorName,
         actorRole: effectiveActorRole,
@@ -1397,6 +1404,9 @@ export async function PATCH(request: Request) {
           riderStatus: updatedOrder.riderStatus,
           paymentStatus: updatedOrder.paymentStatus,
           oldPaymentStatus: txResult.oldPaymentStatus,
+          previousWaiterId: (txResult as any).previousWaiterId,
+          previousRiderId: (txResult as any).previousRiderId,
+          previousRiderStatus: (txResult as any).previousRiderStatus,
           actorId: txResult.actorId,
           actorName: txResult.actorName,
           actorRole: txResult.actorRole,

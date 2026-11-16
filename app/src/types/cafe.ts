@@ -63,6 +63,7 @@ export interface Branch {
   tableQrMaxDistanceMeters?: number;
   paymentSettings?: BranchPaymentSettings;
   minDeliveryAmount?: number; // Minimum order subtotal required for delivery orders
+  autoScheduleEnabled?: boolean; // Open/close automatically at openingHours (Asia/Karachi)
 }
 
 export function normalizeBranchId(id?: string): string {

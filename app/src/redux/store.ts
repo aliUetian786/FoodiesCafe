@@ -1,3 +1,5 @@
+// Must stay the first import: purges stale cached data before anything reads localStorage.
+import '@/lib/storageVersion';
 import { configureStore } from '@reduxjs/toolkit';
 import ordersReducer from './slices/ordersSlice';
 import cartReducer from './slices/cartSlice';

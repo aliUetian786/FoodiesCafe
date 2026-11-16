@@ -26,11 +26,15 @@ CREATE TABLE IF NOT EXISTS branches (
     max_order_distance_km DOUBLE PRECISION NOT NULL DEFAULT 50,
     table_qr_max_distance_meters INT NOT NULL DEFAULT 300,
     min_delivery_amount INT NOT NULL DEFAULT 500,
+    auto_schedule_enabled BOOLEAN NOT NULL DEFAULT false,
+    schedule_last_applied VARCHAR(64),
     payment_settings JSONB NOT NULL DEFAULT '{"dine_in":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"takeaway":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false},"delivery":{"COD":true,"Wallet":true,"Card":true,"Bank":true,"Installment":false}}',
     created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 ALTER TABLE branches ADD COLUMN IF NOT EXISTS min_delivery_amount INT NOT NULL DEFAULT 500;
+ALTER TABLE branches ADD COLUMN IF NOT EXISTS auto_schedule_enabled BOOLEAN NOT NULL DEFAULT false;
+ALTER TABLE branches ADD COLUMN IF NOT EXISTS schedule_last_applied VARCHAR(64);
 
 -- 2. Users Table (Staff & Customers)
 CREATE TABLE IF NOT EXISTS users (
