@@ -1188,8 +1188,17 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
       if (authData?.user) {
         liveUser = { ...liveUser, ...authData.user };
+        delete (liveUser as any).requiresServerAuth;
+      } else if ((liveUser as any).requiresServerAuth) {
+        showToast('Staff login failed: server did not return an account for this email.', 'danger');
+        return;
       }
     } catch (_err) {
+      // Accounts not known on this device can only be verified by the server.
+      if ((liveUser as any).requiresServerAuth) {
+        showToast('Cannot reach the FoodiesCafe server to verify this staff account. Check your internet connection.', 'danger');
+        return;
+      }
       // Offline fallback: verify status and password strictly if server is unreachable
       if (liveUser.status && liveUser.status !== 'active') {
         showToast(`Account Access Prohibited: Staff account for ${liveUser.name} is ${liveUser.status.toUpperCase()}.`, 'danger');

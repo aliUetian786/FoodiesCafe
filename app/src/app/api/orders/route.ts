@@ -542,7 +542,7 @@ export async function POST(request: Request) {
           $14, $15::jsonb, $16, $17, $18, $19,
           $20, $21, 1, $22, $23,
           $24, $25, $26, $27, $28,
-          $29, $30, $31, $32, $33, CASE WHEN $34 IS NULL THEN NULL ELSE $34::jsonb END,
+          $29, $30, $31, $32, $33, $34::jsonb,
           $35, $36, $37, $38, $39,
           COALESCE($40::timestamptz, CURRENT_TIMESTAMP)
         ) RETURNING *
@@ -793,7 +793,7 @@ export async function PATCH(request: Request) {
               $14, $15::jsonb, $16, $17, $18, $19,
               $20, $21, $22, $23, $24,
               $25, $26, $27, $28, $29,
-              $30, $31, $32, $33, $34, CASE WHEN $35 IS NULL THEN NULL ELSE $35::jsonb END,
+              $30, $31, $32, $33, $34, $35::jsonb,
               $36, $37, $38, $39, COALESCE($40::timestamptz, CURRENT_TIMESTAMP)
             ) ON CONFLICT (id) DO NOTHING`,
             [

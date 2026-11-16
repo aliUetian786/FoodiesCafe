@@ -10,12 +10,12 @@ import {
 import { Colors } from '../theme/colors';
 import { useApp } from '../context/AppContext';
 import { SEED_USERS, normalizeBranchId } from '../services/api';
-import { Shield, Utensils, Bike, Mail, Lock, ArrowRight, ArrowLeft, Building2, CheckCircle2, ChefHat } from 'lucide-react-native';
+import { Shield, Utensils, Bike, Mail, Lock, ArrowRight, ArrowLeft, Building2, CheckCircle2, ChefHat, Wallet } from 'lucide-react-native';
 
 export function StaffLogin() {
   const { loginStaff, setAppMode, showToast, users, currentBranch } = useApp();
 
-  const [selectedRole, setSelectedRole] = useState<'platform_owner' | 'branch_manager' | 'kitchen_staff' | 'floor_staff' | 'delivery_staff'>('branch_manager');
+  const [selectedRole, setSelectedRole] = useState<'platform_owner' | 'branch_manager' | 'cashier' | 'kitchen_staff' | 'floor_staff' | 'delivery_staff'>('branch_manager');
   const [email, setEmail] = useState('manager.gulberg@foodiescafe.pk');
   const [password, setPassword] = useState('••••••••');
 
@@ -39,6 +39,26 @@ export function StaffLogin() {
         SEED_USERS[1],
       icon: Building2,
       color: '#8B5CF6',
+    },
+    {
+      role: 'cashier' as const,
+      title: 'Cashier',
+      desc: 'Cash desk, online & walk-in orders hub, payments and settlements',
+      user:
+        users.find((u) => u.role === 'cashier' && normalizeBranchId(u.branchId) === normalizeBranchId(currentBranch.id)) ||
+        users.find((u) => u.role === 'cashier') ||
+        (() => {
+          const b = normalizeBranchId(currentBranch.id);
+          const byBranch: Record<string, { id: string; name: string; email: string }> = {
+            'gulberg-lahore': { id: 'user-cashier', name: 'Bilal Farooq (Cashier)', email: 'cashier.gulberg@foodiescafe.pk' },
+            'f7-islamabad': { id: 'user-cashier-isb', name: 'Hamza Tariq (Cashier)', email: 'cashier.islamabad@foodiescafe.pk' },
+            'clifton-karachi': { id: 'user-cashier-khi', name: 'Saad Ali (Cashier)', email: 'cashier.karachi@foodiescafe.pk' },
+          };
+          const c = byBranch[b] || byBranch['gulberg-lahore'];
+          return { ...c, phone: '', role: 'cashier' as const, branchId: b in byBranch ? b : 'gulberg-lahore', status: 'active' as const };
+        })(),
+      icon: Wallet,
+      color: '#16A34A',
     },
     {
       role: 'kitchen_staff' as const,
@@ -103,7 +123,22 @@ export function StaffLogin() {
       );
     }
 
-    // 2. Fall back to selected role profile
+    // 2. Typed email not known locally (e.g. cashiers — the staff list is only sent after login):
+    //    let the server identify the account instead of silently signing in as the selected role card.
+    if (!matchedUser && cleanEmail.includes('@')) {
+      matchedUser = {
+        id: cleanEmail,
+        name: cleanEmail,
+        email: cleanEmail,
+        phone: '',
+        role: selectedRole,
+        branchId: currentBranch.id,
+        status: 'active',
+        requiresServerAuth: true,
+      } as any;
+    }
+
+    // 3. Fall back to selected role profile (empty email field)
     if (!matchedUser) {
       const prof = staffProfiles.find((p) => p.role === selectedRole);
       matchedUser = prof ? (users.find((u) => u.id === prof.user.id || u.email.toLowerCase() === prof.user.email.toLowerCase()) || prof.user) : undefined;
