@@ -1822,12 +1822,16 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       .then((data) => {
         if (data && Array.isArray(data.menuItems) && data.menuItems.length > 0) {
           setMenuItems(data.menuItems);
+          // Keep Redux in step: otherwise its demo INITIAL_MENU can be mirrored back into context later,
+          // showing customers dishes/deals that do not exist in the database (orders then get rejected).
+          store.dispatch(setReduxMenuItems(data.menuItems));
           try {
             localStorage.setItem('foodies_menu_items', JSON.stringify(data.menuItems));
           } catch (e) { }
         }
         if (data && Array.isArray(data.categories) && data.categories.length > 0) {
           setCategories(data.categories);
+          store.dispatch(setReduxCategories(data.categories));
           try {
             localStorage.setItem('foodies_categories', JSON.stringify(data.categories));
           } catch (e) { }

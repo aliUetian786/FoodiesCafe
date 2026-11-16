@@ -24,6 +24,7 @@ import {
 import { CustomerLoginModal } from './CustomerLoginModal';
 import { OpenStreetMapView } from '@/components/common/OpenStreetMapView';
 import { calculateHaversineKm, getOsmDirectionsUrl } from '@/utils/openStreetMap';
+import { resolveDishImage } from '@/lib/dishImages';
 
 interface OrderTrackingScreenProps {
   onNavigate: (view: string) => void;
@@ -1393,7 +1394,7 @@ export const OrderTrackingScreen: React.FC<OrderTrackingScreenProps> = ({ onNavi
                       >
                         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flex: 1, minWidth: 0, marginRight: '10px' }}>
                           <img
-                            src={dish.image || '/food-biryani.jpg'}
+                            src={resolveDishImage(dish.image, (dish as any).category, (dish as any).menuItemId || (dish as any).id, dish.name)}
                             alt={dish.name}
                             style={{ width: '42px', height: '42px', borderRadius: '8px', objectFit: 'cover' }}
                             onError={(e) => {
