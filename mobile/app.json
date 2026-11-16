@@ -27,7 +27,9 @@
       "bundler": "metro"
     },
     "extra": {
-      "apiUrl": "https://foodies-cafe-eutsvzksr-aliraza8.vercel.app"
+      "apiUrl": "https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app",
+      "customerWebUrl": "https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/",
+      "staffWebUrl": "https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/staff"
     }
   }
 }

@@ -1,0 +1,64 @@
+name: Build FoodiesCafe Android APK
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - main
+    paths:
+      - 'mobile/src/**'
+      - 'mobile/app.json'
+      - 'mobile/eas.json'
+      - 'mobile/package.json'
+      - '.github/workflows/build-apk.yml'
+
+jobs:
+  build-android-apk:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: mobile
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Set up JDK 17
+        uses: actions/setup-java@v4
+        with:
+          distribution: 'temurin'
+          java-version: '17'
+
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Install mobile dependencies
+        run: npm ci || npm install --legacy-peer-deps
+
+      - name: Run Expo Android Prebuild
+        env:
+          EXPO_PUBLIC_API_URL: https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app
+          EXPO_PUBLIC_CUSTOMER_WEB_URL: https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/
+          EXPO_PUBLIC_STAFF_WEB_URL: https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/staff
+        run: npx expo prebuild --platform android --no-install
+
+      - name: Build Release APK
+        env:
+          EXPO_PUBLIC_API_URL: https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app
+          EXPO_PUBLIC_CUSTOMER_WEB_URL: https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/
+          EXPO_PUBLIC_STAFF_WEB_URL: https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/staff
+        run: |
+          cd android
+          chmod +x gradlew
+          ./gradlew assembleRelease -x lint -x test --no-daemon
+
+      - name: Upload APK Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: FoodiesCafe-apk
+          path: mobile/android/app/build/outputs/apk/release/app-release.apk

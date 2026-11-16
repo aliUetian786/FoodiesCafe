@@ -796,31 +796,54 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
               const existing = matchedId ? map.get(matchedId) : undefined;
               const targetKey = inc.id || existing?.id || '';
               const inFlight = inFlightOrdersRef.current.get(targetKey) || (inc.orderNumber ? inFlightOrdersRef.current.get(inc.orderNumber) : undefined);
-              const isLocallyPaid = (existing && (existing.paymentStatus === 'paid' || existing.paymentCollected)) || (inFlight && inFlight.paymentStatus === 'paid');
+              const isLocallyPaid =
+                Boolean(existing && (existing.paymentStatus === 'paid' || existing.paymentCollected === true)) ||
+                Boolean(inFlight && (inFlight.paymentStatus === 'paid' || inFlight.paymentCollected === true)) ||
+                inc.paymentStatus === 'paid' ||
+                Boolean(inc.paymentCollected);
+
+              const incStatus = inc.status as string;
+              const existingStatus = existing?.status as string | undefined;
+              const inFlightStatus = inFlight?.status as string | undefined;
+
+              const isDeliveryFinished =
+                (inc.type === 'delivery' || existing?.type === 'delivery') &&
+                isLocallyPaid &&
+                (incStatus === 'delivered' || incStatus === 'completed' || existingStatus === 'completed' || inc.riderStatus === 'delivered' || inFlight?.riderStatus === 'delivered');
+
+              const isDineInFinished =
+                (inc.type === 'dine_in' || existing?.type === 'dine_in') &&
+                isLocallyPaid &&
+                (incStatus === 'served' || incStatus === 'completed' || existingStatus === 'served' || existingStatus === 'completed');
+
+              const isTakeawayFinished =
+                (inc.type === 'takeaway' || existing?.type === 'takeaway') &&
+                isLocallyPaid &&
+                (incStatus === 'taken' || incStatus === 'completed' || existingStatus === 'taken' || existingStatus === 'completed');
+
+              const isOrderFinished =
+                incStatus === 'completed' ||
+                existingStatus === 'completed' ||
+                inFlightStatus === 'completed' ||
+                isDeliveryFinished ||
+                isDineInFinished ||
+                isTakeawayFinished;
 
               if (existing) {
                 const existingRank = STATUS_RANK[existing.status] || 0;
                 const incomingRank = STATUS_RANK[inc.status] || 0;
+                const isLocalCancelled = existing.status === 'cancelled';
                 const preserveLocal =
-                  existing.status !== 'cancelled' &&
-                  inc.status !== 'cancelled' &&
-                  existingRank > incomingRank;
+                  isLocalCancelled ||
+                  (existing.status !== 'cancelled' &&
+                    inc.status !== 'cancelled' &&
+                    existingRank > incomingRank);
 
-                const isOrderFinished =
-                  inc.status === 'delivered' ||
-                  inc.status === 'completed' ||
-                  existing?.status === 'completed' ||
-                  inc.riderStatus === 'delivered' ||
-                  inFlight?.riderStatus === 'delivered' ||
-                  inFlight?.status === 'completed' ||
-                  inFlight?.status === 'delivered' ||
-                  (inc.type === 'delivery' && (isLocallyPaid || inc.paymentStatus === 'paid')) ||
-                  ((isLocallyPaid || inc.paymentStatus === 'paid') &&
-                    (existing?.status === 'served' || inc.status === 'served' || existing?.status === 'ready' || inc.status === 'ready' || inc.type === 'dine_in'));
-
-                const resolvedStatus = isOrderFinished
-                  ? ('completed' as OrderStatus)
-                  : inFlight?.status || (preserveLocal ? existing.status : inc.status);
+                const resolvedStatus = isLocalCancelled
+                  ? ('cancelled' as OrderStatus)
+                  : isOrderFinished
+                    ? ('completed' as OrderStatus)
+                    : inFlight?.status || (preserveLocal ? existing.status : inc.status);
 
                 if (matchedId && matchedId !== targetKey) {
                   map.delete(matchedId);
@@ -829,21 +852,29 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
                   ...inc,
                   id: targetKey,
                   status: resolvedStatus,
-                  paymentStatus: isLocallyPaid || inc.paymentStatus === 'paid' ? 'paid' : (inc.paymentStatus || existing.paymentStatus),
-                  paymentCollected: Boolean(existing.paymentCollected || inc.paymentCollected || isLocallyPaid),
+                  paymentStatus: (isOrderFinished || isLocallyPaid) && inc.paymentStatus !== 'refunded' ? 'paid' : (inc.paymentStatus || existing.paymentStatus),
+                  paymentCollected: Boolean(isOrderFinished || isLocallyPaid || existing.paymentCollected || inc.paymentCollected),
                   sentToKitchen: existing.sentToKitchen || inc.sentToKitchen,
                   sentToKitchenAt: inc.sentToKitchenAt || existing.sentToKitchenAt,
                   preparationStartedAt: inc.preparationStartedAt || existing.preparationStartedAt,
-                  completedAt: isOrderFinished ? (inc.completedAt || new Date().toISOString()) : (inc.completedAt || existing.completedAt),
-                  deliveredAt: isOrderFinished ? (inc.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
+                  completedAt: isOrderFinished ? (inc.completedAt || existing.completedAt || new Date().toISOString()) : (inc.completedAt || existing.completedAt),
+                  deliveredAt: isOrderFinished ? (inc.deliveredAt || existing.deliveredAt || new Date().toISOString()) : (inc.deliveredAt || existing.deliveredAt),
                   assignedRiderId: inc.assignedRiderId || existing.assignedRiderId,
                   assignedRiderName: inc.assignedRiderName || existing.assignedRiderName,
                   assignedWaiterId: inc.assignedWaiterId || existing.assignedWaiterId,
                   assignedWaiterName: inc.assignedWaiterName || existing.assignedWaiterName,
-                  riderStatus: isOrderFinished ? 'delivered' : (inFlight?.riderStatus || inc.riderStatus || existing.riderStatus),
+                  riderStatus: (isOrderFinished && (inc.type === 'delivery' || existing.type === 'delivery')) ? 'delivered' : (inFlight?.riderStatus || inc.riderStatus || existing.riderStatus),
                 });
               } else {
-                map.set(inc.id, {
+                map.set(inc.id, isOrderFinished ? {
+                  ...inc,
+                  status: 'completed',
+                  riderStatus: inc.type === 'delivery' ? 'delivered' : inc.riderStatus,
+                  paymentStatus: 'paid',
+                  paymentCollected: true,
+                  completedAt: inc.completedAt || new Date().toISOString(),
+                  deliveredAt: inc.deliveredAt || new Date().toISOString(),
+                } : {
                   ...inc,
                   status: inFlight?.status || inc.status,
                   paymentStatus: (inFlight?.paymentStatus === 'paid') ? 'paid' : inc.paymentStatus,
@@ -2754,11 +2785,27 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       }
     }
 
+    const nextOrderSnapshot = existingOrd
+      ? {
+          ...existingOrd,
+          status,
+          ...(extraFields || {}),
+          preparationStartedAt:
+            status === 'preparing' ? new Date().toISOString() : existingOrd.preparationStartedAt,
+          completedAt:
+            status === 'completed' || status === 'delivered' || status === 'served' || status === 'taken'
+              ? new Date().toISOString()
+              : existingOrd.completedAt,
+        }
+      : undefined;
+
     // Notify Web Backend & PostgreSQL via PATCH /api/orders
     apiFetch('/api/orders', {
       method: 'PATCH',
       body: JSON.stringify({
         orderId,
+        type: existingOrd?.type,
+        orderSnapshot: nextOrderSnapshot,
         status,
         expectedVersion: existingOrd?.version,
         actorId: currentUser?.id,
@@ -2770,47 +2817,86 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
   };
 
   const updateOrderPayment = (orderId: string, paymentStatus: 'paid' | 'unpaid') => {
-    const existingOrd = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
-    const isDeliveryOrder = existingOrd?.type === 'delivery' || existingOrd?.status === 'out_for_delivery' || existingOrd?.status === 'delivered';
-    const shouldCompleteDelivery = paymentStatus === 'paid' && isDeliveryOrder;
+    const existingOrd =
+      orders.find((o) => o.id === orderId || o.orderNumber === orderId) ||
+      ordersRef.current.find((o) => o.id === orderId || o.orderNumber === orderId);
+    const isFulfilledDelivery =
+      Boolean(existingOrd) &&
+      (existingOrd?.status === 'out_for_delivery' ||
+        existingOrd?.status === 'delivered' ||
+        (existingOrd?.type === 'delivery' && existingOrd?.riderStatus === 'delivered'));
+    const isFulfilledDineIn =
+      existingOrd?.type === 'dine_in' && existingOrd?.status === 'served';
+    const isFulfilledTakeaway =
+      existingOrd?.type === 'takeaway' && existingOrd?.status === 'taken';
+    const shouldCompleteOnPay =
+      paymentStatus === 'paid' &&
+      (isFulfilledDelivery || isFulfilledDineIn || isFulfilledTakeaway);
+    const nowIso = new Date().toISOString();
+    const resolvedNextStatus: OrderStatus | undefined = shouldCompleteOnPay
+      ? 'completed'
+      : paymentStatus === 'paid' && existingOrd?.status === 'placed'
+        ? 'accepted'
+        : existingOrd?.status;
+    const nextOrderSnapshot = existingOrd
+      ? {
+          ...existingOrd,
+          paymentStatus,
+          paymentCollected: paymentStatus === 'paid',
+          status: resolvedNextStatus || existingOrd.status,
+          riderStatus:
+            paymentStatus === 'paid' && isFulfilledDelivery
+              ? ('delivered' as const)
+              : existingOrd.riderStatus,
+          completedAt: shouldCompleteOnPay ? nowIso : existingOrd.completedAt,
+          deliveredAt:
+            paymentStatus === 'paid' && isFulfilledDelivery
+              ? existingOrd.deliveredAt || nowIso
+              : existingOrd.deliveredAt,
+        }
+      : undefined;
 
     // Track in-flight payment status so polling NEVER reverts to unpaid
     inFlightOrdersRef.current.set(orderId, {
       paymentStatus,
       paymentCollected: paymentStatus === 'paid',
-      status: shouldCompleteDelivery ? 'completed' : undefined,
-      riderStatus: shouldCompleteDelivery ? 'delivered' : undefined,
+      status: shouldCompleteOnPay ? 'completed' : undefined,
+      riderStatus: paymentStatus === 'paid' && isFulfilledDelivery ? 'delivered' : undefined,
       timestamp: Date.now(),
     });
 
     setOrders((prev) => {
-      const next = prev.map((o) =>
-        o.id === orderId || o.orderNumber === orderId
-          ? {
-            ...o,
-            paymentStatus,
-            paymentCollected: paymentStatus === 'paid',
-            status:
-              paymentStatus === 'paid' && (o.type === 'delivery' || o.status === 'out_for_delivery' || o.status === 'delivered')
-                ? ('completed' as OrderStatus)
-                : paymentStatus === 'paid' && o.status === 'placed'
-                  ? ('accepted' as OrderStatus)
-                  : o.status,
-            riderStatus:
-              paymentStatus === 'paid' && (o.type === 'delivery' || o.status === 'out_for_delivery' || o.status === 'delivered')
-                ? ('delivered' as const)
-                : o.riderStatus,
-            completedAt:
-              paymentStatus === 'paid' && (o.type === 'delivery' || o.status === 'out_for_delivery' || o.status === 'delivered')
-                ? new Date().toISOString()
-                : o.completedAt,
-            deliveredAt:
-              paymentStatus === 'paid' && (o.type === 'delivery' || o.status === 'out_for_delivery' || o.status === 'delivered')
-                ? new Date().toISOString()
-                : o.deliveredAt,
-          }
-          : o
-      );
+      const next = prev.map((o) => {
+        if (o.id !== orderId && o.orderNumber !== orderId) return o;
+        const oFulfilledDelivery =
+          o.status === 'out_for_delivery' ||
+          o.status === 'delivered' ||
+          (o.type === 'delivery' && o.riderStatus === 'delivered');
+        const oFulfilledDineIn = o.type === 'dine_in' && o.status === 'served';
+        const oFulfilledTakeaway = o.type === 'takeaway' && o.status === 'taken';
+        const oShouldComplete =
+          paymentStatus === 'paid' &&
+          (oFulfilledDelivery || oFulfilledDineIn || oFulfilledTakeaway);
+        return {
+          ...o,
+          paymentStatus,
+          paymentCollected: paymentStatus === 'paid',
+          status: oShouldComplete
+            ? ('completed' as OrderStatus)
+            : paymentStatus === 'paid' && o.status === 'placed'
+              ? ('accepted' as OrderStatus)
+              : o.status,
+          riderStatus:
+            paymentStatus === 'paid' && oFulfilledDelivery
+              ? ('delivered' as const)
+              : o.riderStatus,
+          completedAt: oShouldComplete ? nowIso : o.completedAt,
+          deliveredAt:
+            paymentStatus === 'paid' && oFulfilledDelivery
+              ? o.deliveredAt || nowIso
+              : o.deliveredAt,
+        };
+      });
       AsyncStorage.setItem('@foodies_orders_permanent_store', JSON.stringify(next)).catch(() => { });
       return next;
     });
@@ -2821,12 +2907,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       method: 'PATCH',
       body: JSON.stringify({
         orderId,
+        type: existingOrd?.type,
+        orderSnapshot: nextOrderSnapshot,
         paymentStatus,
         paymentCollected: paymentStatus === 'paid',
-        status: shouldCompleteDelivery ? 'completed' : undefined,
-        riderStatus: shouldCompleteDelivery ? 'delivered' : undefined,
-        completedAt: shouldCompleteDelivery ? new Date().toISOString() : undefined,
-        deliveredAt: shouldCompleteDelivery ? new Date().toISOString() : undefined,
+        status: shouldCompleteOnPay ? 'completed' : undefined,
+        riderStatus: paymentStatus === 'paid' && isFulfilledDelivery ? 'delivered' : undefined,
+        completedAt: shouldCompleteOnPay ? nowIso : undefined,
+        deliveredAt: paymentStatus === 'paid' && isFulfilledDelivery ? nowIso : undefined,
         actorId: currentUser?.id,
         actorName: currentUser?.name,
         actorRole: currentUser?.role || role || 'delivery_staff',
@@ -3690,11 +3778,23 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     showToast(`Order #${target?.orderNumber || ''} delivered to table. Guests dining 🍽️`, 'success');
 
+    const nextDeliveredSnapshot = target
+      ? {
+          ...target,
+          status: 'served' as OrderStatus,
+          deliveredAt: nowIso,
+          assignedWaiterId: resolvedWaiterId || target.assignedWaiterId,
+          assignedWaiterName: resolvedWaiterName || target.assignedWaiterName,
+        }
+      : undefined;
+
     // Sync to Web Backend & PostgreSQL
     apiFetch('/api/orders', {
       method: 'PATCH',
       body: JSON.stringify({
         orderId: targetOrderId,
+        type: target?.type || 'dine_in',
+        orderSnapshot: nextDeliveredSnapshot,
         status: 'served',
         deliveredAt: nowIso,
         assignedWaiterId: resolvedWaiterId,
@@ -3772,11 +3872,26 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     showToast(`Table ${target?.tableNumber || ''} cleared & Order #${target?.orderNumber || ''} done and collected ✓`, 'success');
 
+    const nextDoneSnapshot = target
+      ? {
+          ...target,
+          status: 'completed' as OrderStatus,
+          completedAt: nowIso,
+          deliveredAt: target.deliveredAt || nowIso,
+          paymentStatus: (cashCollected ? 'paid' : target.paymentStatus) as 'paid' | 'unpaid',
+          paymentCollected: cashCollected ? true : target.paymentCollected,
+          assignedWaiterId: target.assignedWaiterId || (role === 'floor_staff' ? staffUser?.id : undefined),
+          assignedWaiterName: target.assignedWaiterName || (role === 'floor_staff' ? staffUser?.name : undefined),
+        }
+      : undefined;
+
     // Sync to Web Backend & PostgreSQL
     apiFetch('/api/orders', {
       method: 'PATCH',
       body: JSON.stringify({
         orderId: targetOrderId,
+        type: target?.type || 'dine_in',
+        orderSnapshot: nextDoneSnapshot,
         status: 'completed',
         paymentStatus: cashCollected ? 'paid' : target?.paymentStatus,
         paymentCollected: cashCollected,

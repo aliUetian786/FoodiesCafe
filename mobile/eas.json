@@ -11,11 +11,21 @@
       "distribution": "internal",
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app",
+        "EXPO_PUBLIC_CUSTOMER_WEB_URL": "https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/",
+        "EXPO_PUBLIC_STAFF_WEB_URL": "https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/staff"
       }
     },
     "production": {
       "android": {
         "buildType": "apk"
+      },
+      "env": {
+        "EXPO_PUBLIC_API_URL": "https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app",
+        "EXPO_PUBLIC_CUSTOMER_WEB_URL": "https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/",
+        "EXPO_PUBLIC_STAFF_WEB_URL": "https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/staff"
       }
     }
   },

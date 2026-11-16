@@ -18,7 +18,7 @@ export function getApiBaseUrl(): string {
   }
 
   if (Platform.OS === 'web') {
-    return 'https://foodies-cafe-eutsvzksr-aliraza8.vercel.app';
+    return 'https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app';
   }
 
   const hostUri =
@@ -33,10 +33,18 @@ export function getApiBaseUrl(): string {
     }
   }
 
-  return 'https://foodies-cafe-eutsvzksr-aliraza8.vercel.app';
+  return 'https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app';
 }
 
 export const API_BASE_URL = getApiBaseUrl();
+export const CUSTOMER_WEB_URL =
+  process.env.EXPO_PUBLIC_CUSTOMER_WEB_URL ||
+  (Constants.expoConfig?.extra as any)?.customerWebUrl ||
+  'https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/';
+export const STAFF_WEB_URL =
+  process.env.EXPO_PUBLIC_STAFF_WEB_URL ||
+  (Constants.expoConfig?.extra as any)?.staffWebUrl ||
+  'https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/staff';
 
 /**
  * Normalizes branch IDs to match PostgreSQL database constraints strictly:
