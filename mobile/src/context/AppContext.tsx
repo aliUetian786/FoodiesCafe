@@ -3729,7 +3729,43 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         assignedRiderName: riderName,
         riderStatus: 'assigned',
       }),
-    }).catch(() => { });
+    })
+      .then((res) => handleRiderChangeRejected(orderId, res))
+      .catch(() => { });
+  };
+
+  // Server rejected a rider change (another rider already accepted / claimed it):
+  // drop the optimistic state and show the server's rider instead.
+  const handleRiderChangeRejected = (
+    orderId: string,
+    res: { ok: boolean; error: string | null }
+  ): boolean => {
+    if (res.ok || !res.error) return false;
+    let parsed: any = null;
+    try {
+      parsed = JSON.parse(res.error);
+    } catch { }
+    const serverOrder = parsed?.order;
+    if (!serverOrder) return false;
+    inFlightOrdersRef.current.delete(orderId);
+    if (serverOrder.id) inFlightOrdersRef.current.delete(serverOrder.id);
+    if (serverOrder.orderNumber) inFlightOrdersRef.current.delete(serverOrder.orderNumber);
+    setOrders((prev) => {
+      const next = prev.map((o) =>
+        o.id === orderId || o.orderNumber === orderId || o.id === serverOrder.id
+          ? {
+            ...o,
+            assignedRiderId: serverOrder.assignedRiderId || undefined,
+            assignedRiderName: serverOrder.assignedRiderName || undefined,
+            riderStatus: serverOrder.riderStatus || undefined,
+          }
+          : o
+      );
+      AsyncStorage.setItem('@foodies_orders_permanent_store', JSON.stringify(next)).catch(() => { });
+      return next;
+    });
+    showToast(parsed?.error || 'Another rider already has this order.', 'danger');
+    return true;
   };
 
   const unassignRiderFromOrder = async (orderId: string) => {
@@ -3749,10 +3785,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         assignedRiderName: null,
         riderStatus: null,
       }),
-    }).catch(() => { });
+    })
+      .then((res) => handleRiderChangeRejected(orderId, res))
+      .catch(() => { });
   };
 
   const acceptRiderOrder = async (orderId: string) => {
+    const myId = currentUser?.id;
+    const myName = currentUser?.name;
     inFlightOrdersRef.current.set(orderId, {
       riderStatus: 'accepted',
       timestamp: Date.now(),
@@ -3760,7 +3800,12 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     setOrders((prev) => {
       const next = prev.map((o) =>
         o.id === orderId || o.orderNumber === orderId
-          ? { ...o, riderStatus: 'accepted' as const }
+          ? {
+            ...o,
+            riderStatus: 'accepted' as const,
+            // Accepting claims the order for this rider (server rejects it if someone else has it)
+            ...(myId && !o.assignedRiderId ? { assignedRiderId: myId, assignedRiderName: myName } : {}),
+          }
           : o
       );
       AsyncStorage.setItem('@foodies_orders_permanent_store', JSON.stringify(next)).catch(() => { });
@@ -3783,11 +3828,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       body: JSON.stringify({
         orderId,
         riderStatus: 'accepted',
+        ...(myId ? { assignedRiderId: myId, assignedRiderName: myName } : {}),
         actorRole: 'delivery_staff',
-        actorId: currentUser?.id,
-        actorName: currentUser?.name,
+        actorId: myId,
+        actorName: myName,
       }),
-    }).catch(() => { });
+    })
+      .then((res) => handleRiderChangeRejected(orderId, res))
+      .catch(() => { });
   };
 
   const markOrderDeliveredToTable = (orderId: string) => {

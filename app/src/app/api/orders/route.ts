@@ -1054,6 +1054,56 @@ export async function PATCH(request: Request) {
         effectiveStatus = currentStatus;
       }
 
+      // Rider assignment guard. The row is locked FOR UPDATE, so this is race-free across
+      // cashier terminals and rider phones:
+      //  - Once a rider has accepted (or is on the trip), nobody else can be assigned and
+      //    no other rider can accept it.
+      //  - A rider accepting an order claims it (assigned_rider_id = that rider).
+      //  - Auto-assign (onlyIfUnassigned) never replaces an existing assignment.
+      const LOCKED_RIDER_STATUSES = ['accepted', 'picked_up', 'en_route', 'on_trip', 'delivered'];
+      const currentRiderId = currentOrder.assigned_rider_id ? String(currentOrder.assigned_rider_id) : '';
+      const currentRiderName = String(currentOrder.assigned_rider_name || 'another rider');
+      const isCurrentRiderLocked =
+        Boolean(currentRiderId) && LOCKED_RIDER_STATUSES.includes(String(currentOrder.rider_status || ''));
+      let effectiveAssignedRiderId = assignedRiderId;
+      let effectiveAssignedRiderName = assignedRiderName;
+
+      if (riderStatus === 'accepted') {
+        const accepterId = String(
+          assignedRiderId || (effectiveActorRole === 'delivery_staff' ? effectiveActorId : '') || ''
+        );
+        if (currentRiderId && accepterId && currentRiderId !== accepterId) {
+          return {
+            status: 409,
+            error: `This order is already assigned to ${currentRiderName}.`,
+            currentOrder: formatOrderRow(currentOrder),
+          };
+        }
+        if (!currentRiderId && accepterId) {
+          effectiveAssignedRiderId = accepterId;
+          effectiveAssignedRiderName = assignedRiderName || effectiveActorName;
+        }
+      }
+
+      // Cancelling clears the rider on purpose, so it is exempt from the lock.
+      if (assignedRiderId !== undefined && effectiveStatus !== 'cancelled' && status !== 'cancelled') {
+        const nextRiderId = String(assignedRiderId || '');
+        if (isCurrentRiderLocked && nextRiderId !== currentRiderId) {
+          return {
+            status: 409,
+            error: `${currentRiderName} has already accepted this order. The rider cannot be changed.`,
+            currentOrder: formatOrderRow(currentOrder),
+          };
+        }
+        if (body.onlyIfUnassigned && currentRiderId && nextRiderId !== currentRiderId) {
+          return {
+            status: 409,
+            error: `This order is already assigned to ${currentRiderName}.`,
+            currentOrder: formatOrderRow(currentOrder),
+          };
+        }
+      }
+
       // 4. Server State Machine Validation for Status Transitions
       if (effectiveStatus !== undefined && effectiveStatus !== currentStatus) {
         const check = validateStatusTransition(currentStatus, effectiveStatus, effectiveActorRole);
@@ -1164,13 +1214,13 @@ export async function PATCH(request: Request) {
         updates.push(`auto_forward_custom_min = $${idx++}`);
         values.push(autoForwardCustomMin);
       }
-      if (assignedRiderId !== undefined) {
+      if (effectiveAssignedRiderId !== undefined) {
         updates.push(`assigned_rider_id = $${idx++}`);
-        values.push(assignedRiderId || null);
+        values.push(effectiveAssignedRiderId || null);
       }
-      if (assignedRiderName !== undefined) {
+      if (effectiveAssignedRiderName !== undefined) {
         updates.push(`assigned_rider_name = $${idx++}`);
-        values.push(assignedRiderName || null);
+        values.push(effectiveAssignedRiderName || null);
       }
       if (effectiveRiderStatus !== undefined) {
         updates.push(`rider_status = $${idx++}`);

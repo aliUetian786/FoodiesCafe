@@ -3390,6 +3390,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
   };
 
   // Delivery Rider Actions
+  // Server rejected a rider change (409): drop the optimistic overlay and show the server's rider.
+  const revertRiderAssignmentToServer = (orderId: string, serverOrder?: Partial<Order> | null) => {
+    if (!serverOrder) return;
+    setOrders((prev) => {
+      const updated = prev.map((ord) => {
+        if (ord.id !== orderId && ord.orderNumber !== orderId && ord.id !== serverOrder.id) return ord;
+        inFlightStatusRef.current.delete(ord.id);
+        if (ord.orderNumber) inFlightStatusRef.current.delete(ord.orderNumber);
+        return {
+          ...ord,
+          assignedRiderId: serverOrder.assignedRiderId || undefined,
+          assignedRiderName: serverOrder.assignedRiderName || undefined,
+          riderStatus: serverOrder.riderStatus || undefined,
+        };
+      });
+      try {
+        localStorage.setItem('foodies_orders_live', JSON.stringify(updated));
+      } catch (e) { }
+      broadcastOrders(updated);
+      return updated;
+    });
+  };
+
   const assignRiderToOrder = (orderId: string, riderId: string, silent = false) => {
     const rider = users.find((u) => u.id === riderId);
     const riderName = rider?.name || 'Assigned Rider';
@@ -3467,7 +3490,8 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return prev;
     });
 
-    // Asynchronously sync order update to PostgreSQL
+    // Asynchronously sync order update to PostgreSQL.
+    // `silent` is the auto-assign path: it must never replace a rider another terminal already set.
     try {
       fetch('/api/orders', {
         method: 'PATCH',
@@ -3477,8 +3501,22 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           assignedRiderId: riderId,
           assignedRiderName: riderName,
           riderStatus: 'assigned',
+          ...(silent ? { onlyIfUnassigned: true } : {}),
         }),
-      }).catch(() => { });
+      })
+        .then(async (res) => {
+          if (res.ok || res.status !== 409) return;
+          const data = await res.json().catch(() => null);
+          revertRiderAssignmentToServer(orderId, data?.order);
+          if (!silent) {
+            addToast({
+              type: 'error',
+              title: 'Rider Not Changed',
+              message: data?.error || 'This order already has a rider.',
+            });
+          }
+        })
+        .catch(() => { });
     } catch (e) { }
 
     if (!silent) {
@@ -3545,8 +3583,23 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         body: JSON.stringify({
           orderId,
           riderStatus: 'accepted',
+          // Claim the order for this rider; the server rejects it if another rider has it.
+          ...(currentUser?.role === 'delivery_staff'
+            ? { assignedRiderId: currentUser.id, assignedRiderName: currentUser.name, actorRole: 'delivery_staff', actorId: currentUser.id, actorName: currentUser.name }
+            : {}),
         }),
-      }).catch(() => { });
+      })
+        .then(async (res) => {
+          if (res.ok || res.status !== 409) return;
+          const data = await res.json().catch(() => null);
+          revertRiderAssignmentToServer(orderId, data?.order);
+          addToast({
+            type: 'error',
+            title: 'Order Taken',
+            message: data?.error || 'Another rider already has this order.',
+          });
+        })
+        .catch(() => { });
     } catch (e) { }
 
     addToast({
@@ -3727,7 +3780,18 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           assignedRiderName: null,
           riderStatus: null,
         }),
-      }).catch(() => { });
+      })
+        .then(async (res) => {
+          if (res.ok || res.status !== 409) return;
+          const data = await res.json().catch(() => null);
+          revertRiderAssignmentToServer(orderId, data?.order);
+          addToast({
+            type: 'error',
+            title: 'Rider Not Changed',
+            message: data?.error || 'The rider has already accepted this order.',
+          });
+        })
+        .catch(() => { });
     } catch (e) { }
 
     addToast({

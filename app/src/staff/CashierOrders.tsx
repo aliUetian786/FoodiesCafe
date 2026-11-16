@@ -56,6 +56,10 @@ interface CashierOrdersScreenProps {
   isFloorStaff?: boolean;
 }
 
+// Explicit option colours so the native dropdown list never inherits the select's
+// blue/muted state colours (that caused the flickering "colour conflict" in the rider list).
+const RIDER_OPTION_STYLE: React.CSSProperties = { color: '#0F172A', backgroundColor: '#FFFFFF', fontWeight: 600 };
+
 export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloorStaff = false }) => {
   const {
     orders,
@@ -207,6 +211,10 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
     return branchOrders.length;
   }, [branchOrders]);
 
+  // Orders this terminal has already auto-assigned once. Without this the effect re-fired on every
+  // poll/re-render and kept swapping the rider (the "name keeps changing" bug).
+  const autoAssignedOrderIdsRef = React.useRef<Set<string>>(new Set());
+
   // Auto-assign closer en-route rider if distance between branch and new order is greater than distance between existing accepted order and new order
   React.useEffect(() => {
     const bCoords = {
@@ -216,7 +224,8 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
 
     branchOrders.forEach((ord) => {
       if (ord.type !== 'delivery') return;
-      if (ord.assignedRiderId) return;
+      if (ord.assignedRiderId || ord.riderStatus) return;
+      if (autoAssignedOrderIdsRef.current.has(ord.id)) return;
       if (ord.status === 'completed' || ord.status === 'delivered' || ord.status === 'cancelled') return;
 
       const newCoords = getOrderDeliveryCoords(ord, bCoords);
@@ -259,6 +268,8 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
       });
 
       if (bestRiderId) {
+        autoAssignedOrderIdsRef.current.add(ord.id);
+        // silent = auto path: the server only applies it if the order is still unassigned
         assignRiderToOrder(ord.id, bestRiderId, true);
       }
     });
@@ -1229,9 +1240,13 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
 
                       const sortedRiderItems = [...closerRiders, ...otherRiders];
 
-                      // Automatically show the selected rider if they have an active order closer than branch
-                      const topCloserCandidate = closerRiders[0]?.rider;
-                      const selectedRiderId = ord.assignedRiderId || (topCloserCandidate ? topCloserCandidate.id : '');
+                      // Show ONLY the real assignment. Previously an unassigned order showed a "suggested"
+                      // rider as if selected, which flipped colour/name as the suggestion changed on each poll.
+                      const selectedRiderId = ord.assignedRiderId || '';
+                      // Keep the assigned rider visible even if they dropped out of the available list
+                      // (offline / on another trip); otherwise the select rendered blank but styled as selected.
+                      const assignedMissingFromList =
+                        Boolean(selectedRiderId) && !sortedRiderItems.some((it) => it.rider.id === selectedRiderId);
 
                       const isOrderOutForDelivery =
                         ord.status === 'out_for_delivery' ||
@@ -1294,9 +1309,10 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                           style={{
                             padding: '2px 6px',
                             borderRadius: '5px',
-                            border: selectedRiderId ? '1.5px solid #2563EB' : '1px dashed var(--border-color)',
-                            backgroundColor: selectedRiderId ? '#EFF6FF' : 'var(--bg-card-subtle)',
-                            color: selectedRiderId ? '#1E40AF' : 'var(--text-muted)',
+                            border: selectedRiderId ? '1.5px solid #2563EB' : '1px dashed #CBD5E1',
+                            backgroundColor: selectedRiderId ? '#EFF6FF' : '#FFFFFF',
+                            color: selectedRiderId ? '#1E40AF' : '#475569',
+                            colorScheme: 'light',
                             fontSize: '11px',
                             fontWeight: 750,
                             cursor: 'pointer',
@@ -1305,9 +1321,14 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
                             width: '100%',
                           }}
                         >
-                          <option value="">🛵 Select Rider</option>
+                          <option value="" style={RIDER_OPTION_STYLE}>🛵 Select Rider</option>
+                          {assignedMissingFromList && (
+                            <option value={selectedRiderId} style={RIDER_OPTION_STYLE}>
+                              {ord.assignedRiderName || 'Assigned Rider'}
+                            </option>
+                          )}
                           {sortedRiderItems.map((item) => (
-                            <option key={item.rider.id} value={item.rider.id}>
+                            <option key={item.rider.id} value={item.rider.id} style={RIDER_OPTION_STYLE}>
                               {item.isCloserThanBranch ? `⭐ ${item.label}` : item.label}
                             </option>
                           ))}

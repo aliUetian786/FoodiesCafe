@@ -53,7 +53,21 @@ export function mergeSingleOrderMonotonically(existing: Order | undefined, inc: 
   const incStatus = inc.status as string;
   const existingStatus = existing?.status as string | undefined;
   const orderType = inc.type || existing?.type;
-  const resolvedRiderStatus = (inc.riderStatus || existing?.riderStatus) as Order['riderStatus'];
+  // Rider status only moves forward for the SAME rider (a stale poll must not turn
+  // 'accepted' back into 'assigned'). A different rider id means a real reassignment.
+  const RIDER_STATUS_RANK: Record<string, number> = {
+    assigned: 1, accepted: 2, picked_up: 3, en_route: 3, on_trip: 3, delivered: 4,
+  };
+  const sameRider =
+    Boolean(existing?.assignedRiderId) &&
+    (!inc.assignedRiderId || inc.assignedRiderId === existing?.assignedRiderId);
+  const keepExistingRiderStatus =
+    sameRider &&
+    (RIDER_STATUS_RANK[String(existing?.riderStatus || '')] || 0) >
+      (RIDER_STATUS_RANK[String(inc.riderStatus || '')] || 0);
+  const resolvedRiderStatus = (
+    keepExistingRiderStatus ? existing?.riderStatus : inc.riderStatus || existing?.riderStatus
+  ) as Order['riderStatus'];
 
   const isAnyCancelled = existingStatus === 'cancelled' || incStatus === 'cancelled';
 
