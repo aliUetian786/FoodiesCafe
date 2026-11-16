@@ -26,7 +26,7 @@ jobs:
       - name: Set up Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: '24'
 
       - name: Set up JDK 17
         uses: actions/setup-java@v4
@@ -34,14 +34,23 @@ jobs:
           distribution: 'temurin'
           java-version: '17'
 
-      - name: Set up Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Accept Android SDK Licenses
+        shell: bash
+        run: |
+          SDK_ROOT="${ANDROID_HOME:-/usr/local/lib/android/sdk}"
+          echo "ANDROID_HOME=$SDK_ROOT" >> "$GITHUB_ENV"
+          echo "ANDROID_SDK_ROOT=$SDK_ROOT" >> "$GITHUB_ENV"
+          SDKMANAGER="$(find "$SDK_ROOT/cmdline-tools" -name sdkmanager -type f 2>/dev/null | head -n 1)"
+          if [ -n "$SDKMANAGER" ]; then
+            yes | "$SDKMANAGER" --sdk_root="$SDK_ROOT" --licenses > /dev/null || true
+          fi
 
       - name: Install mobile dependencies
-        run: npm ci || npm install --legacy-peer-deps
+        run: npm ci --legacy-peer-deps || npm install --legacy-peer-deps
 
       - name: Run Expo Android Prebuild
         env:
+          CI: '1'
           EXPO_PUBLIC_API_URL: https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app
           EXPO_PUBLIC_CUSTOMER_WEB_URL: https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/
           EXPO_PUBLIC_STAFF_WEB_URL: https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/staff
@@ -49,11 +58,14 @@ jobs:
 
       - name: Build Release APK
         env:
+          CI: '1'
           EXPO_PUBLIC_API_URL: https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app
           EXPO_PUBLIC_CUSTOMER_WEB_URL: https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/
           EXPO_PUBLIC_STAFF_WEB_URL: https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/staff
         run: |
           cd android
+          grep -q "^reactNativeArchitectures=" gradle.properties && sed -i 's/^reactNativeArchitectures=.*/reactNativeArchitectures=arm64-v8a,armeabi-v7a/' gradle.properties || echo "reactNativeArchitectures=arm64-v8a,armeabi-v7a" >> gradle.properties
+          grep -q "^org.gradle.jvmargs=" gradle.properties && sed -i 's/^org\.gradle\.jvmargs=.*/org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m/' gradle.properties || echo "org.gradle.jvmargs=-Xmx4096m -XX:MaxMetaspaceSize=1024m" >> gradle.properties
           chmod +x gradlew
           ./gradlew assembleRelease -x lint -x test --no-daemon
 
