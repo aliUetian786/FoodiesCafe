@@ -765,3 +765,35 @@ export async function safeQuery<T extends QueryResultRow = any>(text: string, pa
 }
 
 export default { query, safeQuery, withTransaction, testConnection, getPoolMetrics, flushDatabaseStatePersistence, scheduleDatabaseStatePersistence };
+
+/**
+ * Run a statement inside a transaction that is ALLOWED to fail, without poisoning the transaction.
+ *
+ * PostgreSQL aborts the whole transaction on any error; if the error is swallowed (`.catch(() => {})`)
+ * the final COMMIT silently becomes a ROLLBACK while the caller still returns the "updated" row.
+ * That is how rider "delivered" and cashier "paid" updates were reported as saved but never persisted
+ * (a side-step `UPDATE cash_shifts ... updated_at` failed on a missing column). A SAVEPOINT isolates
+ * the optional statement: on failure only it is rolled back, the error is logged, and the order commits.
+ */
+export async function optionalQuery<T extends QueryResultRow = any>(
+  client: PoolClient,
+  text: string,
+  params?: any[]
+): Promise<{ rows: T[]; rowCount?: number | null }> {
+  const sp = `sp_opt_${Math.random().toString(36).slice(2, 10)}`;
+  let savepoint = true;
+  try {
+    await client.query(`SAVEPOINT ${sp}`);
+  } catch {
+    savepoint = false; // e.g. in-memory dev adapter without savepoint support
+  }
+  try {
+    const res = await client.query<T>(text, params);
+    if (savepoint) await client.query(`RELEASE SAVEPOINT ${sp}`).catch(() => {});
+    return res;
+  } catch (err: any) {
+    console.error('[db] optional statement failed (isolated, transaction kept):', err?.message, '|', text.replace(/\s+/g, ' ').slice(0, 120));
+    if (savepoint) await client.query(`ROLLBACK TO SAVEPOINT ${sp}`).catch(() => {});
+    return { rows: [] };
+  }
+}

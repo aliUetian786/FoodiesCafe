@@ -180,7 +180,8 @@ CREATE TABLE IF NOT EXISTS cash_shifts (
     counted_cash NUMERIC(10, 2),
     difference NUMERIC(10, 2),
     difference_reason TEXT,
-    status VARCHAR(20) NOT NULL DEFAULT 'open'
+    status VARCHAR(20) NOT NULL DEFAULT 'open',
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
 CREATE INDEX IF NOT EXISTS idx_cash_shifts_branch_status ON cash_shifts(branch_id, status);
 

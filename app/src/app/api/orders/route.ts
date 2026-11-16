@@ -1,7 +1,7 @@
 import { NextResponse } from 'next/server';
 import { applyBranchSchedules } from '@/lib/branchSchedule';
 import type { PoolClient } from 'pg';
-import { query, withTransaction } from '@/lib/db';
+import { query, withTransaction, optionalQuery } from '@/lib/db';
 import { createOrderSchema, updateOrderSchema } from '@/lib/validations';
 import { broadcastRealtimeEvent } from '@/lib/realtime';
 import { cacheGet, cacheSet, cacheInvalidatePrefix } from '@/lib/redis';
@@ -333,9 +333,7 @@ export async function POST(request: Request) {
     const txResult = await withTransaction(async (client) => {
       // 1. Idempotency check (by Idempotency-Key, order id, or order_number)
       if (headerIdempotencyKey) {
-        const existingByKey = await client
-          .query(`SELECT * FROM orders WHERE idempotency_key = $1 LIMIT 1`, [headerIdempotencyKey])
-          .catch(() => ({ rows: [] }));
+        const existingByKey = await optionalQuery(client, `SELECT * FROM orders WHERE idempotency_key = $1 LIMIT 1`, [headerIdempotencyKey]);
         if (existingByKey.rows.length > 0) {
           return {
             status: 200,
@@ -800,9 +798,7 @@ export async function PATCH(request: Request) {
       if (existingRes.rows.length === 0 && body.orderSnapshot && body.orderSnapshot.id) {
         const snap = body.orderSnapshot;
         const snapBranchId = normalizeBranchId(snap.branchId || branchId || 'gulberg-lahore');
-        await client
-          .query(
-            `INSERT INTO orders (
+        await optionalQuery(client, `INSERT INTO orders (
               id, order_number, branch_id, customer_id, customer_name, customer_phone, customer_email,
               type, table_number, table_pin, pickup_time, status, payment_status,
               payment_method, items, original_subtotal, add_on_subtotal, tax, total,
@@ -860,9 +856,7 @@ export async function PATCH(request: Request) {
               Boolean(snap.isTableQr),
               Boolean(snap.waiterNotified),
               toValidIsoOrNull(snap.createdAt) || new Date().toISOString(),
-            ]
-          )
-          .catch(() => {});
+            ]);
 
         existingRes = await client.query(
           `SELECT * FROM orders WHERE id = $1 OR order_number = $1 FOR UPDATE`,
@@ -1237,8 +1231,13 @@ export async function PATCH(request: Request) {
       const updRes = await client.query(sql, values);
       const updatedRow = updRes.rows[0];
 
-      // 6. Release table & close active table_session on completion or cancellation
-      if (effectiveStatus === 'completed' || effectiveStatus === 'cancelled' || status === 'completed' || status === 'cancelled') {
+      // 6. Release table & close active table_session on completion or cancellation —
+      //    and (rule) as soon as a dine-in order is PAID, the table becomes available automatically.
+      const dineInJustPaid =
+        (updatedRow.type || currentOrder.type) === 'dine_in' &&
+        updatedRow.payment_status === 'paid' &&
+        currentPaymentStatus !== 'paid';
+      if (dineInJustPaid || effectiveStatus === 'completed' || effectiveStatus === 'cancelled' || status === 'completed' || status === 'cancelled') {
         if (currentOrder.table_number) {
           await client.query(
             `UPDATE tables
@@ -1254,35 +1253,23 @@ export async function PATCH(request: Request) {
             [currentOrder.id, currentOrder.order_number]
           );
         }
-        const sessRows = await client
-          .query(
-            `SELECT id, started_at FROM table_sessions WHERE (order_id = $1 OR order_number = $2) AND status = 'occupied'`,
-            [currentOrder.id, currentOrder.order_number]
-          )
-          .catch(() => ({ rows: [] }));
+        const sessRows = await optionalQuery(client, `SELECT id, started_at FROM table_sessions WHERE (order_id = $1 OR order_number = $2) AND status = 'occupied'`,
+            [currentOrder.id, currentOrder.order_number]);
         for (const s of sessRows.rows) {
           const started = s.started_at ? new Date(s.started_at).getTime() : Date.now();
           const durMin = Math.max(1, Math.round((Date.now() - started) / 60000));
-          await client
-            .query(
-              `UPDATE table_sessions SET status = 'completed', ended_at = CURRENT_TIMESTAMP, duration_min = $1 WHERE id = $2`,
-              [durMin, s.id]
-            )
-            .catch(() => {});
+          await optionalQuery(client, `UPDATE table_sessions SET status = 'completed', ended_at = CURRENT_TIMESTAMP, duration_min = $1 WHERE id = $2`,
+              [durMin, s.id]);
         }
       }
 
       // Free assigned rider if order is cancelled
       if (effectiveStatus === 'cancelled' || status === 'cancelled') {
         if (currentOrder.assigned_rider_id) {
-          await client
-            .query(
-              `UPDATE users
+          await optionalQuery(client, `UPDATE users
                SET rider_active_order_id = NULL, rider_availability = 'available'
                WHERE id = $1 AND (rider_active_order_id = $2 OR rider_active_order_id = $3)`,
-              [currentOrder.assigned_rider_id, currentOrder.id, currentOrder.order_number]
-            )
-            .catch(() => {});
+              [currentOrder.assigned_rider_id, currentOrder.id, currentOrder.order_number]);
         }
       }
 
@@ -1293,14 +1280,12 @@ export async function PATCH(request: Request) {
         if (isCashOrCod) {
           const ordTotal = Number(updatedRow.total) || 0;
           if (ordTotal > 0) {
-            await client.query(
-              `UPDATE cash_shifts
+            await optionalQuery(client, `UPDATE cash_shifts
                SET cash_collected = cash_collected + $1,
                    expected_cash = expected_cash + $1,
                    updated_at = CURRENT_TIMESTAMP
                WHERE status = 'open' AND (branch_id = $2 OR branch_id IS NULL)`,
-              [ordTotal, targetBranchId]
-            ).catch(() => {});
+              [ordTotal, targetBranchId]);
           }
         }
       }
@@ -1313,12 +1298,8 @@ export async function PATCH(request: Request) {
         currentOrder.customer_id &&
         currentOrder.customer_id !== 'user-guest'
       ) {
-        await client
-          .query(
-            `UPDATE users SET no_show_count = COALESCE(no_show_count, 0) + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
-            [currentOrder.customer_id]
-          )
-          .catch(() => {});
+        await optionalQuery(client, `UPDATE users SET no_show_count = COALESCE(no_show_count, 0) + 1, updated_at = CURRENT_TIMESTAMP WHERE id = $1`,
+            [currentOrder.customer_id]);
       }
 
       // 7. Write order_history entry

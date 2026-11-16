@@ -1212,6 +1212,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }
 
     setStaffUserState(liveUser);
+    setCustomUserData({});
     setRoleState(liveUser.role);
     setAppModeState('staff');
     if (liveUser.branchId) {
@@ -1335,7 +1336,9 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           base = staffUser || SEED_USERS[0];
           break;
       }
-      return { ...base, ...customUserData };
+      // Staff profile edits are stored in staffUser itself. Merging customUserData here leaked a previous
+      // session's name (e.g. the owner's) onto whoever logged in next — both riders showed "Malik Jahangir".
+      return base;
     }
 
     // Customer App

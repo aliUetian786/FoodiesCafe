@@ -1,4 +1,5 @@
 import { PoolClient } from 'pg';
+import { optionalQuery } from '@/lib/db';
 import { cacheGet, cacheSet } from '@/lib/redis';
 import { getHomeDealById } from '@/lib/homeDeals';
 
@@ -315,7 +316,7 @@ export async function ensureOrderHistoryTable(client: PoolClient): Promise<void>
   // (an extra round trip while holding the order row lock, and a swallowed DDL error would abort the transaction).
   if (orderHistoryTableReady) return;
   try {
-    await client.query(`
+    await optionalQuery(client, `
       CREATE TABLE IF NOT EXISTS order_history (
         id VARCHAR(64) PRIMARY KEY,
         order_id VARCHAR(64) NOT NULL,
@@ -368,7 +369,7 @@ export async function recordOrderHistory(
   try {
     await ensureOrderHistoryTable(client);
     const historyId = `oh-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
-    await client.query(
+    await optionalQuery(client, 
       `INSERT INTO order_history (
         id, order_id, order_number, branch_id,
         actor_id, actor_name, actor_role, change_type,
