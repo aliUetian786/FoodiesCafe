@@ -13,9 +13,9 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app",
-        "EXPO_PUBLIC_CUSTOMER_WEB_URL": "https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/",
-        "EXPO_PUBLIC_STAFF_WEB_URL": "https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/staff"
+        "EXPO_PUBLIC_API_URL": "https://foodies-cafe-aliraza8.vercel.app",
+        "EXPO_PUBLIC_CUSTOMER_WEB_URL": "https://foodies-cafe-aliraza8.vercel.app/",
+        "EXPO_PUBLIC_STAFF_WEB_URL": "https://foodies-cafe-aliraza8.vercel.app/staff"
       }
     },
     "production": {
@@ -23,9 +23,9 @@
         "buildType": "apk"
       },
       "env": {
-        "EXPO_PUBLIC_API_URL": "https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app",
-        "EXPO_PUBLIC_CUSTOMER_WEB_URL": "https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/",
-        "EXPO_PUBLIC_STAFF_WEB_URL": "https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/staff"
+        "EXPO_PUBLIC_API_URL": "https://foodies-cafe-aliraza8.vercel.app",
+        "EXPO_PUBLIC_CUSTOMER_WEB_URL": "https://foodies-cafe-aliraza8.vercel.app/",
+        "EXPO_PUBLIC_STAFF_WEB_URL": "https://foodies-cafe-aliraza8.vercel.app/staff"
       }
     }
   },

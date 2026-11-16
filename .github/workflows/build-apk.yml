@@ -51,17 +51,17 @@ jobs:
       - name: Run Expo Android Prebuild
         env:
           CI: '1'
-          EXPO_PUBLIC_API_URL: https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app
-          EXPO_PUBLIC_CUSTOMER_WEB_URL: https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/
-          EXPO_PUBLIC_STAFF_WEB_URL: https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/staff
+          EXPO_PUBLIC_API_URL: https://foodies-cafe-aliraza8.vercel.app
+          EXPO_PUBLIC_CUSTOMER_WEB_URL: https://foodies-cafe-aliraza8.vercel.app/
+          EXPO_PUBLIC_STAFF_WEB_URL: https://foodies-cafe-aliraza8.vercel.app/staff
         run: npx expo prebuild --platform android --no-install
 
       - name: Build Release APK
         env:
           CI: '1'
-          EXPO_PUBLIC_API_URL: https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app
-          EXPO_PUBLIC_CUSTOMER_WEB_URL: https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/
-          EXPO_PUBLIC_STAFF_WEB_URL: https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/staff
+          EXPO_PUBLIC_API_URL: https://foodies-cafe-aliraza8.vercel.app
+          EXPO_PUBLIC_CUSTOMER_WEB_URL: https://foodies-cafe-aliraza8.vercel.app/
+          EXPO_PUBLIC_STAFF_WEB_URL: https://foodies-cafe-aliraza8.vercel.app/staff
         run: |
           cd android
           grep -q "^reactNativeArchitectures=" gradle.properties && sed -i 's/^reactNativeArchitectures=.*/reactNativeArchitectures=arm64-v8a,armeabi-v7a/' gradle.properties || echo "reactNativeArchitectures=arm64-v8a,armeabi-v7a" >> gradle.properties

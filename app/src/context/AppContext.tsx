@@ -2926,14 +2926,29 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         },
         body: JSON.stringify({ ...newOrder, idempotencyKey }),
       })
-        .then((res) => res.json())
-        .then((data) => {
-          if (data?.order) {
-            store.dispatch(upsertReduxOrder(data.order));
-            broadcastStateMutation('SYNC_ORDERS', [data.order]);
+        .then(async (res) => {
+          const data = await res.json().catch(() => null);
+          if (!res.ok || !data?.order) {
+            // The order only exists on this device — staff will NOT see it. Tell the customer instead of failing silently.
+            console.error('[orders] Server rejected order', newOrder.orderNumber, res.status, data);
+            addToast({
+              type: 'error',
+              title: 'Order NOT sent to the cafe',
+              message: `Order #${newOrder.orderNumber} could not be saved${data?.error ? `: ${data.error}` : ` (HTTP ${res.status})`}. Please try again or contact the branch.`,
+            });
+            return;
           }
+          store.dispatch(upsertReduxOrder(data.order));
+          broadcastStateMutation('SYNC_ORDERS', [data.order]);
         })
-        .catch(() => { });
+        .catch((err) => {
+          console.error('[orders] Network error while sending order', newOrder.orderNumber, err);
+          addToast({
+            type: 'error',
+            title: 'Order NOT sent to the cafe',
+            message: `Order #${newOrder.orderNumber} could not reach the server. Check your internet connection and try again.`,
+          });
+        });
     } catch (e) { }
 
     return newOrder;

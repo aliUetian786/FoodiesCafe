@@ -217,6 +217,116 @@ async function ensureExtraSchemaColumns(pool: Pool): Promise<void> {
   }
 }
 
+/**
+ * Splits a CREATE TABLE body on top-level commas, ignoring commas inside parentheses
+ * (NUMERIC(10, 2)) and inside quoted literals (JSON defaults like '{"a":true,"b":true}').
+ */
+function splitTopLevelCommas(body: string): string[] {
+  const parts: string[] = [];
+  let depth = 0;
+  let inQuote = false;
+  let current = '';
+  for (const ch of body) {
+    if (ch === "'") inQuote = !inQuote;
+    if (!inQuote && ch === '(') depth++;
+    if (!inQuote && ch === ')') depth--;
+    if (ch === ',' && depth === 0 && !inQuote) {
+      parts.push(current);
+      current = '';
+    } else {
+      current += ch;
+    }
+  }
+  if (current.trim()) parts.push(current);
+  return parts;
+}
+
+/**
+ * Builds a safe "ADD COLUMN IF NOT EXISTS" definition from a CREATE TABLE column definition.
+ * Drops PRIMARY KEY / UNIQUE / REFERENCES, and NOT NULL when there is no DEFAULT (existing rows would violate it).
+ */
+function toAddColumnDefinition(columnDef: string): string {
+  let def = columnDef.replace(/\s+/g, ' ').trim();
+  def = def.replace(/\s+REFERENCES\s+.*$/i, '');
+  def = def.replace(/\s+PRIMARY KEY/i, '').replace(/\s+UNIQUE/i, '');
+  if (!/\sDEFAULT\s/i.test(def)) def = def.replace(/\s+NOT NULL/i, '');
+  return def;
+}
+
+/**
+ * Brings a real PostgreSQL database up to the schema bundled with this build.
+ * Databases created from an older schema were missing columns (e.g. orders.idempotency_key),
+ * which made every customer order INSERT fail with "current transaction is aborted".
+ * Runs once per server instance: one information_schema query, then only the missing DDL.
+ */
+async function ensureLiveSchemaUpToDate(pool: Pool): Promise<void> {
+  try {
+    const existing = await pool.query<{ table_name: string; column_name: string }>(
+      `SELECT table_name, column_name FROM information_schema.columns WHERE table_schema = 'public'`
+    );
+    const columnsByTable = new Map<string, Set<string>>();
+    for (const row of existing.rows) {
+      if (!columnsByTable.has(row.table_name)) columnsByTable.set(row.table_name, new Set());
+      columnsByTable.get(row.table_name)!.add(row.column_name);
+    }
+
+    const sql = FALLBACK_SCHEMA_SQL.replace(/--.*$/gm, '');
+    const tableRe = /CREATE TABLE IF NOT EXISTS\s+"?(\w+)"?\s*\(([\s\S]*?)\)\s*;/gi;
+    const applied: string[] = [];
+    let match: RegExpExecArray | null;
+
+    while ((match = tableRe.exec(sql))) {
+      const [fullStatement, table, body] = match;
+      const existingCols = columnsByTable.get(table);
+
+      if (!existingCols) {
+        try {
+          await pool.query(fullStatement);
+          applied.push(`CREATE TABLE ${table}`);
+        } catch (err: any) {
+          console.error(`[db] Schema repair: could not create table ${table}:`, err.message);
+        }
+        continue;
+      }
+
+      for (const part of splitTopLevelCommas(body)) {
+        const def = part.trim();
+        if (!def || /^(PRIMARY KEY|UNIQUE|CONSTRAINT|FOREIGN KEY|CHECK)\b/i.test(def)) continue;
+        const colName = def.split(/\s+/)[0].replace(/"/g, '');
+        if (existingCols.has(colName)) continue;
+        try {
+          await pool.query(`ALTER TABLE "${table}" ADD COLUMN IF NOT EXISTS ${toAddColumnDefinition(def)}`);
+          applied.push(`${table}.${colName}`);
+        } catch (err: any) {
+          console.error(`[db] Schema repair: could not add column ${table}.${colName}:`, err.message);
+        }
+      }
+    }
+
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_orders_idempotency_key_unique ON orders(idempotency_key) WHERE idempotency_key IS NOT NULL`
+    ).catch(() => {});
+    await ensureExtraSchemaColumns(pool);
+
+    // Bootstrap initial cafe master data if branches are empty
+    const branchCountRes = await pool
+      .query(`SELECT COUNT(*) as count FROM branches`)
+      .catch(() => ({ rows: [] }));
+    if (Number(branchCountRes.rows[0]?.count || 0) === 0) {
+      console.log('[db] Zero branches found in PostgreSQL. Seeding initial cafe master data...');
+      await pool.query(FALLBACK_SEED_SQL).catch((err) => {
+        console.warn('[db] Auto-seed warning:', err.message);
+      });
+    }
+
+    if (applied.length > 0) {
+      console.warn(`[db] Schema repair applied ${applied.length} change(s): ${applied.join(', ')}`);
+    }
+  } catch (err: any) {
+    console.error('[db] Schema repair skipped:', err.message);
+  }
+}
+
 async function restorePersistedDatabaseState(pool: Pool): Promise<void> {
   try {
     await ensureExtraSchemaColumns(pool);
@@ -342,25 +452,44 @@ export function scheduleDatabaseStatePersistence(pool: Pool) {
   }, delay);
 }
 
+function getPostgresConnectionString(): string | undefined {
+  return (
+    process.env.DATABASE_URL ||
+    process.env.POSTGRES_URL ||
+    process.env.SUPABASE_DATABASE_URL ||
+    process.env.POSTGRES_PRISMA_URL
+  );
+}
+
 function buildPoolConfig(): PoolConfig {
   const isProd = process.env.NODE_ENV === 'production';
-  const connectionString = process.env.DATABASE_URL;
+  const isVercel = Boolean(process.env.VERCEL || process.env.VERCEL_ENV || process.env.AWS_LAMBDA_FUNCTION_NAME);
+  const connectionString = getPostgresConnectionString();
 
-  const max = parseInt(process.env.DB_POOL_MAX || '25', 10);
-  const min = parseInt(process.env.DB_POOL_MIN || '2', 10);
+  const max = parseInt(process.env.DB_POOL_MAX || (isVercel ? '5' : '20'), 10);
+  const min = parseInt(process.env.DB_POOL_MIN || (isVercel ? '0' : '2'), 10);
   const idleTimeoutMillis = parseInt(process.env.DB_IDLE_TIMEOUT_MS || '30000', 10);
-  const connectionTimeoutMillis = parseInt(process.env.DB_CONN_TIMEOUT_MS || '5000', 10);
-  const statementTimeout = parseInt(process.env.DB_STATEMENT_TIMEOUT_MS || '10000', 10);
+  const connectionTimeoutMillis = parseInt(process.env.DB_CONN_TIMEOUT_MS || '10000', 10);
+  const statementTimeout = parseInt(process.env.DB_STATEMENT_TIMEOUT_MS || '15000', 10);
   const maxUses = parseInt(process.env.DB_POOL_MAX_USES || '7500', 10);
 
-  // PgBouncer transaction-pooling compatibility: avoid session-level startup options when PGBOUNCER=true
+  // PgBouncer / Supabase transaction pooler (port 6543 / 6432) compatibility
   const isPgBouncer =
     process.env.PGBOUNCER === 'true' ||
-    Boolean(connectionString && (connectionString.includes('pgbouncer=true') || connectionString.includes(':6432')));
+    Boolean(
+      connectionString &&
+        (connectionString.includes('pgbouncer=true') ||
+         connectionString.includes(':6432') ||
+         connectionString.includes(':6543') ||
+         connectionString.includes('pooler.supabase.com'))
+    );
+
+  const isRemoteHost = Boolean(
+    connectionString && !connectionString.includes('localhost') && !connectionString.includes('127.0.0.1')
+  );
 
   const sslConfig =
-    process.env.PGSSL === 'true' ||
-    (isProd && connectionString && !connectionString.includes('localhost') && !connectionString.includes('127.0.0.1'))
+    process.env.PGSSL === 'true' || isRemoteHost
       ? { rejectUnauthorized: process.env.PGSSL_REJECT_UNAUTHORIZED === 'true' }
       : false;
 
@@ -369,7 +498,7 @@ function buildPoolConfig(): PoolConfig {
     min,
     idleTimeoutMillis,
     connectionTimeoutMillis,
-    allowExitOnIdle: false,
+    allowExitOnIdle: isVercel,
     maxUses,
     ssl: sslConfig,
     ...(isPgBouncer ? {} : { statement_timeout: statementTimeout, query_timeout: statementTimeout }),
@@ -399,16 +528,27 @@ export function getDatabaseClient() {
 
   const isProd = process.env.NODE_ENV === 'production';
   const isVercel = Boolean(process.env.VERCEL || process.env.VERCEL_ENV || process.env.AWS_LAMBDA_FUNCTION_NAME);
-  const connectionString = process.env.DATABASE_URL;
+  const connectionString = getPostgresConnectionString();
   const isLocalhostConn = Boolean(
     connectionString && (connectionString.includes('localhost') || connectionString.includes('127.0.0.1'))
   );
+  const hasValidRemoteUrl = Boolean(connectionString && !isLocalhostConn);
   const useMemoryFallback =
-    process.env.USE_PG_MEM === 'true' ||
-    ((isProd || isVercel) && (!connectionString || isLocalhostConn));
+    !hasValidRemoteUrl &&
+    (process.env.USE_PG_MEM === 'true' || isProd || isVercel);
 
   if (useMemoryFallback) {
-    console.warn('[db] Using resilient embedded pg-mem PostgreSQL adapter.');
+    if (isVercel) {
+      // Each serverless instance gets its own private in-memory DB, so orders placed on one
+      // device are NOT visible to staff served by another instance. Set DATABASE_URL to a
+      // hosted PostgreSQL (Neon / Supabase) in Vercel → Settings → Environment Variables.
+      console.error(
+        '[db] CRITICAL: DATABASE_URL is missing or points to localhost on Vercel. Falling back to a per-instance ' +
+          'in-memory database — data will NOT be shared between devices. Configure a hosted PostgreSQL DATABASE_URL.'
+      );
+    } else {
+      console.warn('[db] Using resilient embedded pg-mem PostgreSQL adapter.');
+    }
     const mem = createMemoryPgPool();
     global.__foodiesPgClient = {
       pool: mem.pool,
@@ -429,6 +569,8 @@ export function getDatabaseClient() {
     pool: realPool,
     isMemory: false,
     initialized: true,
+    // query() and withTransaction() await this before running, so the schema is repaired first.
+    restorePromise: ensureLiveSchemaUpToDate(realPool),
   };
 
   return global.__foodiesPgClient;

@@ -44,6 +44,8 @@ import {
   getItemMinPrice,
   getItemEffectivePrice,
   getApiBaseUrl,
+  isBlockedByVercelProtection,
+  VERCEL_PROTECTION_ERROR,
   postNotificationToServer,
   updateNotificationSettingsOnServer,
   updateReceiverNotificationSettingsOnServer,
@@ -1158,7 +1160,20 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
           password: pwd,
         }),
       });
+
+      // Vercel Deployment Protection redirects API calls to an HTML login page. Without this
+      // check the app would "log in" with no session token and every later request would fail.
+      if (isBlockedByVercelProtection(authRes)) {
+        showToast(VERCEL_PROTECTION_ERROR, 'danger');
+        return;
+      }
+
       const authData = await authRes.json().catch(() => null);
+
+      if (authRes.ok && !authData) {
+        showToast(`Staff login server returned an invalid response from ${baseUrl}. Check the server URL.`, 'danger');
+        return;
+      }
 
       if (!authRes.ok) {
         showToast(
@@ -2503,9 +2518,18 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         console.log(`[Sync Success] Order #${newOrder.orderNumber} dispatched to Web Backend & PostgreSQL.`);
       } else {
         console.warn(`[Sync Error] Web Backend rejected order:`, res.error);
+        let reason = res.error || '';
+        try {
+          reason = JSON.parse(reason)?.error || reason;
+        } catch { }
+        showToast(
+          `Order #${newOrder.orderNumber} was NOT sent to the cafe${reason ? `: ${String(reason).slice(0, 140)}` : ''}. Please try again.`,
+          'danger'
+        );
       }
     }).catch((err) => {
       console.warn(`[Sync Error] Order transmission error:`, err.message);
+      showToast(`Order #${newOrder.orderNumber} could not reach the server. Check your connection and try again.`, 'danger');
     });
 
     return newOrder;

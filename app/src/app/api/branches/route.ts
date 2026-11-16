@@ -10,22 +10,47 @@ export async function GET(request: Request) {
     let payload = await cacheGet<{ branches: any[]; etag: string }>('branches:all');
 
     if (!payload) {
-      const res = await query(
-        `SELECT id, name, city, address, phone, opening_hours as "openingHours",
-                is_open as "isOpen", is_busy as "isBusy",
-                prep_time_estimate_min as "prepTimeEstimateMin",
-                full_edit_window_min as "fullEditWindowMin",
-                stop_add_ons_min_before_ready as "stopAddOnsMinBeforeReady",
-                delivery_enabled as "deliveryEnabled",
-                COALESCE(latitude, CASE WHEN id = 'gulberg-lahore' THEN 31.5126 WHEN id = 'f7-islamabad' THEN 33.7215 WHEN id = 'clifton-karachi' THEN 24.8252 ELSE 31.5126 END) as "latitude",
-                COALESCE(longitude, CASE WHEN id = 'gulberg-lahore' THEN 74.3436 WHEN id = 'f7-islamabad' THEN 73.0552 WHEN id = 'clifton-karachi' THEN 67.0305 ELSE 74.3436 END) as "longitude",
-                COALESCE(max_order_distance_km, 50) as "maxOrderDistanceKm",
-                COALESCE(table_qr_max_distance_meters, 300) as "tableQrMaxDistanceMeters",
-                COALESCE(min_delivery_amount, 500) as "minDeliveryAmount",
-                payment_settings as "paymentSettings"
-         FROM branches
-         ORDER BY city ASC, name ASC`
-      );
+      let res;
+      try {
+        res = await query(
+          `SELECT id, name, city, address, phone, opening_hours as "openingHours",
+                  is_open as "isOpen", is_busy as "isBusy",
+                  prep_time_estimate_min as "prepTimeEstimateMin",
+                  full_edit_window_min as "fullEditWindowMin",
+                  stop_add_ons_min_before_ready as "stopAddOnsMinBeforeReady",
+                  delivery_enabled as "deliveryEnabled",
+                  COALESCE(latitude, CASE WHEN id = 'gulberg-lahore' THEN 31.5126 WHEN id = 'f7-islamabad' THEN 33.7215 WHEN id = 'clifton-karachi' THEN 24.8252 ELSE 31.5126 END) as "latitude",
+                  COALESCE(longitude, CASE WHEN id = 'gulberg-lahore' THEN 74.3436 WHEN id = 'f7-islamabad' THEN 73.0552 WHEN id = 'clifton-karachi' THEN 67.0305 ELSE 74.3436 END) as "longitude",
+                  COALESCE(max_order_distance_km, 50) as "maxOrderDistanceKm",
+                  COALESCE(table_qr_max_distance_meters, 300) as "tableQrMaxDistanceMeters",
+                  COALESCE(min_delivery_amount, 500) as "minDeliveryAmount",
+                  payment_settings as "paymentSettings"
+           FROM branches
+           ORDER BY city ASC, name ASC`
+        );
+      } catch (err: any) {
+        if (err?.message?.includes('min_delivery_amount')) {
+          await query(`ALTER TABLE branches ADD COLUMN IF NOT EXISTS min_delivery_amount INT NOT NULL DEFAULT 500`).catch(() => {});
+          res = await query(
+            `SELECT id, name, city, address, phone, opening_hours as "openingHours",
+                    is_open as "isOpen", is_busy as "isBusy",
+                    prep_time_estimate_min as "prepTimeEstimateMin",
+                    full_edit_window_min as "fullEditWindowMin",
+                    stop_add_ons_min_before_ready as "stopAddOnsMinBeforeReady",
+                    delivery_enabled as "deliveryEnabled",
+                    COALESCE(latitude, CASE WHEN id = 'gulberg-lahore' THEN 31.5126 WHEN id = 'f7-islamabad' THEN 33.7215 WHEN id = 'clifton-karachi' THEN 24.8252 ELSE 31.5126 END) as "latitude",
+                    COALESCE(longitude, CASE WHEN id = 'gulberg-lahore' THEN 74.3436 WHEN id = 'f7-islamabad' THEN 73.0552 WHEN id = 'clifton-karachi' THEN 67.0305 ELSE 74.3436 END) as "longitude",
+                    COALESCE(max_order_distance_km, 50) as "maxOrderDistanceKm",
+                    COALESCE(table_qr_max_distance_meters, 300) as "tableQrMaxDistanceMeters",
+                    500 as "minDeliveryAmount",
+                    payment_settings as "paymentSettings"
+             FROM branches
+             ORDER BY city ASC, name ASC`
+          );
+        } else {
+          throw err;
+        }
+      }
       const rows = res.rows.map((r: any) => ({
         ...r,
         latitude: Number(r.latitude) || (r.city === 'Islamabad' ? 33.7215 : r.city === 'Karachi' ? 24.8252 : 31.5126),

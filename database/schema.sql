@@ -280,6 +280,14 @@ ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS tiktok VARCHAR(100);
 ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS order_routing_support_first BOOLEAN DEFAULT true;
 ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS auto_forward_kitchen_min INT DEFAULT 3;
 ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS auto_forward_mode VARCHAR(30) DEFAULT 'timed';
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_enabled BOOLEAN DEFAULT true;
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_badge VARCHAR(64);
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_title TEXT;
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_message TEXT;
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_type VARCHAR(30) DEFAULT 'promo';
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_updated_by VARCHAR(150);
+ALTER TABLE footer_settings ADD COLUMN IF NOT EXISTS home_notification_updated_at VARCHAR(100);
+
 
 -- 15. Table Occupancy Sessions (Manager & Floor Tracking)
 CREATE TABLE IF NOT EXISTS table_sessions (
@@ -404,6 +412,14 @@ ALTER TABLE notification_settings ADD COLUMN IF NOT EXISTS recipient_rules JSONB
 INSERT INTO notification_settings (id, default_platform, notify_customer, notify_concerned_rider, notify_concerned_waiter, notify_kitchen, notify_cashier_and_manager)
 VALUES ('global', 'all', true, true, true, true, true)
 ON CONFLICT (id) DO NOTHING;
+
+-- 20. Custom Receiver Notification Settings Table
+CREATE TABLE IF NOT EXISTS receiver_notification_settings (
+    receiver_key VARCHAR(150) PRIMARY KEY,
+    settings JSONB NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
 
 
 

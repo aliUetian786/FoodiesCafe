@@ -35,3 +35,6 @@ Thumbs.db
 
 # Mobile native Android build
 /mobile/android/
+.expo/
+mobile/.expo/
+

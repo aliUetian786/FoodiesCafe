@@ -18,7 +18,7 @@ export function getApiBaseUrl(): string {
   }
 
   if (Platform.OS === 'web') {
-    return 'https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app';
+    return 'https://foodies-cafe-aliraza8.vercel.app';
   }
 
   const hostUri =
@@ -33,18 +33,18 @@ export function getApiBaseUrl(): string {
     }
   }
 
-  return 'https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app';
+  return 'https://foodies-cafe-aliraza8.vercel.app';
 }
 
 export const API_BASE_URL = getApiBaseUrl();
 export const CUSTOMER_WEB_URL =
   process.env.EXPO_PUBLIC_CUSTOMER_WEB_URL ||
   (Constants.expoConfig?.extra as any)?.customerWebUrl ||
-  'https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/';
+  'https://foodies-cafe-aliraza8.vercel.app/';
 export const STAFF_WEB_URL =
   process.env.EXPO_PUBLIC_STAFF_WEB_URL ||
   (Constants.expoConfig?.extra as any)?.staffWebUrl ||
-  'https://foodies-cafe-ky7bgu5wt-aliraza8.vercel.app/staff';
+  'https://foodies-cafe-aliraza8.vercel.app/staff';
 
 /**
  * Normalizes branch IDs to match PostgreSQL database constraints strictly:
@@ -93,6 +93,20 @@ export function getItemEffectivePrice(item: MenuItem, branchId?: string | null):
   return getItemMinPrice(item);
 }
 
+export const VERCEL_PROTECTION_ERROR =
+  'Server is locked by Vercel Deployment Protection. Disable "Vercel Authentication" in the Vercel project settings so the app can reach it.';
+
+/**
+ * Detects responses that were redirected to Vercel's SSO login page instead of reaching the API.
+ * fetch() follows redirects, so the final response is an HTML page from vercel.com (or a 401 HTML page).
+ */
+export function isBlockedByVercelProtection(res: Response): boolean {
+  const finalUrl = (res as any).url || '';
+  if (/vercel\.com\/(sso-api|login|sso)/i.test(finalUrl)) return true;
+  const contentType = res.headers.get('content-type') || '';
+  return res.status === 401 && contentType.includes('text/html');
+}
+
 /**
  * Generic API fetch helper with automatic base URL routing and timeout handling
  */
@@ -125,6 +139,10 @@ export async function apiFetch<T = any>(
       headers,
     });
     clearTimeout(timeout);
+
+    if (isBlockedByVercelProtection(res)) {
+      return { data: null, error: VERCEL_PROTECTION_ERROR, ok: false };
+    }
 
     if (!res.ok) {
       const errText = await res.text().catch(() => '');

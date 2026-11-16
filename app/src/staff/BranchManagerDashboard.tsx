@@ -341,7 +341,7 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
       const uniqueOrders = Array.from(new Map(matchedOrders.map((o) => [o.id, o])).values());
 
       const rawCash = uniqueOrders.filter(isOrderCash).reduce((sum, o) => sum + (Number(o.total) || 0), 0);
-      
+
       // For cashier: consider shift cashCollected if higher
       let effectiveCash = rawCash;
       if (roleCategory === 'cashier') {
@@ -1079,8 +1079,8 @@ export const BranchManagerScreen: React.FC<BranchManagerScreenProps> = ({ onNavi
                 item.roleCategory === 'cashier'
                   ? { bg: '#DCFCE7', text: '#15803D', border: '#BBF7D0', label: '💵 CASHIER' }
                   : item.roleCategory === 'rider'
-                  ? { bg: '#FFEDD5', text: '#C2410C', border: '#FED7AA', label: '🛵 RIDER' }
-                  : { bg: '#F3E8FF', text: '#7E22CE', border: '#E9D5FF', label: '🍽️ WAITER' };
+                    ? { bg: '#FFEDD5', text: '#C2410C', border: '#FED7AA', label: '🛵 RIDER' }
+                    : { bg: '#F3E8FF', text: '#7E22CE', border: '#E9D5FF', label: '🍽️ WAITER' };
 
               return (
                 <div
