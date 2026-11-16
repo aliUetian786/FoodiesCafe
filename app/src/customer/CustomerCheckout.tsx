@@ -25,6 +25,7 @@ import {
 } from 'lucide-react';
 import { OpenStreetMapView } from '@/components/common/OpenStreetMapView';
 import { DeliveryMapModal } from '@/components/common/DeliveryMapModal';
+import { BranchPickerModal } from '@/components/common/BranchPickerModal';
 
 interface CustomerCheckoutProps {
   isOpen: boolean;
@@ -80,6 +81,7 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
 
   // Order Type Modal State (if not confirmed)
   const [orderTypeModalOpen, setOrderTypeModalOpen] = useState(false);
+  const [branchPickerFor, setBranchPickerFor] = useState<'dine_in' | 'takeaway' | null>(null);
   const [deliveryMapModalOpen, setDeliveryMapModalOpen] = useState(false);
 
   // Dine-In Seating Sheet (half screen sheet)
@@ -243,10 +245,19 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
       setDeliveryMapModalOpen(true);
       return;
     }
+    setShowModeSwitcher(false);
+    setBranchPickerFor(newMode as 'dine_in' | 'takeaway');
+  };
+
+  // After the customer chose a branch for Takeaway / Dine-In.
+  const applyTypeAfterBranch = (newMode: 'dine_in' | 'takeaway') => {
+    setBranchPickerFor(null);
     setLocalOrderType(newMode);
     setGlobalOrderType(newMode);
     setHasConfirmedOrderType(true);
-    setShowModeSwitcher(false);
+    if (newMode === 'dine_in') {
+      setSeatingSheetOpen(true);
+    }
     addToast({
       type: 'info',
       title: 'Order Mode Changed',
@@ -1775,6 +1786,13 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
       )}
 
       {/* ================= ORDER TYPE MODAL (If Unconfirmed) ================= */}
+      <BranchPickerModal
+        isOpen={branchPickerFor !== null}
+        orderType={branchPickerFor || 'takeaway'}
+        onClose={() => setBranchPickerFor(null)}
+        onSelected={() => branchPickerFor && applyTypeAfterBranch(branchPickerFor)}
+      />
+
       {orderTypeModalOpen && (
         <div
           onClick={() => setOrderTypeModalOpen(false)}
@@ -1823,13 +1841,8 @@ export const CustomerCheckout: React.FC<CustomerCheckoutProps> = ({
                       setDeliveryMapModalOpen(true);
                       return;
                     }
-                    setLocalOrderType(opt.id as OrderType);
-                    setGlobalOrderType(opt.id as OrderType);
-                    setHasConfirmedOrderType(true);
                     setOrderTypeModalOpen(false);
-                    if (opt.id === 'dine_in') {
-                      setSeatingSheetOpen(true);
-                    }
+                    setBranchPickerFor(opt.id as 'dine_in' | 'takeaway');
                   }}
                   style={{
                     padding: '14px 8px',

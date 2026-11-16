@@ -26,6 +26,7 @@ import {
   getOsmDirectionsUrl,
   reverseGeocodeOpenStreetMap,
 } from '@/utils/openStreetMap';
+import { FRANCHISE_NAME, branchStatus, formatDistance, googleMapsDirectionsUrl } from '@/lib/branchInfo';
 
 interface StoreMapModalProps {
   isOpen: boolean;
@@ -296,15 +297,19 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
 
   // Filtered branches for search
   const filteredBranches = useMemo(() => {
-    if (!searchQuery.trim()) return branchesWithDistance;
+    const ordered = [...branchesWithDistance].sort((a, b) => {
+      if (Boolean(a.isOpen) !== Boolean(b.isOpen)) return a.isOpen ? -1 : 1;
+      return userCoords ? Number(a.distanceKm) - Number(b.distanceKm) : 0;
+    });
+    if (!searchQuery.trim()) return ordered;
     const q = searchQuery.toLowerCase();
-    return branchesWithDistance.filter(
+    return ordered.filter(
       (b) =>
         b.name.toLowerCase().includes(q) ||
         b.city.toLowerCase().includes(q) ||
         b.address.toLowerCase().includes(q)
     );
-  }, [branchesWithDistance, searchQuery]);
+  }, [branchesWithDistance, searchQuery, userCoords]);
 
   // Currently selected branch object
   const activeBranch = useMemo(() => {
@@ -321,8 +326,6 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
       setSelectedBranchId(nearestBranch.id);
     }
   }, [nearestBranch, selectedBranchId]);
-
-  if (!isOpen) return null;
 
   // Handlers
   const handleSelectBranch = (bId: string) => {
@@ -442,6 +445,10 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
     };
   }, [activeBranch, effectiveUserCoords, isDelivery]);
 
+  // Must come AFTER every hook: returning early above the useMemo calls changed the hook order
+  // between closed/open renders ("Rendered more hooks than during the previous render").
+  if (!isOpen) return null;
+
   return (
     <div
       className="foodies-modal-overlay"
@@ -513,7 +520,7 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
         </div>
 
         {/* ============ MODAL BODY (1/4 Left Side & 3/4 Right Side) ============ */}
-        <div style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
+        <div className="store-locator-body" style={{ display: 'flex', flex: 1, minHeight: 0, overflow: 'hidden' }}>
           {/* 
             ========================================================================
             LEFT 1 QUARTER (~28% width): SCROLLABLE LIST OF BRANCH NAMES
@@ -521,6 +528,7 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
             ========================================================================
           */}
           <div
+            className="store-locator-list"
             style={{
               width: 'clamp(180px, 28%, 215px)',
               borderRight: '1px solid var(--border-color)',
@@ -662,6 +670,9 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
                     >
                       {b.name}
                     </div>
+                    <div style={{ fontSize: '11px', fontWeight: 700, color: 'var(--text-secondary)' }}>
+                      {FRANCHISE_NAME} · {b.city}
+                    </div>
 
                     {/* Location Address below the name in LESS BOLD words */}
                     <div
@@ -684,10 +695,23 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
                     </div>
 
                     {/* Distance indicator */}
-                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px', fontSize: '10.5px' }}>
-                      <span style={{ color: 'var(--primary)', fontWeight: 800 }}>
-                        📍 {b.distanceKm} km
+                    <div style={{ fontSize: '11px', fontWeight: 750, color: branchStatus(b).open ? '#15803D' : '#B91C1C' }}>
+                      🕒 {branchStatus(b).label}
+                    </div>
+                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '2px', fontSize: '10.5px', gap: '6px' }}>
+                      <span style={{ color: userCoords ? 'var(--primary)' : 'var(--text-muted)', fontWeight: 800 }}>
+                        {userCoords ? `📍 ${formatDistance(Number(b.distanceKm))}` : '📍 Share location to see distance'}
                       </span>
+                      <a
+                        href={googleMapsDirectionsUrl({ lat: b.resolvedLat, lng: b.resolvedLng }, userCoords)}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        onClick={(e) => e.stopPropagation()}
+                        style={{ display: 'inline-flex', alignItems: 'center', gap: '4px', padding: '5px 9px', minHeight: '30px', borderRadius: '8px', border: '1px solid var(--border-color)', backgroundColor: '#FFFFFF', color: 'var(--text-secondary)', fontSize: '11px', fontWeight: 800, textDecoration: 'none', whiteSpace: 'nowrap' }}
+                      >
+                        <ExternalLink size={11} />
+                        Google Maps
+                      </a>
                       {isCurrentActive && (
                         <span style={{ color: '#15803D', fontWeight: 800 }}>
                           ✓ Active
@@ -733,6 +757,7 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
             ========================================================================
           */}
           <div
+            className="store-locator-map"
             style={{
               flex: 1,
               backgroundColor: '#F8FAFC',
@@ -909,16 +934,39 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
                     <span style={{ fontSize: '12.5px', fontWeight: 850, color: 'var(--text-main)', whiteSpace: 'nowrap' }}>
                       {activeBranch.name}
                     </span>
-                    <span style={{ fontSize: '10.5px', fontWeight: 800, color: 'var(--primary)' }}>
-                      • {activeBranch.distanceKm} km
-                    </span>
+                    {userCoords && (
+                      <span style={{ fontSize: '10.5px', fontWeight: 800, color: 'var(--primary)' }}>
+                        • {formatDistance(Number(activeBranch.distanceKm))}
+                      </span>
+                    )}
                   </div>
                   <div style={{ fontSize: '10.5px', color: 'var(--text-muted)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                     {activeBranch.address}
                   </div>
                 </div>
 
-                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0 }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexShrink: 0, flexWrap: 'wrap' }}>
+                  <a
+                    href={googleMapsDirectionsUrl({ lat: activeBranch.resolvedLat, lng: activeBranch.resolvedLng }, userCoords)}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    style={{
+                      padding: '6px 10px',
+                      borderRadius: 'var(--radius-sm)',
+                      backgroundColor: 'var(--primary)',
+                      border: '1px solid var(--primary)',
+                      color: '#FFFFFF',
+                      fontSize: '11px',
+                      fontWeight: 800,
+                      textDecoration: 'none',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: '4px',
+                    }}
+                  >
+                    <ExternalLink size={12} />
+                    <span>Google Maps Directions</span>
+                  </a>
                   <a
                     href={getOsmDirectionsUrl(effectiveUserCoords, {
                       lat: activeBranch.resolvedLat,
@@ -941,7 +989,7 @@ export const StoreMapModal: React.FC<StoreMapModalProps> = ({
                     }}
                   >
                     <ExternalLink size={12} />
-                    <span>OpenStreetMap Directions</span>
+                    <span>OpenStreetMap</span>
                   </a>
 
                   {onProceedToPayment ? (

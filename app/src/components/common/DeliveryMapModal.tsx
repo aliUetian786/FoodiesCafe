@@ -116,11 +116,41 @@ export const DeliveryMapModal: React.FC<DeliveryMapModalProps> = ({
     }
   }, [isOpen, customerCoordinates, selectedDeliveryAddress, savedAddresses]);
 
-  // Find nearest branch to coordinates
+  // Open the map on the customer's real position: ask for GPS once if we don't have it yet.
+  const [locating, setLocating] = useState(false);
+  const gpsAskedRef = React.useRef(false);
+  useEffect(() => {
+    if (!isOpen || customerCoordinates || gpsAskedRef.current) return;
+    if (typeof navigator === 'undefined' || !navigator.geolocation) return;
+    gpsAskedRef.current = true;
+    setLocating(true);
+    navigator.geolocation.getCurrentPosition(
+      (pos) => {
+        const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+        setPinCoords(coords);
+        if (setCustomerCoordinates) setCustomerCoordinates(coords);
+        setLocating(false);
+      },
+      () => {
+        setLocating(false);
+        addToast({
+          type: 'info',
+          title: 'Location not shared',
+          message: 'Drag the pin or pick an area to set your delivery location.',
+        });
+      },
+      { enableHighAccuracy: true, timeout: 10000, maximumAge: 60000 }
+    );
+  }, [isOpen, customerCoordinates, setCustomerCoordinates, addToast]);
+
+  // Nearest branch that can actually take a delivery right now (open + delivery enabled);
+  // falls back to all branches only if none qualifies, so the customer still sees a result.
   const findNearestBranch = (coords: { lat: number; lng: number }): { branch: Branch; dist: number } => {
-    let nearest = branches[0];
+    const eligible = branches.filter((b) => b.isOpen && b.deliveryEnabled !== false);
+    const pool = eligible.length > 0 ? eligible : branches;
+    let nearest = pool[0];
     let minD = 999999;
-    branches.forEach((b) => {
+    pool.forEach((b) => {
       const bLat = Number(b.latitude) || 31.5126;
       const bLng = Number(b.longitude) || 74.3436;
       const d = calculateDistanceKm(coords.lat, coords.lng, bLat, bLng);
@@ -265,8 +295,8 @@ export const DeliveryMapModal: React.FC<DeliveryMapModalProps> = ({
               >
                 Confirm Delivery Location
               </h3>
-              <p style={{ margin: 0, fontSize: '11.5px', color: 'var(--text-muted)' }}>
-                Drag pin or search • Fulfilled by nearest branch via OpenStreetMap
+              <p style={{ margin: 0, fontSize: '11.5px', color: locating ? 'var(--primary)' : 'var(--text-muted)', fontWeight: locating ? 700 : 400 }}>
+                {locating ? '📍 Finding your current location…' : 'Drag pin or search • Fulfilled by nearest open branch'}
               </p>
             </div>
           </div>

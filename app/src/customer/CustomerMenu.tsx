@@ -32,6 +32,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { resolveDishImage } from '@/lib/dishImages';
+import { BranchPickerModal } from '@/components/common/BranchPickerModal';
 
 interface MenuScreenProps {
   onNavigate: (view: string) => void;
@@ -166,6 +167,7 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({
 
   // Order Type Selection Pop-up Modal state
   const [orderTypeModalOpen, setOrderTypeModalOpen] = useState(false);
+  const [branchPickerFor, setBranchPickerFor] = useState<'dine_in' | 'takeaway' | null>(null);
   const [deliveryMapModalOpen, setDeliveryMapModalOpen] = useState(false);
 
   // Web Checkout Experience States
@@ -737,9 +739,16 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({
       return;
     }
 
+    // Takeaway / Dine-In: choose the branch first (nearest open first, closed ones disabled).
+    setOrderTypeModalOpen(false);
+    setBranchPickerFor(selected);
+  };
+
+  // Runs after the customer picked a branch for Takeaway / Dine-In.
+  const continueAfterBranchPicked = (selected: 'dine_in' | 'takeaway') => {
     setOrderType(selected);
     setHasConfirmedOrderType(true);
-    setOrderTypeModalOpen(false);
+    setBranchPickerFor(null);
 
     // Screen-adaptive checkout branching:
     if (isDesktop) {
@@ -1315,8 +1324,12 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({
       style={{
         maxWidth: '1280px',
         margin: '0 auto',
-        padding: `0 16px ${menuBottomPadding}`,
+        // Longhands only: mixing the `padding` shorthand with `paddingTop` let React drop the
+        // top padding when the bottom padding changed (cart bar appearing).
         paddingTop: isCheckoutMode ? '20px' : '0px',
+        paddingRight: '16px',
+        paddingBottom: menuBottomPadding,
+        paddingLeft: '16px',
         width: '100%',
         boxSizing: 'border-box',
       }}
@@ -2972,9 +2985,16 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({
       )}
 
       {/* 3 Clickable Buttons Pop-up Modal Asking for Order Type */}
+      <BranchPickerModal
+        isOpen={branchPickerFor !== null}
+        orderType={branchPickerFor || 'takeaway'}
+        onClose={() => setBranchPickerFor(null)}
+        onSelected={() => branchPickerFor && continueAfterBranchPicked(branchPickerFor)}
+      />
+
       {orderTypeModalOpen && (
         <div
-          className="foodies-modal-overlay"
+          className="foodies-modal-overlay foodies-modal-centered"
           onClick={() => setOrderTypeModalOpen(false)}
           style={{
             position: 'fixed',

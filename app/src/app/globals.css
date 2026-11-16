@@ -839,3 +839,42 @@ button {
     letter-spacing: 0.02em !important;
   }
 }
+
+/* Order-type popup stays a CENTERED card on phones (opts out of the bottom-drawer rule above) */
+@media (max-width: 768px) {
+  .foodies-modal-overlay.foodies-modal-centered {
+    align-items: center !important;
+    padding: 16px !important;
+  }
+  .foodies-modal-centered .foodies-modal-card {
+    max-width: 420px !important;
+    border-radius: 20px !important;
+    border-bottom: 1.5px solid var(--border-color) !important;
+    box-shadow: 0 20px 48px rgba(0, 0, 0, 0.25) !important;
+    animation: scaleUp 0.2s cubic-bezier(0.16, 1, 0.3, 1) !important;
+  }
+}
+@keyframes scaleUp {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+
+/* Store Locator on phones: branch list on top (full width), map below — instead of two squeezed columns */
+@media (max-width: 640px) {
+  .store-locator-body {
+    flex-direction: column !important;
+    overflow-y: auto !important;
+  }
+  .store-locator-list {
+    width: 100% !important;
+    height: auto !important;
+    max-height: 48vh;
+    border-right: none !important;
+    border-bottom: 1px solid var(--border-color);
+    flex-shrink: 0;
+  }
+  .store-locator-map {
+    min-height: 380px;
+    flex: 0 0 auto !important;
+  }
+}
