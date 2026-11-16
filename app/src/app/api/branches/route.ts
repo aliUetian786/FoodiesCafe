@@ -78,7 +78,7 @@ export async function GET(request: Request) {
         status: 304,
         headers: {
           ETag: payload.etag,
-          'Cache-Control': 'public, max-age=10, stale-while-revalidate=30',
+          'Cache-Control': 'public, max-age=10, s-maxage=5, stale-while-revalidate=15',
         },
       });
     }
@@ -88,7 +88,7 @@ export async function GET(request: Request) {
       {
         headers: {
           ETag: payload.etag,
-          'Cache-Control': 'public, max-age=10, stale-while-revalidate=30',
+          'Cache-Control': 'public, max-age=10, s-maxage=5, stale-while-revalidate=15',
         },
       }
     );

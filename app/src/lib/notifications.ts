@@ -17,8 +17,25 @@ import {
 } from '@/types/cafe';
 
 let tableInitialized = false;
+let tableInitPromise: Promise<void> | null = null;
 
-export async function ensureNotificationsTable(): Promise<void> {
+/**
+ * Ensures notification tables exist — once per server instance.
+ * Previously the guard flag was set but never checked, so ~10 sequential DDL statements
+ * (each taking an exclusive table lock) ran on EVERY /api/sync poll: ~2s extra latency per
+ * request and lock contention under load.
+ */
+export function ensureNotificationsTable(): Promise<void> {
+  if (tableInitialized) return Promise.resolve();
+  if (!tableInitPromise) {
+    tableInitPromise = initNotificationsTables().finally(() => {
+      if (!tableInitialized) tableInitPromise = null; // retry on the next call if it failed
+    });
+  }
+  return tableInitPromise;
+}
+
+async function initNotificationsTables(): Promise<void> {
   try {
     await query(`
       CREATE TABLE IF NOT EXISTS notifications (

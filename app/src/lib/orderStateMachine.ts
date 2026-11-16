@@ -308,7 +308,12 @@ export async function recalculateOrderItemsOnServer(
 /**
  * Records an immutable row in order_history inside the active transaction.
  */
+let orderHistoryTableReady = false;
+
 export async function ensureOrderHistoryTable(client: PoolClient): Promise<void> {
+  // Runs inside every order transaction: only issue the DDL once per server instance
+  // (an extra round trip while holding the order row lock, and a swallowed DDL error would abort the transaction).
+  if (orderHistoryTableReady) return;
   try {
     await client.query(`
       CREATE TABLE IF NOT EXISTS order_history (
@@ -332,6 +337,7 @@ export async function ensureOrderHistoryTable(client: PoolClient): Promise<void>
         created_at TIMESTAMPTZ NOT NULL DEFAULT CURRENT_TIMESTAMP
       );
     `);
+    orderHistoryTableReady = true;
   } catch {}
 }
 

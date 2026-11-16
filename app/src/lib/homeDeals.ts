@@ -42,7 +42,17 @@ export const HOME_DEALS: HomeDeal[] = [
   },
 ];
 
+// The bundled demo menu (embeddedSeed INITIAL_MENU) lists the same four combos as deal-1..4;
+// carts saved from it must still be accepted at the same price.
+const DEAL_ID_ALIASES: Record<string, string> = {
+  'deal-1': 'deal-home-1',
+  'deal-2': 'deal-home-2',
+  'deal-3': 'deal-home-3',
+  'deal-4': 'deal-home-4',
+};
+
 export function getHomeDealById(id?: string | null): HomeDeal | undefined {
   if (!id) return undefined;
-  return HOME_DEALS.find((d) => d.id === id);
+  const canonical = DEAL_ID_ALIASES[id] || id;
+  return HOME_DEALS.find((d) => d.id === canonical);
 }
