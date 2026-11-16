@@ -297,7 +297,7 @@ export async function GET(request: Request) {
       tableSql += ` ORDER BY floor ASC, number ASC`;
       tablesPromise = query(tableSql, tableParams)
         .then(async (res) => {
-          await cacheSet(tableCacheKey, res.rows, 15);
+          await cacheSet(tableCacheKey, res.rows, 4); // short TTL: without Redis each instance has its own cache
           return res;
         })
         .catch(() => ({ rows: [] }));

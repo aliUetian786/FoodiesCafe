@@ -152,7 +152,9 @@ export function getActiveSseConnections(): number {
 export function broadcastRealtimeEvent(
   event: Omit<RealtimeEvent, 'id' | 'seq' | 'timestamp'> & { timestamp?: number }
 ): RealtimeEvent {
-  if (event.type === 'TABLE_UPDATED') {
+  // Dine-in orders occupy/release tables, so order events must also drop the cached table list
+  // (otherwise waiters saw a just-taken table as "available" for up to the cache TTL).
+  if (event.type === 'TABLE_UPDATED' || event.type === 'ORDER_CREATED' || event.type === 'ORDER_UPDATED') {
     cacheInvalidatePrefix('tables:branch:').catch(() => {});
   }
   cacheInvalidatePrefix('sync:payload:').catch(() => {});
