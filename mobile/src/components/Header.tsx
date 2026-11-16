@@ -2,7 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, TouchableOpacity, Platform, StatusBar as RNStatusBar } from 'react-native';
 import { Colors } from '../theme/colors';
 import { useApp } from '../context/AppContext';
-import { ShoppingBag, Utensils, Shield, Bike, User, LogOut, Building2, Bell } from 'lucide-react-native';
+import { ShoppingBag, Utensils, Shield, Bike, User, LogOut, Building2, Bell, Wallet, ChefHat } from 'lucide-react-native';
 import { MobileRole } from '../types';
 import { AllBranchesClosedModal } from './AllBranchesClosedModal';
 import { NotificationCenterModal } from './NotificationCenterModal';
@@ -14,7 +14,7 @@ interface HeaderProps {
 }
 
 export function Header({ onOpenCart, onNavigateHome, activeScreenTitle }: HeaderProps) {
-  const { role, appMode, setAppMode, logoutStaff, cartCount, setHeaderHeight, branches, unreadNotificationsCount, openNotificationModal } = useApp();
+  const { role, appMode, setAppMode, logoutStaff, cartCount, setHeaderHeight, branches, unreadNotificationsCount, openNotificationModal, currentUser } = useApp();
   const [closedCartBlockedVisible, setClosedCartBlockedVisible] = useState(false);
   const allBranchesClosed = branches.length > 0 && branches.every((b) => !b.isOpen);
 
@@ -28,6 +28,10 @@ export function Header({ onOpenCart, onNavigateHome, activeScreenTitle }: Header
         return { label: 'Floor Staff', color: Colors.info, icon: Utensils };
       case 'delivery_staff':
         return { label: 'Rider', color: Colors.success, icon: Bike };
+      case 'cashier':
+        return { label: 'Cashier', color: '#16A34A', icon: Wallet };
+      case 'kitchen_staff':
+        return { label: 'Kitchen', color: '#EA580C', icon: ChefHat };
       case 'customer':
       default:
         return { label: 'Customer', color: Colors.warning, icon: User };
@@ -36,6 +40,9 @@ export function Header({ onOpenCart, onNavigateHome, activeScreenTitle }: Header
 
   const badge = getRoleBadge(role);
   const IconComponent = badge.icon;
+  // Header pill shows the person's second name (e.g. "Bilal Farooq (Cashier)" -> "Farooq").
+  const nameParts = (currentUser?.name || '').replace(/\s*\(.*?\)/g, '').trim().split(/\s+/).filter(Boolean);
+  const secondName = nameParts[1] || nameParts[0] || badge.label;
 
   return (
     <View
@@ -57,7 +64,7 @@ export function Header({ onOpenCart, onNavigateHome, activeScreenTitle }: Header
             <Text style={styles.brandTitle}>Foodies<Text style={styles.brandHighlight}>Cafe</Text></Text>
             {appMode === 'staff' && (
               <View style={styles.staffTag}>
-                <Text style={styles.staffTagText}>STAFF</Text>
+                <Text style={styles.staffTagText}>{badge.label.toUpperCase()}</Text>
               </View>
             )}
           </View>
@@ -172,7 +179,7 @@ export function Header({ onOpenCart, onNavigateHome, activeScreenTitle }: Header
               </TouchableOpacity>
               <View style={[styles.staticRoleBadge, { borderColor: badge.color }]}>
                 <IconComponent size={12} color={badge.color} />
-                <Text style={[styles.staticRoleText, { color: badge.color }]}>{badge.label}</Text>
+                <Text style={[styles.staticRoleText, { color: badge.color }]} numberOfLines={1}>{secondName}</Text>
               </View>
               <TouchableOpacity
                 style={styles.staffLogoutBtn}

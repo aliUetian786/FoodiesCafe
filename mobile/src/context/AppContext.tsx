@@ -280,6 +280,7 @@ interface AppContextType {
 
   // Toast
   toast: ToastMessage | null;
+  dismissToast: () => void;
   showToast: (message: string, type?: 'success' | 'danger' | 'warning' | 'info') => void;
   headerHeight: number;
   setHeaderHeight: (h: number) => void;
@@ -4447,6 +4448,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         markDeliveryCompleted,
 
         toast,
+        dismissToast: () => setToast(null),
         showToast,
         headerHeight,
         setHeaderHeight,

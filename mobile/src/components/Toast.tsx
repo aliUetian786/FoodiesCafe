@@ -1,13 +1,35 @@
 import React, { useEffect, useRef } from 'react';
-import { View, Text, StyleSheet, Platform, StatusBar as RNStatusBar, Animated } from 'react-native';
+import { View, Text, StyleSheet, Platform, StatusBar as RNStatusBar, Animated, PanResponder, Dimensions } from 'react-native';
 import { useApp } from '../context/AppContext';
 import { Colors } from '../theme/colors';
 import { CheckCircle, AlertTriangle, AlertCircle, Info } from 'lucide-react-native';
 
 export function Toast() {
-  const { toast, headerHeight } = useApp();
+  const { toast, headerHeight, dismissToast } = useApp();
   const fadeAnim = useRef(new Animated.Value(0)).current;
   const slideAnim = useRef(new Animated.Value(-8)).current;
+  // Swipe right to dismiss (like the phone's notification shade).
+  const swipeX = useRef(new Animated.Value(0)).current;
+  const dismissRef = useRef(dismissToast);
+  dismissRef.current = dismissToast;
+  const panResponder = useRef(
+    PanResponder.create({
+      onMoveShouldSetPanResponder: (_e, g) => Math.abs(g.dx) > 8 && Math.abs(g.dx) > Math.abs(g.dy),
+      onPanResponderMove: (_e, g) => swipeX.setValue(Math.max(0, g.dx)),
+      onPanResponderRelease: (_e, g) => {
+        const width = Dimensions.get('window').width;
+        if (g.dx > width * 0.25 || g.vx > 0.6) {
+          Animated.timing(swipeX, { toValue: width, duration: 160, useNativeDriver: true }).start(() => {
+            dismissRef.current();
+            swipeX.setValue(0);
+          });
+        } else {
+          Animated.spring(swipeX, { toValue: 0, useNativeDriver: true, bounciness: 6 }).start();
+        }
+      },
+      onPanResponderTerminate: () => Animated.spring(swipeX, { toValue: 0, useNativeDriver: true }).start(),
+    })
+  ).current;
 
   useEffect(() => {
     if (toast) {
@@ -27,6 +49,7 @@ export function Toast() {
       fadeAnim.setValue(0);
       slideAnim.setValue(-8);
     }
+    swipeX.setValue(0);
   }, [toast]);
 
   if (!toast) return null;
@@ -72,6 +95,7 @@ export function Toast() {
 
   return (
     <Animated.View
+      {...panResponder.panHandlers}
       style={[
         styles.container,
         {
@@ -79,7 +103,7 @@ export function Toast() {
           backgroundColor: styleConfig.bg,
           borderColor: styleConfig.border,
           opacity: fadeAnim,
-          transform: [{ translateY: slideAnim }],
+          transform: [{ translateY: slideAnim }, { translateX: swipeX }],
         },
       ]}
     >
