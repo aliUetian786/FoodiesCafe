@@ -31,6 +31,7 @@ import {
   Tag,
   Upload,
 } from 'lucide-react';
+import { resolveDishImage } from '@/lib/dishImages';
 
 interface MenuScreenProps {
   onNavigate: (view: string) => void;
@@ -249,7 +250,7 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({
   }, [isTableQr, tableFromUrl, setOrderType, setHasConfirmedOrderType, setCurrentBranchId]);
 
   // Screen width detection for screen-adaptive checkout (desktop 2-column vs mobile drawer)
-  const [isDesktop, setIsDesktop] = useState(true);
+  const [isDesktop, setIsDesktop] = useState(() => (typeof window !== 'undefined' ? window.innerWidth > 860 : true));
   useEffect(() => {
     const checkDesktop = () => {
       setIsDesktop(typeof window !== 'undefined' ? window.innerWidth > 860 : true);
@@ -1030,9 +1031,11 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({
       >
         {/* Photo & Category Badge */}
         <div className="dish-img-wrap" style={{ height: '190px', width: '100%', position: 'relative', overflow: 'hidden', backgroundColor: '#F8FAFC' }}>
-          {item.image && item.image.trim() !== '' ? (
+          {resolveDishImage(item.image, item.category, item.id, item.name) ? (
             <img
-              src={item.image}
+              src={resolveDishImage(item.image, item.category, item.id, item.name)}
+              loading="lazy"
+              decoding="async"
               alt={item.name}
               style={{ width: '100%', height: '100%', objectFit: 'cover' }}
               onError={(e) => {
@@ -1348,6 +1351,7 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({
           {/* Scrollable Category Filter Pills */}
           <div
             ref={categoryRowRef}
+            className="foodies-menu-chips"
             style={{
               display: 'flex',
               gap: '8px',
@@ -1590,7 +1594,7 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({
                 >
                   {cart.map((item) => {
                     const itemMenuData = menuItems.find((m) => m.id === item.menuItemId);
-                    const itemImg = itemMenuData?.image || '/food-biryani.jpg';
+                    const itemImg = resolveDishImage(itemMenuData?.image, itemMenuData?.category, item.menuItemId, item.name);
                     return (
                     <div
                       key={item.id}
@@ -1754,7 +1758,7 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({
                           }}
                         >
                           <img
-                            src={rec.image || '/food-biryani.jpg'}
+                            src={resolveDishImage(rec.image, rec.category, rec.id, rec.name)}
                             alt={rec.name}
                             style={{ width: '100%', height: '105px', objectFit: 'cover' }}
                             onError={(e) => {
@@ -3392,7 +3396,7 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({
       )}
 
       {/* Responsive styles for progressive layout breakdown */}
-      <style jsx>{`
+      <style jsx global>{`
         .order-type-select-btn:hover {
           border-color: var(--primary) !important;
           background-color: var(--primary-light) !important;
@@ -3734,14 +3738,25 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({
             flex: 1 !important;
             text-align: center !important;
           }
+        }
+
+        /* Phones: search on its own full-width row, category chips scroll underneath.
+           (This rule used to sit inside the unclosed <=380px block, so it never applied at normal phone widths.) */
         @media (max-width: 640px) {
           .foodies-menu-toolbar {
             flex-direction: column !important;
             align-items: stretch !important;
-            gap: 10px !important;
+            gap: 8px !important;
+            padding: 0 10px !important;
           }
           .foodies-menu-search-box {
             width: 100% !important;
+            min-width: 0 !important;
+            order: -1;
+          }
+          .foodies-menu-chips {
+            padding: 2px 2px 4px !important;
+            scroll-padding-inline: 10px;
           }
         }
 

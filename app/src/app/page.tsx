@@ -16,8 +16,10 @@ import { TableSelectionScreen as CustomerTableQR } from '@/customer/CustomerTabl
 import { OrderTrackingScreen as CustomerTracking } from '@/customer/CustomerTracking';
 import { OrderHistoryScreen as CustomerHistory } from '@/customer/CustomerHistory';
 import { ProfileScreen as CustomerProfile } from '@/customer/CustomerProfile';
+import { useHasMounted } from '@/lib/useHasMounted';
+import { AppBootSplash } from '@/components/common/AppBootSplash';
 
-export default function CustomerMainPage() {
+function CustomerMainPageInner() {
   const { currentUser, branches, orderType, hasConfirmedOrderType, cart } = useApp();
 
   // Check if all branches are closed for the day / late-night timing
@@ -301,4 +303,11 @@ export default function CustomerMainPage() {
       `}</style>
     </div>
   );
+}
+
+/** Deterministic first paint: see useHasMounted for why the app renders only after mount. */
+export default function CustomerMainPage() {
+  const mounted = useHasMounted();
+  if (!mounted) return <AppBootSplash label="Preparing your table…" />;
+  return <CustomerMainPageInner />;
 }

@@ -1122,7 +1122,7 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
               }}
             >
               <Bell size={14} />
-              <span>Alerts</span>
+              <span className="staff-alerts-label">Alerts</span>
               {unreadNotificationsCount > 0 && (
                 <span
                   style={{
@@ -1194,6 +1194,7 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
             >
               {/* Status / Role Badge */}
               <span
+                className="staff-role-badge"
                 style={{
                   fontSize: '11px',
                   fontWeight: 800,

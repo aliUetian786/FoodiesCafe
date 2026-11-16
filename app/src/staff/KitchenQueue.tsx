@@ -11,6 +11,7 @@ import {
   Bike,
   Eye,
 } from 'lucide-react';
+import { formatOrderTime } from '@/lib/formatDateTime';
 
 export const KitchenQueueScreen: React.FC = () => {
   const { orders, updateOrderStatus, currentBranch, footerSettings, currentRole, currentUser, addToast } = useApp();
@@ -157,7 +158,7 @@ export const KitchenQueueScreen: React.FC = () => {
             </h4>
           </div>
           <span style={{ fontSize: '11.5px', fontWeight: 700, color: 'var(--text-muted)' }}>
-            {ord.createdAt}
+            {formatOrderTime(ord.createdAt)}
           </span>
         </div>
 

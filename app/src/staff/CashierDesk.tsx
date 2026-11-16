@@ -45,6 +45,7 @@ import {
 import { TableQrModal } from './TableQrModal';
 import { WalkInOrderModal } from './WalkInOrderModal';
 import { AssignTablesModal } from './AssignTablesModal';
+import { formatOrderTime } from '@/lib/formatDateTime';
 
 export const CashierScreen: React.FC = () => {
   const {
@@ -354,7 +355,7 @@ export const CashierScreen: React.FC = () => {
 
               <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; color: #334155; font-weight: 600;">
                 <span>Slip: <strong>#${ord.orderNumber}</strong></span>
-                <span>${ord.createdAt}</span>
+                <span>${formatOrderTime(ord.createdAt)}</span>
               </div>
               <div style="font-size: 11px; margin-bottom: 5px; color: #334155;">
                 Customer: <strong>${ord.customerName}</strong> (${ord.customerPhone})
@@ -722,7 +723,7 @@ export const CashierScreen: React.FC = () => {
                     </div>
 
                     <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                      Requested by Cashier: <strong>{req.requestedBy}</strong> · {req.createdAt}
+                      Requested by Cashier: <strong>{req.requestedBy}</strong> · {formatOrderTime(req.createdAt)}
                     </div>
 
                     <div style={{ display: 'flex', gap: '8px', marginTop: '6px' }}>
@@ -1585,7 +1586,7 @@ export const CashierScreen: React.FC = () => {
                       </span>
                     </div>
                     <div style={{ fontSize: '12.5px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-                      Placed: <strong>{activeMonitorOrder.createdAt}</strong> · Fulfillment Status: <strong style={{ textTransform: 'uppercase' }}>{activeMonitorOrder.status}</strong>
+                      Placed: <strong>{formatOrderTime(activeMonitorOrder.createdAt)}</strong> · Fulfillment Status: <strong style={{ textTransform: 'uppercase' }}>{activeMonitorOrder.status}</strong>
                     </div>
                   </div>
 
@@ -2086,7 +2087,7 @@ export const CashierScreen: React.FC = () => {
                     <span style={{ fontSize: '16px', fontWeight: 800, color: 'var(--primary)' }}>
                       Rs. {ord.total.toLocaleString()}
                     </span>
-                    <span style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>{ord.createdAt}</span>
+                    <span style={{ fontSize: '11.5px', color: 'var(--text-muted)' }}>{formatOrderTime(ord.createdAt)}</span>
                   </div>
                 </div>
               );

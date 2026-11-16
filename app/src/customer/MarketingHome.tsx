@@ -35,59 +35,11 @@ import {
 import { OpenStreetMapView } from '@/components/common/OpenStreetMapView';
 import { OsmMarkerItem, getOsmDirectionsUrl } from '@/utils/openStreetMap';
 import { HOME_DEALS } from '@/lib/homeDeals';
+import { resolveDishImage, PHOTOS } from '@/lib/dishImages';
 
 interface MarketingHomeProps {
   onNavigate: (view: string) => void;
   onOpenItemModal?: (item: any) => void;
-}
-
-// Exact Dish Image Fallbacks & Specific Images Matching Mobile App (mobile/src/services/api.ts)
-const DISH_IMAGE_FALLBACKS: Record<string, string> = {
-  'Biryani & Rice': 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=800&auto=format&fit=crop&q=60',
-  'Karahi & Handi': 'https://images.unsplash.com/photo-1603894584373-5ac82b2ae398?w=800&auto=format&fit=crop&q=60',
-  'Burgers': 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&auto=format&fit=crop&q=60',
-  'Burgers & Fast Food': 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&auto=format&fit=crop&q=60',
-  'BBQ & Kebabs': 'https://images.unsplash.com/photo-1599488615731-7e5c2823ff28?w=800&auto=format&fit=crop&q=60',
-  'Tandoor & Breads': 'https://images.unsplash.com/photo-1565557623262-b51c2513a641?w=800&auto=format&fit=crop&q=60',
-  'Beverages & Desserts': 'https://images.unsplash.com/photo-1551024709-8f23befc6f87?w=800&auto=format&fit=crop&q=60',
-  'Desserts': 'https://images.unsplash.com/photo-1551024709-8f23befc6f87?w=800&auto=format&fit=crop&q=60',
-  'Beverages': 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop&q=60',
-};
-
-const SPECIFIC_DISH_IMAGES: Record<string, string> = {
-  m14: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&auto=format&fit=crop&q=60',
-  m15: 'https://images.unsplash.com/photo-1576107232684-1279f3908594?w=800&auto=format&fit=crop&q=60',
-  m4: 'https://images.unsplash.com/photo-1521305916504-4a1121188589?w=800&auto=format&fit=crop&q=60',
-  m1: 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=800&auto=format&fit=crop&q=60',
-  m8: 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=800&auto=format&fit=crop&q=60',
-  m9: 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=800&auto=format&fit=crop&q=60',
-  m2: 'https://images.unsplash.com/photo-1603894584373-5ac82b2ae398?w=800&auto=format&fit=crop&q=60',
-  m10: 'https://images.unsplash.com/photo-1589302168068-964664d93dc0?w=800&auto=format&fit=crop&q=60',
-  m11: 'https://images.unsplash.com/photo-1545247181-516773cae754?w=800&auto=format&fit=crop&q=60',
-  m3: 'https://images.unsplash.com/photo-1599488615731-7e5c2823ff28?w=800&auto=format&fit=crop&q=60',
-  m12: 'https://images.unsplash.com/photo-1599488615731-7e5c2823ff28?w=800&auto=format&fit=crop&q=60',
-  m13: 'https://images.unsplash.com/photo-1544025162-d76694265947?w=800&auto=format&fit=crop&q=60',
-  m5: 'https://images.unsplash.com/photo-1565557623262-b51c2513a641?w=800&auto=format&fit=crop&q=60',
-  m16: 'https://images.unsplash.com/photo-1565557623262-b51c2513a641?w=800&auto=format&fit=crop&q=60',
-  m17: 'https://images.unsplash.com/photo-1565557623262-b51c2513a641?w=800&auto=format&fit=crop&q=60',
-  m6: 'https://images.unsplash.com/photo-1576092768241-dec231879fc3?w=800&auto=format&fit=crop&q=60',
-  m7: 'https://images.unsplash.com/photo-1551024709-8f23befc6f87?w=800&auto=format&fit=crop&q=60',
-  m18: 'https://images.unsplash.com/photo-1513558161293-cdaf765ed2fd?w=800&auto=format&fit=crop&q=60',
-  m19: 'https://images.unsplash.com/photo-1576092768241-dec231879fc3?w=800&auto=format&fit=crop&q=60',
-  m20: 'https://images.unsplash.com/photo-1551024709-8f23befc6f87?w=800&auto=format&fit=crop&q=60',
-};
-
-function resolveDishImage(image?: string, category?: string, dishIdOrName?: string): string {
-  if (dishIdOrName && SPECIFIC_DISH_IMAGES[dishIdOrName]) {
-    return SPECIFIC_DISH_IMAGES[dishIdOrName];
-  }
-  if (image && (image.startsWith('http://') || image.startsWith('https://'))) {
-    return image;
-  }
-  if (category && DISH_IMAGE_FALLBACKS[category]) {
-    return DISH_IMAGE_FALLBACKS[category];
-  }
-  return 'https://images.unsplash.com/photo-1563379091339-03b21ab4a4f8?w=800&auto=format&fit=crop&q=60';
 }
 
 function calculateDistanceKm(lat1: number, lon1: number, lat2: number, lon2: number): number {
@@ -206,7 +158,7 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
   const activeBanner = BANNERS[activeBannerIndex % BANNERS.length] || BANNERS[0];
 
   // Screen width detection for responsive popup vs mobile bottom sheet
-  const [isDesktop, setIsDesktop] = useState(true);
+  const [isDesktop, setIsDesktop] = useState(() => (typeof window !== 'undefined' ? window.innerWidth > 768 : true));
   useEffect(() => {
     const handleResize = () => {
       setIsDesktop(typeof window !== 'undefined' ? window.innerWidth > 768 : true);
@@ -217,7 +169,12 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
   }, []);
 
   // Signature Specials items (First 4 menu items)
-  const featuredDishes = menuItems.slice(0, 4);
+  // Signature dishes only — deal combos already have their own "Special Deals" row below.
+  const featuredDishes = (() => {
+    const isDeal = (m: (typeof menuItems)[number]) => /deal/i.test(m.category || '') || String(m.id).startsWith('deal');
+    const dishes = menuItems.filter((m) => !isDeal(m) && m.isAvailable !== false);
+    return (dishes.length >= 2 ? dishes : menuItems).slice(0, 4);
+  })();
 
   return (
     <div
@@ -340,10 +297,9 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
 
         {/* Dishes Grid (Fits full horizontal screen width: 4 cols on laptop/desktop, 2 cols on mobile) */}
         <div
+          className="mh-card-grid"
           style={{
             display: 'grid',
-            gridTemplateColumns: isDesktop ? 'repeat(4, 1fr)' : 'repeat(2, 1fr)',
-            gap: isDesktop ? '16px' : '12px',
             width: '100%',
           }}
         >
@@ -371,7 +327,7 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
               >
                 <div style={{ width: '100%', height: isDesktop ? '145px' : '105px', minHeight: isDesktop ? '145px' : '105px', position: 'relative', overflow: 'hidden' }}>
                   <img
-                    src={resolveDishImage(dish.image, dish.category, dish.id)}
+                    src={resolveDishImage(dish.image, dish.category, dish.id, dish.name)}
                     alt={dish.name}
                     style={{
                       width: '100%',
@@ -409,6 +365,7 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                       }}
+                      className="mh-card-title"
                       title={dish.name}
                     >
                       {dish.name}
@@ -585,14 +542,14 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
         </div>
 
         {/* Deals List (Matches Signature Specials 4 cols on desktop, 2 cols on mobile) */}
-        <div style={{ display: 'grid', gridTemplateColumns: isDesktop ? 'repeat(4, 1fr)' : 'repeat(2, 1fr)', gap: isDesktop ? '16px' : '12px', width: '100%' }}>
+        <div className="mh-card-grid" style={{ display: 'grid', width: '100%' }}>
           {(() => {
             // Deal ids & prices come from the shared catalog so the server accepts and prices them identically.
             const dealImages = [
-              dealCard?.imageUrl || localDealPhotos[0] || '/food-biryani.jpg',
-              localDealPhotos[1] || '/hero-bg.jpg',
-              'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&auto=format&fit=crop&q=60',
-              'https://images.unsplash.com/photo-1599488615731-7e5c2823ff28?w=800&auto=format&fit=crop&q=60',
+              resolveDishImage(dealCard?.imageUrl || localDealPhotos[0], 'Deals', 'deal-home-1', HOME_DEALS[0].title),
+              resolveDishImage(localDealPhotos[1], 'Deals', 'deal-home-2', HOME_DEALS[1].title),
+              PHOTOS.burger,
+              PHOTOS.bbqSkewers,
             ];
             const homeDealsList = HOME_DEALS.map((deal, idx) => ({
               ...deal,
@@ -670,6 +627,7 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
                       }}
+                      className="mh-card-title"
                       title={d.title}
                     >
                       {d.title}
@@ -758,10 +716,9 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
         }}
       >
         <div
+          className="mh-footer-grid"
           style={{
             display: 'grid',
-            gridTemplateColumns: isDesktop ? 'repeat(4, 1fr)' : 'repeat(auto-fit, minmax(130px, 1fr))',
-            gap: isDesktop ? '32px' : '12px',
             marginBottom: isDesktop ? '28px' : '10px',
             width: '100%',
           }}
@@ -781,12 +738,12 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
                 <span style={{ fontFamily: 'Outfit, sans-serif', fontWeight: isDesktop ? 900 : 750, fontSize: isDesktop ? '19px' : '12px', color: 'var(--text-main, #1E293B)' }}>
                   Foodies<span style={{ color: 'var(--primary)' }}>Cafe</span>
                 </span>
-                <div style={{ fontSize: isDesktop ? '11px' : '8.5px', color: 'var(--text-muted, #64748B)', fontWeight: isDesktop ? 700 : 500 }}>
+                <div style={{ fontSize: isDesktop ? '11px' : '11.5px', color: 'var(--text-muted, #64748B)', fontWeight: isDesktop ? 700 : 500 }}>
                   Taste That Speaks
                 </div>
               </div>
             </div>
-            <p style={{ fontSize: isDesktop ? '12.5px' : '9px', color: 'var(--text-secondary, #475569)', lineHeight: 1.35, fontWeight: 400, margin: isDesktop ? '0 0 14px' : '0 0 6px' }}>
+            <p style={{ fontSize: isDesktop ? '12.5px' : '12px', color: 'var(--text-secondary, #475569)', lineHeight: 1.35, fontWeight: 400, margin: isDesktop ? '0 0 14px' : '0 0 6px' }}>
               Pakistan&apos;s premier multi-branch dining experience. Authentic Dum Biryani, sizzling karahis, gourmet burgers, and fresh shakes.
             </p>
             <div
@@ -798,7 +755,7 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
                 borderRadius: '999px',
                 backgroundColor: '#DCFCE7',
                 color: '#15803D',
-                fontSize: isDesktop ? '11.5px' : '8.5px',
+                fontSize: isDesktop ? '11.5px' : '11.5px',
                 fontWeight: isDesktop ? 800 : 650,
               }}
             >
@@ -852,31 +809,31 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
 
           {/* Col 3: Branch Locations */}
           <div>
-            <h4 style={{ fontSize: isDesktop ? '15px' : '11px', fontWeight: isDesktop ? 850 : 700, marginBottom: isDesktop ? '14px' : '6px', color: 'var(--text-main, #1E293B)' }}>
+            <h4 style={{ fontSize: isDesktop ? '15px' : '14px', fontWeight: isDesktop ? 850 : 700, marginBottom: isDesktop ? '14px' : '6px', color: 'var(--text-main, #1E293B)' }}>
               Branch Locations
             </h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: isDesktop ? '11px' : '5px', fontSize: isDesktop ? '12.5px' : '9px', color: 'var(--text-secondary, #475569)' }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: isDesktop ? '11px' : '5px', fontSize: isDesktop ? '12.5px' : '12px', color: 'var(--text-secondary, #475569)' }}>
               <div>
-                <strong style={{ color: 'var(--text-main, #1E293B)', fontWeight: isDesktop ? 700 : 600, fontSize: isDesktop ? '12.5px' : '9.5px' }}>📍 Lahore (Flagship):</strong>
-                <div style={{ fontSize: isDesktop ? '12px' : '8.5px', marginTop: '1px', lineHeight: 1.25 }}>Gulberg III, Lahore</div>
+                <strong style={{ color: 'var(--text-main, #1E293B)', fontWeight: isDesktop ? 700 : 600, fontSize: isDesktop ? '12.5px' : '12px' }}>📍 Lahore (Flagship):</strong>
+                <div style={{ fontSize: isDesktop ? '12px' : '11.5px', marginTop: '1px', lineHeight: 1.25 }}>Gulberg III, Lahore</div>
               </div>
               <div>
-                <strong style={{ color: 'var(--text-main, #1E293B)', fontWeight: isDesktop ? 700 : 600, fontSize: isDesktop ? '12.5px' : '9.5px' }}>📍 Islamabad:</strong>
-                <div style={{ fontSize: isDesktop ? '12px' : '8.5px', marginTop: '1px', lineHeight: 1.25 }}>F-7 Markaz, Islamabad</div>
+                <strong style={{ color: 'var(--text-main, #1E293B)', fontWeight: isDesktop ? 700 : 600, fontSize: isDesktop ? '12.5px' : '12px' }}>📍 Islamabad:</strong>
+                <div style={{ fontSize: isDesktop ? '12px' : '11.5px', marginTop: '1px', lineHeight: 1.25 }}>F-7 Markaz, Islamabad</div>
               </div>
               <div>
-                <strong style={{ color: 'var(--text-main, #1E293B)', fontWeight: isDesktop ? 700 : 600, fontSize: isDesktop ? '12.5px' : '9.5px' }}>📍 Karachi:</strong>
-                <div style={{ fontSize: isDesktop ? '12px' : '8.5px', marginTop: '1px', lineHeight: 1.25 }}>Clifton Block 4, Karachi</div>
+                <strong style={{ color: 'var(--text-main, #1E293B)', fontWeight: isDesktop ? 700 : 600, fontSize: isDesktop ? '12.5px' : '12px' }}>📍 Karachi:</strong>
+                <div style={{ fontSize: isDesktop ? '12px' : '11.5px', marginTop: '1px', lineHeight: 1.25 }}>Clifton Block 4, Karachi</div>
               </div>
             </div>
           </div>
 
           {/* Col 4: Customer Care & Hours */}
           <div>
-            <h4 style={{ fontSize: isDesktop ? '15px' : '11px', fontWeight: isDesktop ? 850 : 700, marginBottom: isDesktop ? '14px' : '6px', color: 'var(--text-main, #1E293B)' }}>
+            <h4 style={{ fontSize: isDesktop ? '15px' : '14px', fontWeight: isDesktop ? 850 : 700, marginBottom: isDesktop ? '14px' : '6px', color: 'var(--text-main, #1E293B)' }}>
               Customer Care & Hours
             </h4>
-            <div style={{ display: 'flex', flexDirection: 'column', gap: isDesktop ? '10px' : '4px', fontSize: isDesktop ? '12.5px' : '9px', color: 'var(--text-secondary, #475569)', fontWeight: 450 }}>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: isDesktop ? '10px' : '4px', fontSize: isDesktop ? '12.5px' : '12px', color: 'var(--text-secondary, #475569)', fontWeight: 450 }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: isDesktop ? '8px' : '4px' }}>
                 <Phone size={isDesktop ? 14 : 10} color="var(--primary)" />
                 <span>Helpline: <strong style={{ fontWeight: isDesktop ? 750 : 600 }}>+92 42 3575 8899</strong></span>
@@ -905,7 +862,7 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
             display: 'flex',
             justifyContent: 'space-between',
             alignItems: 'center',
-            fontSize: isDesktop ? '12px' : '9px',
+            fontSize: isDesktop ? '12px' : '12px',
             color: 'var(--text-muted, #64748B)',
             flexWrap: 'wrap',
             gap: isDesktop ? '10px' : '6px',

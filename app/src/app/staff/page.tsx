@@ -20,6 +20,8 @@ import { ReportsScreen } from '@/staff/ReportsAndReconciliation';
 import { AuditLogScreen } from '@/staff/AuditLogView';
 import { CustomersOrdersScreen } from '@/staff/CustomersAndOrders';
 import { Smartphone } from 'lucide-react';
+import { useHasMounted } from '@/lib/useHasMounted';
+import { AppBootSplash } from '@/components/common/AppBootSplash';
 
 function getFirstViewForRole(role: string): string {
   switch (role) {
@@ -38,7 +40,7 @@ function getFirstViewForRole(role: string): string {
   }
 }
 
-export default function StaffPortalMainPage() {
+function StaffPortalMainPageInner() {
   const { currentRole, setCurrentRole, currentUser, setCurrentUser } = useApp();
 
   // Staff session max duration: 4-8 hours (8 hours = 8 * 60 * 60 * 1000 ms)
@@ -246,4 +248,11 @@ export default function StaffPortalMainPage() {
       <ToastContainer />
     </div>
   );
+}
+
+/** Deterministic first paint: see useHasMounted for why the app renders only after mount. */
+export default function StaffPortalMainPage() {
+  const mounted = useHasMounted();
+  if (!mounted) return <AppBootSplash label="Opening staff operations…" />;
+  return <StaffPortalMainPageInner />;
 }

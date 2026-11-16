@@ -26,6 +26,7 @@ import {
 } from 'lucide-react';
 import { WalkInOrderModal } from '@/staff/WalkInOrderModal';
 import { calculateHaversineKm, LOCAL_PAKISTAN_LANDMARKS } from '@/utils/openStreetMap';
+import { formatOrderTime } from '@/lib/formatDateTime';
 
 function getOrderDeliveryCoords(targetOrder: Order, defaultCoords: { lat: number; lng: number }): { lat: number; lng: number } {
   if (targetOrder.customerCoordinates?.lat && targetOrder.customerCoordinates?.lng) {
@@ -531,7 +532,7 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
 
               <div style="display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 3px; color: #334155; font-weight: 600;">
                 <span>Slip: <strong>#${ord.orderNumber}</strong></span>
-                <span>${ord.createdAt}</span>
+                <span>${formatOrderTime(ord.createdAt)}</span>
               </div>
               <div style="font-size: 11px; margin-bottom: 5px; color: #334155;">
                 Customer: <strong>${ord.customerName}</strong> (${ord.customerPhone})
