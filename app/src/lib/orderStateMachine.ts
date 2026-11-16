@@ -1,5 +1,6 @@
 import { PoolClient } from 'pg';
 import { cacheGet, cacheSet } from '@/lib/redis';
+import { getHomeDealById } from '@/lib/homeDeals';
 
 export const ORDER_STATUS_RANK: Record<string, number> = {
   placed: 1,
@@ -172,14 +173,33 @@ export async function recalculateOrderItemsOnServer(
   let addOnSubtotal = 0;
 
   const recalculatedItems = rawItems.map((item) => {
+    // A homepage deal id must never fall through to a name match (deal 1's title can be renamed to a dish name).
+    const isHomeDealItem = Boolean(getHomeDealById(item.menuItemId) || getHomeDealById(item.id));
     const dbDish =
       byId.get(item.menuItemId) ||
       byId.get(item.id) ||
-      (item.name ? byName.get(String(item.name).toLowerCase().trim()) : undefined);
+      (item.name && !isHomeDealItem ? byName.get(String(item.name).toLowerCase().trim()) : undefined);
 
     const qty = Math.max(1, Number(item.quantity) || 1);
 
     if (!dbDish) {
+      // Homepage deal combos are not rows in menu_items: price them from the shared server catalog.
+      const homeDeal = getHomeDealById(item.menuItemId) || getHomeDealById(item.id);
+      if (homeDeal) {
+        if (item.isAddOn) {
+          addOnSubtotal += homeDeal.price * qty;
+        } else {
+          originalSubtotal += homeDeal.price * qty;
+        }
+        return {
+          ...item,
+          menuItemId: homeDeal.id,
+          name: item.name || homeDeal.title,
+          unitPrice: homeDeal.price,
+          quantity: qty,
+        };
+      }
+
       if (!options.allowCustomPricing) {
         unavailableItems.push(item.name || 'Custom Item (Staff Only)');
       }

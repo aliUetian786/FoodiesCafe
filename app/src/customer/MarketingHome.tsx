@@ -34,6 +34,7 @@ import {
 } from 'lucide-react';
 import { OpenStreetMapView } from '@/components/common/OpenStreetMapView';
 import { OsmMarkerItem, getOsmDirectionsUrl } from '@/utils/openStreetMap';
+import { HOME_DEALS } from '@/lib/homeDeals';
 
 interface MarketingHomeProps {
   onNavigate: (view: string) => void;
@@ -586,40 +587,24 @@ export const MarketingHome: React.FC<MarketingHomeProps> = ({ onNavigate }) => {
         {/* Deals List (Matches Signature Specials 4 cols on desktop, 2 cols on mobile) */}
         <div style={{ display: 'grid', gridTemplateColumns: isDesktop ? 'repeat(4, 1fr)' : 'repeat(2, 1fr)', gap: isDesktop ? '16px' : '12px', width: '100%' }}>
           {(() => {
-            const homeDealsList = [
-              {
-                id: 'deal-home-1',
-                title: dealCard?.title || 'Family Dum Biryani Feast (Deal for 3-4)',
-                tag: dealCard?.tag || 'CHEF SPECIAL DEAL',
-                description: dealCard?.subtitle || '2x Royal Chicken Biryani, 1x Half Chicken Boti BBQ, 2x Mint Margaritas, Raita & Salad.',
-                price: 1650,
-                image: dealCard?.imageUrl || localDealPhotos[0] || '/food-biryani.jpg',
-              },
-              {
-                id: 'deal-home-2',
-                title: 'Shinwari Karahi Duo Combo (Deal for 2)',
-                tag: 'HOT COMBO',
-                description: 'Half Desi Ghee Shinwari Chicken Karahi, 4x Fresh Roghni Naan, 2x Soft Drinks & Mint Chutney.',
-                price: 1550,
-                image: localDealPhotos[1] || '/hero-bg.jpg',
-              },
-              {
-                id: 'deal-home-3',
-                title: 'Smashed Burger & Fries Crave Deal',
-                tag: 'FAST FOOD DEAL',
-                description: '1x Double Beef Smashed Cheeseburger, 1x Peri Peri Loaded Fries & 1x Artisanal Mint Margarita.',
-                price: 1190,
-                image: 'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&auto=format&fit=crop&q=60',
-              },
-              {
-                id: 'deal-home-4',
-                title: 'Midnight BBQ Feast Deal',
-                tag: 'BBQ SPECIAL',
-                description: '4 pcs Reshmi Chicken Kebabs, 6 pcs Chicken Malai Boti, 2x Garlic Butter Naans, Raita & Salad.',
-                price: 1290,
-                image: 'https://images.unsplash.com/photo-1599488615731-7e5c2823ff28?w=800&auto=format&fit=crop&q=60',
-              },
+            // Deal ids & prices come from the shared catalog so the server accepts and prices them identically.
+            const dealImages = [
+              dealCard?.imageUrl || localDealPhotos[0] || '/food-biryani.jpg',
+              localDealPhotos[1] || '/hero-bg.jpg',
+              'https://images.unsplash.com/photo-1568901346375-23c9450c58cd?w=800&auto=format&fit=crop&q=60',
+              'https://images.unsplash.com/photo-1599488615731-7e5c2823ff28?w=800&auto=format&fit=crop&q=60',
             ];
+            const homeDealsList = HOME_DEALS.map((deal, idx) => ({
+              ...deal,
+              ...(idx === 0
+                ? {
+                    title: dealCard?.title || deal.title,
+                    tag: dealCard?.tag || deal.tag,
+                    description: dealCard?.subtitle || deal.description,
+                  }
+                : {}),
+              image: dealImages[idx] || '/food-biryani.jpg',
+            }));
 
             return homeDealsList.map((d) => (
               <div
