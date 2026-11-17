@@ -40,9 +40,7 @@ export function Header({ onOpenCart, onNavigateHome, activeScreenTitle }: Header
 
   const badge = getRoleBadge(role);
   const IconComponent = badge.icon;
-  // Header pill shows the person's second name (e.g. "Bilal Farooq (Cashier)" -> "Farooq").
-  const nameParts = (currentUser?.name || '').replace(/\s*\(.*?\)/g, '').trim().split(/\s+/).filter(Boolean);
-  const secondName = nameParts[1] || nameParts[0] || badge.label;
+  // Header pill shows only the role; the person's name is shown on the first tab (StaffNameBanner).
 
   return (
     <View
@@ -179,7 +177,7 @@ export function Header({ onOpenCart, onNavigateHome, activeScreenTitle }: Header
               </TouchableOpacity>
               <View style={[styles.staticRoleBadge, { borderColor: badge.color }]}>
                 <IconComponent size={12} color={badge.color} />
-                <Text style={[styles.staticRoleText, { color: badge.color }]} numberOfLines={1}>{secondName}</Text>
+                <Text style={[styles.staticRoleText, { color: badge.color }]} numberOfLines={1}>{badge.label}</Text>
               </View>
               <TouchableOpacity
                 style={styles.staffLogoutBtn}

@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Modal } from 'react-native';
 import { Colors } from '../theme/colors';
 import { useApp } from '../context/AppContext';
+import { StaffNameBanner } from '../components/StaffNameBanner';
 import { HistoricalLoadingModal } from '../components/HistoricalLoadingModal';
 import { Order, OrderStatus } from '../types';
 import { normalizeBranchId } from '../services/api';
@@ -151,6 +152,11 @@ export function ManagerOrdersHub({ isFloorStaff = false }: ManagerOrdersHubProps
 
   return (
     <View style={styles.container}>
+      {role === 'cashier' && (
+        <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
+          <StaffNameBanner />
+        </View>
+      )}
       {/* Top Header */}
       <View style={styles.topHeader}>
         <View style={styles.titleRow}>

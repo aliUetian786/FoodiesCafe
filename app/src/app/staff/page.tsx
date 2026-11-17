@@ -33,7 +33,7 @@ function getFirstViewForRole(role: string): string {
     case 'kitchen_staff':
       return 'staff-kitchen';
     case 'cashier':
-      return 'staff-cashier';
+      return 'staff-cashier-orders';
     case 'floor_staff':
       return 'staff-floor-server';
     default:

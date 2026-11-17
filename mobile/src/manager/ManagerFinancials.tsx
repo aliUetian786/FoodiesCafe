@@ -10,7 +10,6 @@ import {
 import { KeyboardSafeModal as Modal } from '../components/KeyboardSafeModal';
 import { Colors } from '../theme/colors';
 import { useApp } from '../context/AppContext';
-import { StaffNameBanner } from '../components/StaffNameBanner';
 import { HistoricalLoadingModal } from '../components/HistoricalLoadingModal';
 import { normalizeBranchId } from '../services/api';
 import {
@@ -46,7 +45,6 @@ export function ManagerFinancials() {
     isFetchingOlderOrders,
     fetchOlderOrders,
     setBottomSheetOpen,
-    role,
   } = useApp();
 
   // Time scope selector: Today (default), Yesterday, Past 7 Days, This Month, All Time
@@ -249,7 +247,6 @@ export function ManagerFinancials() {
       <HistoricalLoadingModal visible={isFetchingOlderOrders} />
 
       <ScrollView contentContainerStyle={styles.content} showsVerticalScrollIndicator={false}>
-        {role === 'cashier' && <StaffNameBanner />}
         {/* Page Header */}
         <View style={styles.header}>
           <View style={{ flex: 1 }}>

@@ -84,7 +84,7 @@ export function RoleNavigator({
   const [ownerTab, setOwnerTab] = useState<'dashboard' | 'branches' | 'menu' | 'staff' | 'audit' | 'orders' | 'announcements'>('dashboard');
   const [ownerOrdersFilter, setOwnerOrdersFilter] = useState<'all' | 'pending'>('all');
   const [managerTab, setManagerTab] = useState<'dashboard' | 'kitchen' | 'orders' | 'staff' | 'financials' | 'tables' | 'menu' | 'announcements'>('dashboard');
-  const [cashierTab, setCashierTab] = useState<'financials' | 'orders' | 'walkin' | 'menu'>('financials');
+  const [cashierTab, setCashierTab] = useState<'financials' | 'orders' | 'walkin' | 'menu'>('orders');
   const [floorTab, setFloorTab] = useState<'waiter' | 'tables' | 'orders' | 'walkin'>('waiter');
   const [riderTab, setRiderTab] = useState<'console' | 'history'>('console');
   const [exitModalVisible, setExitModalVisible] = useState(false);
@@ -95,7 +95,7 @@ export function RoleNavigator({
   const resetAllStaffRoleTabs = () => {
     setOwnerTab('dashboard');
     setManagerTab('dashboard');
-    setCashierTab('financials');
+    setCashierTab('orders');
     setFloorTab('waiter');
     setRiderTab('console');
   };
@@ -281,8 +281,8 @@ export function RoleNavigator({
 
   // Cashier Navigation Tabs
   const cashierTabs = [
+    { id: 'orders', label: 'Orders Hub', icon: Receipt },
     { id: 'financials', label: 'Cash Desk', icon: Banknote },
-    { id: 'orders', label: 'Cashier Desk', icon: Receipt },
     { id: 'walkin', label: 'Walk-In Order', icon: Utensils },
     { id: 'menu', label: 'Menu Stock', icon: ListOrdered },
   ];
@@ -418,7 +418,7 @@ export function RoleNavigator({
                   <FloorWalkInOrder
                     initialTableNumber={walkInTableNumber}
                     onOrderDispatched={() => setCashierTab('orders')}
-                    onBack={() => setCashierTab('financials')}
+                    onBack={() => setCashierTab('orders')}
                   />
                 )}
                 {cashierTab === 'menu' && <OwnerMenu />}
