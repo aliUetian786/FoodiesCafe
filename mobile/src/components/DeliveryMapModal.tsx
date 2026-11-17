@@ -104,7 +104,8 @@ export function DeliveryMapModal({
   // Written Address input (auto-fetched from OpenStreetMap, editable)
   const [writtenAddress, setWrittenAddress] = useState('');
   const [addressLabel, setAddressLabel] = useState<'Home' | 'Work' | 'Other'>('Home');
-  const [saveToProfile, setSaveToProfile] = useState(true);
+  // On by default only for the first address; once one is saved it starts off (switch on to save another).
+  const [saveToProfile, setSaveToProfile] = useState(savedAddresses.length === 0);
 
   // Live-location lookup state: 'asking' = permission prompt, 'locating' = waiting for a GPS fix.
   const [liveStatus, setLiveStatus] = useState<'idle' | 'asking' | 'locating' | 'found' | 'denied' | 'failed'>('idle');
@@ -163,6 +164,7 @@ export function DeliveryMapModal({
     setViewMode('map');
     setPinConfirmed(false);
     setWrittenAddress('');
+    setSaveToProfile(savedAddresses.length === 0);
     if (savedAddresses.length > 0) {
       setSelectedSavedId(savedAddresses[0].id);
     }

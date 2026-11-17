@@ -94,7 +94,8 @@ export const DeliveryMapModal: React.FC<DeliveryMapModalProps> = ({
 
   const [writtenAddress, setWrittenAddress] = useState<string>('');
   const [addressLabel, setAddressLabel] = useState<'Home' | 'Work' | 'Other'>('Home');
-  const [saveToProfile, setSaveToProfile] = useState<boolean>(true);
+  // On by default only for the first address; once one is saved it starts off (tick it to save another).
+  const [saveToProfile, setSaveToProfile] = useState<boolean>(savedAddresses.length === 0);
 
   // 1) ask for location permission (the browser prompt), 2) take a fresh GPS fix (maximumAge 0, so no
   // cached position), 3) pin it and fill the written address from OpenStreetMap.
@@ -148,6 +149,7 @@ export const DeliveryMapModal: React.FC<DeliveryMapModalProps> = ({
     }
     setPinConfirmed(false);
     setWrittenAddress('');
+    setSaveToProfile(savedAddresses.length === 0);
     if (savedAddresses.length > 0) {
       setSelectedSavedId(savedAddresses[0].id);
     }
