@@ -39,7 +39,6 @@ export function Header({ onOpenCart, onNavigateHome, activeScreenTitle }: Header
   };
 
   const badge = getRoleBadge(role);
-  const IconComponent = badge.icon;
   // Header pill shows only the role; the person's name is shown on the first tab (StaffNameBanner).
 
   return (
@@ -175,10 +174,6 @@ export function Header({ onOpenCart, onNavigateHome, activeScreenTitle }: Header
                   </View>
                 )}
               </TouchableOpacity>
-              <View style={[styles.staticRoleBadge, { borderColor: badge.color }]}>
-                <IconComponent size={12} color={badge.color} />
-                <Text style={[styles.staticRoleText, { color: badge.color }]} numberOfLines={1}>{badge.label}</Text>
-              </View>
               <TouchableOpacity
                 style={styles.staffLogoutBtn}
                 onPress={() => {

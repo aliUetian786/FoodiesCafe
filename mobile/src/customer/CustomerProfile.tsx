@@ -267,34 +267,8 @@ export function CustomerProfile() {
         </View>
       )}
 
-      {/* Notifications Row: Single entry point for Notification Inbox & Preferences */}
-      <TouchableOpacity
-        style={styles.notificationCard}
-        onPress={() => openNotificationModal('inbox')}
-        activeOpacity={0.85}
-      >
-        <View style={styles.notificationIconWrap}>
-          <Bell size={18} color={Colors.primary} />
-        </View>
-        <View style={{ flex: 1 }}>
-          <View style={{ flexDirection: 'row', alignItems: 'center', gap: 8 }}>
-            <Text style={styles.notificationCardTitle}>Notifications</Text>
-            {unreadNotificationsCount > 0 && (
-              <View style={styles.unreadBadgePill}>
-                <Text style={styles.unreadBadgePillText}>{unreadNotificationsCount} NEW</Text>
-              </View>
-            )}
-          </View>
-          <Text style={styles.notificationCardSub}>
-            {unreadNotificationsCount > 0
-              ? `${unreadNotificationsCount} unread alert${unreadNotificationsCount > 1 ? 's' : ''} • Notification inbox & preferences`
-              : 'Inbox for notifications & alert preferences'}
-          </Text>
-        </View>
-        <Text style={styles.staffAppArrow}>➔</Text>
-      </TouchableOpacity>
-
-      {/* Contact Us: Customer Support & Branch Locations (Below Notification) */}
+      {/* Notifications are opened from the bell in the header (no profile row). */}
+      {/* Contact Us: Customer Support & Branch Locations  */}
       <TouchableOpacity
         style={styles.contactUsCard}
         onPress={() => setContactModalVisible(true)}
