@@ -426,12 +426,12 @@ export const StaffLayout: React.FC<StaffLayoutProps> = ({
       return [
         {
           id: 'staff-cashier',
-          label: 'Cashier Desk',
+          label: 'Cash Desk',
           icon: Banknote,
         },
         {
           id: 'staff-cashier-orders',
-          label: 'Orders Hub',
+          label: 'Cashier Desk',
           icon: ShoppingBag,
           badge: activeBranchOrdersCount > 0 ? `${activeBranchOrdersCount}` : undefined,
         },

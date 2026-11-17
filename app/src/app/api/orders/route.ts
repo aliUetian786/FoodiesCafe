@@ -19,6 +19,7 @@ import { enqueueNotificationJob, scheduleReadyIn10MinNotice } from '@/lib/jobs';
 import { logger, generateRequestId } from '@/lib/logger';
 import { recordRequestMetric, recordOrderToReadyDuration } from '@/lib/metrics';
 import { emitOrderPlacedNotification, emitOrderUpdatedNotification } from '@/lib/notifications';
+import { distanceMeters, isValidGeoPoint, resolveBranchCoords, resolveTableQrRadius } from '@/lib/tableQrGeofence';
 
 function normalizeBranchId(id?: string): string {
   if (!id) return 'gulberg-lahore';
@@ -324,6 +325,39 @@ export async function POST(request: Request) {
           idempotentReplay: true,
           order: cachedIdemOrder,
         });
+      }
+    }
+
+    // Table-QR geofence: a scanned-QR order carries the customer's GPS fix and must be
+    // inside the branch's table_qr_max_distance_meters (default 300 m).
+    if (type === 'dine_in' && body.tableQrLocation !== undefined && body.tableQrLocation !== null) {
+      if (!isValidGeoPoint(body.tableQrLocation)) {
+        return NextResponse.json(
+          { success: false, code: 'TABLE_QR_OUT_OF_RANGE', error: 'Your location could not be verified for table ordering.' },
+          { status: 403 }
+        );
+      }
+      const brRes = await query(
+        `SELECT name, city, latitude, longitude, table_qr_max_distance_meters FROM branches WHERE id = $1 LIMIT 1`,
+        [normBranchId]
+      ).catch(() => ({ rows: [] as any[] }));
+      const br = brRes.rows[0];
+      if (br) {
+        const radius = resolveTableQrRadius(br.table_qr_max_distance_meters);
+        const c = resolveBranchCoords(br);
+        const dist = distanceMeters(body.tableQrLocation.lat, body.tableQrLocation.lng, c.lat, c.lng);
+        if (dist > radius) {
+          return NextResponse.json(
+            {
+              success: false,
+              code: 'TABLE_QR_OUT_OF_RANGE',
+              distanceMeters: dist,
+              radiusMeters: radius,
+              error: `You are ${dist >= 1000 ? `${(dist / 1000).toFixed(1)} km` : `${dist} m`} from ${br.name}. Table QR orders are allowed within ${radius} m only.`,
+            },
+            { status: 403 }
+          );
+        }
       }
     }
 
@@ -975,14 +1009,89 @@ export async function PATCH(request: Request) {
         }
       }
 
+      // Kitchen add-on rules (customer web + mobile):
+      //  - Once the kitchen has received the order (status 'preparing' = cooking started), existing
+      //    items can no longer be removed or reduced; only NEW items can be added.
+      //  - Once the order is in the kitchen, removing every item (= cancelling) is not allowed.
+      //  - New items added while cooking are flagged `kitchenPending`, so the kitchen sees the same
+      //    order again with the add-ons, marks them received (ackKitchenAddOns), and only then can
+      //    mark the order ready.
+      const parseItems = (raw: any): any[] => {
+        if (Array.isArray(raw)) return raw;
+        if (typeof raw === 'string') {
+          try { const v = JSON.parse(raw); return Array.isArray(v) ? v : []; } catch { return []; }
+        }
+        return [];
+      };
+      const existingItems = parseItems(currentOrder.items);
+      const isInKitchen =
+        Boolean(currentOrder.sent_to_kitchen) || currentStatus === 'accepted' || currentStatus === 'preparing';
+      const cookingStarted = currentStatus === 'preparing';
+      const isStaffEditor = ['cashier', 'branch_manager', 'platform_owner'].includes(String(effectiveActorRole));
+      let effectiveItems: any[] | undefined = items;
+
+      if (Array.isArray(items)) {
+        if (isInKitchen && items.length === 0) {
+          return { status: 409, error: 'This order is already in the kitchen and cannot be cancelled.' };
+        }
+        if (cookingStarted && !isStaffEditor) {
+          const nextQtyById = new Map<string, number>();
+          for (const it of items) nextQtyById.set(String(it.id), Number(it.quantity) || 0);
+          const reduced = existingItems.find(
+            (it) => (nextQtyById.get(String(it.id)) ?? 0) < (Number(it.quantity) || 0)
+          );
+          if (reduced) {
+            return {
+              status: 409,
+              error: `Cooking has started: "${reduced.name || 'item'}" can no longer be removed or reduced. You can only add new items.`,
+              currentOrder: formatOrderRow(currentOrder),
+            };
+          }
+        }
+        if (cookingStarted) {
+          const existingIds = new Set(existingItems.map((it) => String(it.id)));
+          const existingQty = new Map(existingItems.map((it) => [String(it.id), Number(it.quantity) || 0]));
+          effectiveItems = items.map((it: any) => {
+            const id = String(it.id);
+            if (!existingIds.has(id)) return { ...it, isAddOn: true, kitchenPending: true };
+            // Quantity increased on an existing line while cooking: the extra portions are pending too.
+            if ((Number(it.quantity) || 0) > (existingQty.get(id) || 0)) return { ...it, kitchenPending: true };
+            return it;
+          });
+        }
+      }
+
+      if (body.ackKitchenAddOns === true) {
+        effectiveItems = (effectiveItems ?? existingItems).map((it: any) => {
+          if (!it?.kitchenPending) return it;
+          const { kitchenPending: _drop, ...rest } = it;
+          return rest;
+        });
+      }
+
+      if (status === 'ready' && currentStatus !== 'ready') {
+        const pending = (effectiveItems ?? existingItems).filter((it: any) => it?.kitchenPending);
+        if (pending.length > 0) {
+          return {
+            status: 409,
+            error: `New add-on item(s) (${pending.map((it: any) => it.name).join(', ')}) must be marked received in the kitchen before the order can be marked ready.`,
+            currentOrder: formatOrderRow(currentOrder),
+          };
+        }
+      }
+
       // Cancellation checks: Customer can only cancel while order is in 'placed' state before support accepts
       let effectiveNotes = notes;
       if (status === 'cancelled') {
         if (effectiveActorRole === 'customer') {
-          if (currentStatus !== 'placed' || currentOrder.sent_to_kitchen) {
+          // A customer may cancel only until the order reaches the kitchen: sent by the cashier,
+          // accepted, or its auto-forward time has passed (the kitchen screen shows it from then on).
+          const forwardAt = currentOrder.forward_to_kitchen_at ? new Date(currentOrder.forward_to_kitchen_at).getTime() : NaN;
+          const autoForwarded = !isNaN(forwardAt) && Date.now() >= forwardAt;
+          if (currentStatus !== 'placed' || currentOrder.sent_to_kitchen || autoForwarded) {
             return {
               status: 403,
-              error: 'Order has already been accepted by customer support / kitchen and cannot be cancelled.',
+              error: 'This order has already been sent to the kitchen and can no longer be cancelled.',
             };
           }
         }
@@ -1153,8 +1262,12 @@ export async function PATCH(request: Request) {
       let nextAddOnSubtotal = Number(currentOrder.add_on_subtotal) || 0;
 
       // 5. If items are edited, recalculate prices on the server
-      if (items !== undefined) {
-        const calcResult = await recalculateOrderItemsOnServer(client, targetBranchId, items, {
+      if (effectiveItems !== undefined && items === undefined) {
+        // Kitchen add-on acknowledgement only: same items/prices, just clear `kitchenPending`.
+        updates.push(`items = $${idx++}::jsonb`);
+        values.push(JSON.stringify(effectiveItems));
+      } else if (effectiveItems !== undefined) {
+        const calcResult = await recalculateOrderItemsOnServer(client, targetBranchId, effectiveItems, {
           checkAvailability: false,
         });
         if (!calcResult.ok || !calcResult.calculated) {

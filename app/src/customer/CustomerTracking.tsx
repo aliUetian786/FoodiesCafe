@@ -2,7 +2,7 @@
 
 import React, { useState, useMemo, useEffect } from 'react';
 import { useApp } from '@/context/AppContext';
-import { Order, OrderItem, MenuItem, getCancellationAttribution } from '@/types/cafe';
+import { Order, OrderItem, MenuItem, getCancellationAttribution, isOrderInKitchen } from '@/types/cafe';
 import {
   Clock,
   CheckCircle2,
@@ -468,16 +468,31 @@ export const OrderTrackingScreen: React.FC<OrderTrackingScreenProps> = ({ onNavi
     setSelectedAddCategory('All');
   };
 
+  // Live copy of the order being edited (status can move while the modal is open; never trust the snapshot).
+  const liveEditingOrder = editingOrder
+    ? orders.find((o) => o.id === editingOrder.id || o.orderNumber === editingOrder.orderNumber) || editingOrder
+    : null;
+  // Cooking started (kitchen marked it received): existing items are locked, only new items can be added.
+  const editCookingLocked = liveEditingOrder?.status === 'preparing' || liveEditingOrder?.status === 'ready';
+  const editInKitchen = Boolean(liveEditingOrder && isOrderInKitchen(liveEditingOrder));
+  const originalQtyById = useMemo(() => {
+    const m = new Map<string, number>();
+    (liveEditingOrder?.items || []).forEach((i) => m.set(i.id, Number(i.quantity) || 1));
+    return m;
+  }, [liveEditingOrder?.items]);
+
   // Stepper for Current Dishes (already selected items)
   const handleEditCurrentQty = (itemId: string, delta: number) => {
-    const isPrepOrReady = editingOrder?.status === 'preparing' || editingOrder?.status === 'ready';
-    if (isPrepOrReady && delta < 0) {
-      addToast({
-        type: 'warning',
-        title: 'Action Locked',
-        message: 'Items already preparing in kitchen cannot be removed or reduced.',
-      });
-      return;
+    if (delta < 0 && editCookingLocked) {
+      const current = currentDishes.find((it) => it.id === itemId)?.quantity || 0;
+      if (current + delta < (originalQtyById.get(itemId) || 0)) {
+        addToast({
+          type: 'warning',
+          title: 'Cooking has started 🔒',
+          message: 'Items the kitchen is already cooking cannot be removed or reduced. You can still add new items.',
+        });
+        return;
+      }
     }
     setCurrentDishes((prev) =>
       prev
@@ -520,6 +535,15 @@ export const OrderTrackingScreen: React.FC<OrderTrackingScreenProps> = ({ onNavi
       });
 
     const combined = [...activeCurrent, ...fromAddMore];
+
+    if (combined.length === 0 && editInKitchen) {
+      addToast({
+        type: 'warning',
+        title: 'Order is in the kitchen',
+        message: 'This order has already been sent to the kitchen, so it can no longer be cancelled.',
+      });
+      return;
+    }
 
     if (combined.length === 0) {
       cancelOrder(editingOrder.id, 'All items deselected from order by customer');
@@ -775,10 +799,8 @@ export const OrderTrackingScreen: React.FC<OrderTrackingScreenProps> = ({ onNavi
             ? 'PREPARING'
             : 'PLACED';
 
-          const canCancel =
-            ord.status === 'placed' &&
-            !ord.sentToKitchen &&
-            !(ord.type === 'delivery' && Boolean(ord.assignedRiderId));
+          // Customer can cancel until the order reaches the kitchen (any order type).
+          const canCancel = !isOrderInKitchen(ord);
           const canAddItems =
             ['placed', 'accepted', 'preparing'].includes(ord.status) &&
             !isOutForDelivery &&
@@ -1219,7 +1241,7 @@ export const OrderTrackingScreen: React.FC<OrderTrackingScreenProps> = ({ onNavi
                   <span style={{ fontSize: '14px', fontWeight: 800, color: 'var(--text-main)' }}>
                     Current Dishes ({currentDishes.filter((i) => i.quantity > 0).length})
                   </span>
-                  {(editingOrder.status === 'preparing' || editingOrder.status === 'ready') && (
+                  {editCookingLocked && (
                     <span style={{ fontSize: '11px', color: '#D97706', fontWeight: 700, backgroundColor: '#FEF3C7', padding: '2px 8px', borderRadius: '6px' }}>
                       🔒 Cooking in kitchen (Cannot reduce)
                     </span>
@@ -1250,6 +1272,7 @@ export const OrderTrackingScreen: React.FC<OrderTrackingScreenProps> = ({ onNavi
                       </div>
 
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+                        {!(editCookingLocked && it.quantity <= (originalQtyById.get(it.id) || 0)) && (
                         <button
                           onClick={() => handleEditCurrentQty(it.id, -1)}
                           style={{
@@ -1266,6 +1289,7 @@ export const OrderTrackingScreen: React.FC<OrderTrackingScreenProps> = ({ onNavi
                         >
                           {it.quantity === 1 ? <Trash2 size={13} color="#DC2626" /> : <Minus size={13} />}
                         </button>
+                        )}
                         <span style={{ fontSize: '14px', fontWeight: 850, minWidth: '20px', textAlign: 'center' }}>
                           {it.quantity}
                         </span>

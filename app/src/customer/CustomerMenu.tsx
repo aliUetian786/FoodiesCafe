@@ -33,6 +33,7 @@ import {
 } from 'lucide-react';
 import { resolveDishImage } from '@/lib/dishImages';
 import { BranchPickerModal } from '@/components/common/BranchPickerModal';
+import { distanceMeters, resolveBranchCoords, resolveTableQrRadius } from '@/lib/tableQrGeofence';
 
 interface MenuScreenProps {
   onNavigate: (view: string) => void;
@@ -250,6 +251,64 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({
       }
     }
   }, [isTableQr, tableFromUrl, setOrderType, setHasConfirmedOrderType, setCurrentBranchId]);
+
+  // ── Table-QR geofence: a scanned QR can only order within the branch's radius (default 300 m) ──
+  const qrRadiusMeters = resolveTableQrRadius(currentBranch?.tableQrMaxDistanceMeters);
+  const qrBranchCoords = useMemo(
+    () => resolveBranchCoords(currentBranch || {}),
+    [currentBranch?.latitude, currentBranch?.longitude, currentBranch?.city] // eslint-disable-line react-hooks/exhaustive-deps
+  );
+  const [qrGeo, setQrGeo] = useState<{
+    status: 'idle' | 'checking' | 'inside' | 'outside' | 'denied' | 'unsupported';
+    distance: number | null;
+    coords: { lat: number; lng: number } | null;
+    message?: string;
+  }>({ status: 'idle', distance: null, coords: null });
+
+  const checkQrLocation = React.useCallback(
+    (notify = false): Promise<{ lat: number; lng: number } | null> =>
+      new Promise((resolve) => {
+        if (typeof window === 'undefined' || !navigator.geolocation) {
+          setQrGeo({ status: 'unsupported', distance: null, coords: null, message: 'This device cannot share its location, so table ordering is locked.' });
+          resolve(null);
+          return;
+        }
+        setQrGeo((g) => ({ ...g, status: 'checking' }));
+        navigator.geolocation.getCurrentPosition(
+          (pos) => {
+            const coords = { lat: pos.coords.latitude, lng: pos.coords.longitude };
+            const dist = distanceMeters(coords.lat, coords.lng, qrBranchCoords.lat, qrBranchCoords.lng);
+            const inside = dist <= qrRadiusMeters;
+            setQrGeo({ status: inside ? 'inside' : 'outside', distance: dist, coords });
+            if (notify && !inside) {
+              addToast({
+                type: 'error',
+                title: 'Too far from the cafe 🚫',
+                message: `You are ${dist >= 1000 ? `${(dist / 1000).toFixed(1)} km` : `${dist} m`} from ${currentBranch?.name || 'the branch'}. Table QR orders are allowed within ${qrRadiusMeters} m only.`,
+              });
+            }
+            resolve(inside ? coords : null);
+          },
+          (err) => {
+            const message =
+              err.code === 1
+                ? 'Location permission was denied. Allow location access to order from your table.'
+                : 'Could not get your location. Turn on device location and try again.';
+            setQrGeo({ status: 'denied', distance: null, coords: null, message });
+            if (notify) addToast({ type: 'warning', title: 'Location needed 📍', message });
+            resolve(null);
+          },
+          { enableHighAccuracy: true, timeout: 12000, maximumAge: 10000 }
+        );
+      }),
+    [qrBranchCoords.lat, qrBranchCoords.lng, qrRadiusMeters, currentBranch?.name, addToast]
+  );
+
+  const checkQrLocationRef = useRef(checkQrLocation);
+  checkQrLocationRef.current = checkQrLocation;
+  useEffect(() => {
+    if (isTableQr) void checkQrLocationRef.current(false);
+  }, [isTableQr, qrBranchCoords.lat, qrBranchCoords.lng, qrRadiusMeters]);
 
   // Screen width detection for screen-adaptive checkout (desktop 2-column vs mobile drawer)
   const [isDesktop, setIsDesktop] = useState(() => (typeof window !== 'undefined' ? window.innerWidth > 860 : true));
@@ -767,7 +826,18 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({
     }
   };
 
-  const handleConfirmAndPayCash = () => {
+  const handleConfirmAndPayCash = async () => {
+    // Table QR: re-check GPS right before placing. Outside the branch radius means no order.
+    let tableQrLocation: { lat: number; lng: number } | undefined;
+    if (isTableQr) {
+      const coords = await checkQrLocation(true);
+      if (!coords) {
+        setConfirmModalOpen(false);
+        return;
+      }
+      tableQrLocation = coords;
+    }
+
     // 0. Verify customer is authenticated
     if (!isCustomerLoggedIn) {
       setConfirmModalOpen(false);
@@ -848,6 +918,7 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({
           paymentCollected: false,
           isTableQr: isTableQr || Boolean(effectiveType === 'dine_in' && effectiveTableNumber),
           isWalkIn: false,
+          tableQrLocation,
         }
       );
 
@@ -1487,6 +1558,44 @@ export const CustomerMenu: React.FC<MenuScreenProps> = ({
           )}
         </div>
       </div>
+      )}
+
+      {isTableQr && qrGeo.status !== 'inside' && (
+        <div
+          role="status"
+          style={{
+            margin: '12px 0',
+            padding: '12px 16px',
+            borderRadius: '12px',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '12px',
+            flexWrap: 'wrap',
+            backgroundColor: qrGeo.status === 'checking' || qrGeo.status === 'idle' ? '#FFF7ED' : '#FEF2F2',
+            border: `1.5px solid ${qrGeo.status === 'checking' || qrGeo.status === 'idle' ? '#FED7AA' : '#FCA5A5'}`,
+          }}
+        >
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px', fontSize: '13px', fontWeight: 750, color: qrGeo.status === 'checking' || qrGeo.status === 'idle' ? '#9A3412' : '#991B1B' }}>
+            <MapPin size={16} />
+            <span>
+              {qrGeo.status === 'checking' || qrGeo.status === 'idle'
+                ? `Checking you are at ${currentBranch?.name || 'the cafe'}…`
+                : qrGeo.status === 'outside'
+                ? `You are ${qrGeo.distance !== null && qrGeo.distance >= 1000 ? `${(qrGeo.distance / 1000).toFixed(1)} km` : `${qrGeo.distance} m`} away. Table QR orders work only within ${qrRadiusMeters} m of ${currentBranch?.name || 'the branch'}.`
+                : qrGeo.message || 'Location is required to order from this table.'}
+            </span>
+          </div>
+          {qrGeo.status !== 'checking' && qrGeo.status !== 'idle' && (
+            <button
+              type="button"
+              onClick={() => void checkQrLocation(true)}
+              style={{ padding: '7px 12px', borderRadius: '8px', border: 'none', backgroundColor: '#DC2626', color: '#FFFFFF', fontWeight: 800, fontSize: '12px', cursor: 'pointer' }}
+            >
+              Check again
+            </button>
+          )}
+        </div>
       )}
 
       {/* Two-Column Layout Below Categories: Dishes on Left, Static Checkout Card on Right */}

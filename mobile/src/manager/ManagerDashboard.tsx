@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity, Switch, Modal } from 'react-native';
 import { Colors } from '../theme/colors';
 import { useApp } from '../context/AppContext';
+import { StaffNameBanner } from '../components/StaffNameBanner';
+import { AnnouncementsBoard } from '../components/AnnouncementsBoard';
 import { normalizeBranchId } from '../services/api';
 import {
   Building2,
@@ -340,7 +342,8 @@ export function ManagerDashboard({
   };
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <StaffNameBanner />
       {/* Branch Header Card */}
       <View style={styles.branchHeaderCard}>
         <View style={styles.branchInfoRow}>
@@ -976,6 +979,9 @@ export function ManagerDashboard({
           </View>
         </View>
       </View>
+
+      {/* Announcements board inside Overview (also available as its own tab) */}
+      <AnnouncementsBoard embedded />
     </ScrollView>
   );
 }

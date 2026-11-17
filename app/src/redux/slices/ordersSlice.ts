@@ -35,14 +35,48 @@ const initialState: OrdersState = {
   lastSynced: null,
 };
 
-const persistOrders = (orders: Order[]) => {
-  if (typeof window === 'undefined') return;
+// ---- Performance (long-running staff tabs) ----
+// Every reducer used to JSON.stringify the whole order list into localStorage, and every
+// setOrders re-read + JSON.parse'd it, on each poll (2.5 s). The list grows during the day, so
+// the tab got slower by the hour. Now: persistence is debounced and runs once after a burst,
+// and the localStorage copy is only parsed when another tab actually changed it.
+const ORDERS_LIVE_KEY = 'foodies_orders_live';
+let lastSeenLiveRaw: string | null = null;
+let ordersGetter: (() => Order[]) | null = null;
+let persistTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Called once by the store so the debounced writer can read the latest orders. */
+export function registerOrdersGetter(getter: () => Order[]) {
+  ordersGetter = getter;
+}
+
+/** Parsed copy of foodies_orders_live, or null when it is unchanged since we last read/wrote it. */
+export function readChangedLiveOrders(): Order[] | null {
+  if (typeof window === 'undefined') return null;
   try {
-    const nextJson = JSON.stringify(orders);
-    if (localStorage.getItem('foodies_orders_live') !== nextJson) {
-      localStorage.setItem('foodies_orders_live', nextJson);
-    }
-  } catch (e) { }
+    const raw = localStorage.getItem(ORDERS_LIVE_KEY);
+    if (!raw || raw === lastSeenLiveRaw) return null;
+    lastSeenLiveRaw = raw;
+    const parsed = JSON.parse(raw);
+    return Array.isArray(parsed) ? parsed : null;
+  } catch {
+    return null;
+  }
+}
+
+const persistOrders = (_orders?: unknown) => {
+  if (typeof window === 'undefined' || persistTimer) return;
+  persistTimer = setTimeout(() => {
+    persistTimer = null;
+    if (!ordersGetter) return;
+    try {
+      const nextJson = JSON.stringify(ordersGetter());
+      if (nextJson !== lastSeenLiveRaw) {
+        localStorage.setItem(ORDERS_LIVE_KEY, nextJson);
+        lastSeenLiveRaw = nextJson;
+      }
+    } catch (e) { }
+  }, 600);
 };
 
 export function mergeSingleOrderMonotonically(existing: Order | undefined, inc: Order): Order {
@@ -206,23 +240,17 @@ export const ordersSlice = createSlice({
         if (ord.orderNumber) existingMap.set(ord.orderNumber, ord);
       }
 
-      // Also check localStorage so recent updates from other tabs are never lost on poll
-      if (typeof window !== 'undefined') {
-        try {
-          const saved = localStorage.getItem('foodies_orders_live');
-          if (saved) {
-            const parsed = JSON.parse(saved);
-            if (Array.isArray(parsed)) {
-              for (const ord of parsed) {
-                if (!ord || !ord.id) continue;
-                const prev = existingMap.get(ord.id) || (ord.orderNumber ? existingMap.get(ord.orderNumber) : undefined);
-                const merged = mergeSingleOrderMonotonically(prev, ord);
-                existingMap.set(merged.id, merged);
-                if (merged.orderNumber) existingMap.set(merged.orderNumber, merged);
-              }
-            }
-          }
-        } catch { }
+      // Also merge localStorage so recent updates from other tabs are never lost on poll
+      // (parsed only when another tab changed it since our last read/write).
+      const changedLive = readChangedLiveOrders();
+      if (changedLive) {
+        for (const ord of changedLive) {
+          if (!ord || !ord.id) continue;
+          const prev = existingMap.get(ord.id) || (ord.orderNumber ? existingMap.get(ord.orderNumber) : undefined);
+          const merged = mergeSingleOrderMonotonically(prev, ord);
+          existingMap.set(merged.id, merged);
+          if (merged.orderNumber) existingMap.set(merged.orderNumber, merged);
+        }
       }
 
       // Merge incoming orders monotonically without allowing status or payment downgrades
@@ -325,6 +353,25 @@ export const ordersSlice = createSlice({
         persistOrders(state.orders);
       }
     },
+    /** Drop an order that never existed on the server (e.g. a Table-QR order rejected by the geofence). */
+    removeOrder: (state, action: PayloadAction<string>) => {
+      const id = action.payload;
+      state.orders = state.orders.filter((o) => o.id !== id && o.orderNumber !== id);
+      persistOrders();
+    },
+    /** Silent-refresh pruning: drop finished orders older than 24 h (the working set stays small). */
+    pruneFinishedOrders: (state) => {
+      if (state.hasLoadedOlderOrders) return;
+      const cutoff = Date.now() - 24 * 60 * 60 * 1000;
+      const before = state.orders.length;
+      state.orders = state.orders.filter((o) => {
+        const isFinished = ['completed', 'cancelled', 'delivered', 'served', 'taken'].includes(o.status);
+        if (!isFinished) return true;
+        const createdMs = new Date(o.createdAt).getTime();
+        return isNaN(createdMs) || createdMs >= cutoff;
+      });
+      if (state.orders.length !== before) persistOrders();
+    },
     setHasLoadedOlderOrders: (state, action: PayloadAction<boolean>) => {
       state.hasLoadedOlderOrders = action.payload;
     },
@@ -355,6 +402,8 @@ export const {
   setHasLoadedOlderOrders,
   setIsFetchingOlderOrders,
   filterOrdersToToday,
+  removeOrder,
+  pruneFinishedOrders,
 } = ordersSlice.actions;
 
 // Selectors

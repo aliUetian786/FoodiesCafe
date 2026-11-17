@@ -88,7 +88,11 @@ export const CashierOrdersScreen: React.FC<CashierOrdersScreenProps> = ({ isFloo
   // Live timer tick for order forwarding countdown and kitchen stopwatch (1 second interval)
   const [now, setNow] = useState<number>(Date.now());
   React.useEffect(() => {
-    const intv = setInterval(() => setNow(Date.now()), 1000);
+    // Skip ticks while the tab is hidden (no re-render of the whole hub in the background).
+    const intv = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      setNow(Date.now());
+    }, 1000);
     return () => clearInterval(intv);
   }, []);
 

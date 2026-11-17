@@ -38,7 +38,7 @@ const formatPosted = (iso?: string) => {
   return `${d.toLocaleDateString([], { day: '2-digit', month: 'short' })} ${d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}`;
 };
 
-export function AnnouncementsBoard() {
+export function AnnouncementsBoard({ embedded = false }: { embedded?: boolean } = {}) {
   const { announcements, addAnnouncement, deleteAnnouncement, branches, role, staffUser, currentBranch } = useApp();
   const isOwner = role === 'platform_owner';
   const managerBranchId = (staffUser as any)?.branchId || currentBranch?.id || '';
@@ -101,9 +101,8 @@ export function AnnouncementsBoard() {
 
   const branchChoices = [{ id: 'all', name: 'All branches' }, ...branches.map((b) => ({ id: b.id, name: b.name }))];
 
-  return (
-    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
-      <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+  const body = (
+    <>
         <View style={styles.headerRow}>
           <View style={styles.headerIcon}>
             <Megaphone size={22} color="#EF4444" />
@@ -233,6 +232,16 @@ export function AnnouncementsBoard() {
             );
           })
         )}
+    </>
+  );
+
+  // Embedded = rendered inside an Overview screen that already scrolls (no nested ScrollView).
+  if (embedded) return <View style={styles.embedded}>{body}</View>;
+
+  return (
+    <KeyboardAvoidingView style={{ flex: 1 }} behavior={Platform.OS === 'ios' ? 'padding' : undefined}>
+      <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+        {body}
       </ScrollView>
     </KeyboardAvoidingView>
   );
@@ -241,6 +250,7 @@ export function AnnouncementsBoard() {
 const styles = StyleSheet.create({
   container: { flex: 1, backgroundColor: Colors.bgMain },
   content: { padding: 16, paddingBottom: 120, gap: 12 },
+  embedded: { gap: 12, marginTop: 8 },
   headerRow: { flexDirection: 'row', alignItems: 'center', gap: 12 },
   headerIcon: { width: 44, height: 44, borderRadius: 12, backgroundColor: '#FEF2F2', alignItems: 'center', justifyContent: 'center' },
   headerTitle: { fontSize: 20, fontWeight: '800', color: Colors.textMain },

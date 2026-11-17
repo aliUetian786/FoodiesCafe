@@ -210,7 +210,8 @@ export const TableSelectionScreen: React.FC<TableSelectionScreenProps> = ({ onNa
     return false;
   }, []);
 
-  const isLocationVerified = locationStatus === 'verified' || isDirectQrScan;
+  // A scanned QR link does NOT prove presence: always require the GPS radius check.
+  const isLocationVerified = locationStatus === 'verified';
 
   // Request user location access via browser Geolocation API
   const requestLocationAccess = (showToastNotice = true) => {

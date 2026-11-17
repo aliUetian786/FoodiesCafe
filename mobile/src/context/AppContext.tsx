@@ -28,6 +28,7 @@ import {
   DEFAULT_RECEIVER_NOTIFICATION_PREFERENCES,
   SavedDeliveryAddress,
   STATUS_RANK,
+  isOrderInKitchen,
 } from '../types';
 import {
   SEED_BRANCHES,
@@ -200,6 +201,7 @@ interface AppContextType {
   updateOrderStatus: (orderId: string, status: OrderStatus, extraFields?: Record<string, any>) => void;
   updateOrderPayment: (orderId: string, paymentStatus: 'paid' | 'unpaid') => void;
   editOrderStage1: (orderId: string, updatedItems: CartItem[]) => void;
+  acknowledgeKitchenAddOns: (orderId: string) => void;
 
   // On-demand Historical / Multi-day Data Loading
   hasLoadedOlderOrders: boolean;
@@ -2610,17 +2612,16 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     const target = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
     if (!target) return false;
 
-    if (target.type === 'delivery' && (Boolean(target.assignedRiderId) || target.status === 'out_for_delivery')) {
-      showToast('A delivery rider is already assigned to this order. Cancellation is locked.', 'danger');
-      return false;
-    }
-
     const isCustomer = role === 'customer' || appMode === 'customer';
     if (isCustomer) {
-      if (target.status !== 'placed' || target.sentToKitchen) {
-        showToast('Order cannot be cancelled once Customer Support has accepted it.', 'danger');
+      // Customers can cancel only until the order reaches the kitchen (any order type).
+      if (isOrderInKitchen(target)) {
+        showToast('This order is already in the kitchen and can no longer be cancelled.', 'danger');
         return false;
       }
+    } else if (target.type === 'delivery' && target.status === 'out_for_delivery') {
+      showToast('The rider is already on the way with this order. Cancellation is locked.', 'danger');
+      return false;
     }
 
     if (target.status === 'ready' || target.status === 'out_for_delivery' || target.status === 'completed' || target.status === 'served' || target.status === 'delivered') {
@@ -2677,7 +2678,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
       eventKey: 'orderCancelled',
     });
 
-    // Notify Web Backend
+    // Notify Web Backend (if the server refuses, e.g. the kitchen already has it, restore the order)
     apiFetch('/api/orders', {
       method: 'PATCH',
       body: JSON.stringify({
@@ -2691,7 +2692,14 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         actorName: currentUser?.name || (cancelActor === 'customer' ? 'Customer' : 'Staff'),
         actorRole: role || (cancelActor === 'customer' ? 'customer' : 'staff'),
       }),
-    }).catch(() => { });
+    })
+      .then((res) => {
+        if (res.ok) return;
+        const restore: Order = (res.data as any)?.currentOrder || target;
+        setOrders((prev) => prev.map((o) => (o.id === target.id ? { ...o, ...restore } : o)));
+        showToast(res.error || 'The cafe could not cancel this order.', 'danger');
+      })
+      .catch(() => { });
 
     return true;
   };
@@ -3017,7 +3025,58 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
     }).catch(() => { });
   };
 
+  // Apply the server's answer to an item edit: on success take the server order (server prices and
+  // kitchenPending flags); on rejection put the previous order back and show why.
+  const settleOrderItemsEdit = (
+    request: Promise<{ data: any; error: string | null; ok: boolean }>,
+    previous: Order | undefined
+  ) => {
+    request
+      .then((res) => {
+        const serverOrder: Order | undefined = res.data?.order;
+        if (res.ok && serverOrder) {
+          setOrders((prev) => prev.map((o) => (o.id === serverOrder.id ? { ...o, ...serverOrder } : o)));
+          return;
+        }
+        const restore: Order | undefined = res.data?.currentOrder || previous;
+        if (restore) setOrders((prev) => prev.map((o) => (o.id === restore.id ? { ...o, ...restore } : o)));
+        showToast(res.error || res.data?.error || 'The cafe could not update this order.', 'danger');
+      })
+      .catch(() => {
+        if (previous) setOrders((prev) => prev.map((o) => (o.id === previous.id ? previous : o)));
+        showToast('Could not reach the server. Please try again.', 'danger');
+      });
+  };
+
+  // Kitchen: mark newly added add-on items as received so the order can be marked ready.
+  const acknowledgeKitchenAddOns = (orderId: string) => {
+    const previous = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
+    if (!previous) return;
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === previous.id
+          ? { ...o, items: o.items.map((it) => (it.kitchenPending ? { ...it, kitchenPending: false } : it)) }
+          : o
+      )
+    );
+    showToast(`New add-on items for #${previous.orderNumber} received`, 'info');
+    settleOrderItemsEdit(
+      apiFetch('/api/orders', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          orderId: previous.id,
+          ackKitchenAddOns: true,
+          actorId: currentUser?.id,
+          actorName: currentUser?.name,
+          actorRole: role,
+        }),
+      }),
+      previous
+    );
+  };
+
   const editOrderStage1 = (orderId: string, updatedItems: CartItem[]) => {
+    const previousOrder = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
     const newSubtotal = updatedItems.reduce(
       (acc, i) => acc + Number(i.unitPrice) * Number(i.quantity),
       0
@@ -3049,20 +3108,24 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
 
     showToast('Order updated with new items!', 'success');
 
-    apiFetch('/api/orders', {
-      method: 'PATCH',
-      body: JSON.stringify({
-        orderId,
-        items: updatedItems,
-        subtotal: newSubtotal,
-        total: newTotal,
-        expectedVersion: prevVersion,
-        version: nextVersion,
-        actorId: currentUser?.id,
-        actorName: currentUser?.name,
-        actorRole: role,
+    // The server enforces the kitchen rules (cooked items cannot be removed) and flags new add-ons.
+    settleOrderItemsEdit(
+      apiFetch('/api/orders', {
+        method: 'PATCH',
+        body: JSON.stringify({
+          orderId: previousOrder?.id || orderId,
+          items: updatedItems,
+          subtotal: newSubtotal,
+          total: newTotal,
+          expectedVersion: prevVersion,
+          version: nextVersion,
+          actorId: currentUser?.id,
+          actorName: currentUser?.name,
+          actorRole: role,
+        }),
       }),
-    }).catch(() => { });
+      previousOrder
+    );
   };
 
   // Staff Administration Actions (Manager & Owner)
@@ -4511,6 +4574,7 @@ export function AppProvider({ children }: { children: React.ReactNode }) {
         updateOrderStatus,
         updateOrderPayment,
         editOrderStage1,
+        acknowledgeKitchenAddOns,
 
         hasLoadedOlderOrders,
         isFetchingOlderOrders,

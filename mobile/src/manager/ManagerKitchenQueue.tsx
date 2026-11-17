@@ -2,12 +2,13 @@ import React, { useState, useMemo } from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { Colors } from '../theme/colors';
 import { useApp } from '../context/AppContext';
+import { StaffNameBanner } from '../components/StaffNameBanner';
 import { Order, OrderStatus } from '../types';
 import { normalizeBranchId } from '../services/api';
 import { ChefHat, Utensils, ShoppingBag, Bike, CheckCircle, AlertCircle, Eye, Globe, Building2 } from 'lucide-react-native';
 
 export function ManagerKitchenQueue() {
-  const { orders, currentBranch, branches, updateOrderStatus, showToast, role, staffUser } = useApp();
+  const { orders, currentBranch, branches, updateOrderStatus, acknowledgeKitchenAddOns, showToast, role, staffUser } = useApp();
 
   const isManager =
     role === 'branch_manager' ||
@@ -50,7 +51,12 @@ export function ManagerKitchenQueue() {
     () =>
       branchOrders
         .filter((o) => o.status === 'placed' || o.status === 'accepted' || o.status === 'preparing')
-        .sort((a, b) => parseOrderTimeMs(b.createdAt) - parseOrderTimeMs(a.createdAt)),
+        // Orders that came back with new add-on items go first.
+        .sort(
+          (a, b) =>
+            Number(b.items.some((i) => i.kitchenPending)) - Number(a.items.some((i) => i.kitchenPending)) ||
+            parseOrderTimeMs(b.createdAt) - parseOrderTimeMs(a.createdAt)
+        ),
     [branchOrders]
   );
 
@@ -74,6 +80,14 @@ export function ManagerKitchenQueue() {
     showToast(`Order #${orderNumber} acknowledged & cooking in kitchen ✓`, 'info');
   };
 
+  const handleMarkAddOnsReceived = (orderId: string) => {
+    if (isManager) {
+      showToast('Branch Managers have view-only access in Kitchen queue.', 'warning');
+      return;
+    }
+    acknowledgeKitchenAddOns(orderId);
+  };
+
   const handleMarkOrderReady = (orderId: string, orderNumber: string) => {
     if (isManager) {
       showToast('Branch Managers have view-only access in Kitchen queue.', 'warning');
@@ -87,6 +101,11 @@ export function ManagerKitchenQueue() {
 
   return (
     <View style={styles.container}>
+      {!isManager && (
+        <View style={{ paddingHorizontal: 16, paddingTop: 12 }}>
+          <StaffNameBanner />
+        </View>
+      )}
       {/* Top Header */}
       <View style={styles.topHeader}>
         <View style={styles.headerTitleRow}>
@@ -178,7 +197,9 @@ export function ManagerKitchenQueue() {
           </View>
         ) : (
           displayOrders.map((ord) => {
-            const isReceived = ord.status === 'preparing';
+            const hasPendingAddOns = ord.status === 'preparing' && ord.items.some((i) => i.kitchenPending);
+            // Came back with new add-ons: show as arrived again until the kitchen receives them.
+            const isReceived = ord.status === 'preparing' && !hasPendingAddOns;
             const isReadyToServe = ord.status === 'ready' || ord.status === 'served';
             const orderBranch = branches.find((b) => normalizeBranchId(b.id) === normalizeBranchId(ord.branchId));
 
@@ -266,7 +287,14 @@ export function ManagerKitchenQueue() {
                         <Text style={styles.itemQtyText}>{it.quantity}x</Text>
                       </View>
                       <View style={{ flex: 1 }}>
-                        <Text style={styles.itemNameText}>{it.name}</Text>
+                        <Text style={styles.itemNameText}>
+                          {it.name}
+                          {it.isAddOn ? (
+                            <Text style={{ color: it.kitchenPending ? Colors.danger : Colors.primary, fontWeight: '800' }}>
+                              {it.kitchenPending ? '  • NEW ADD-ON' : '  • ADD-ON'}
+                            </Text>
+                          ) : null}
+                        </Text>
                         {it.size && <Text style={styles.itemOptionText}>Portion: {it.size}</Text>}
                         {it.extras && it.extras.length > 0 && (
                           <Text style={styles.itemOptionText}>Extras: {it.extras.join(', ')}</Text>
@@ -294,7 +322,9 @@ export function ManagerKitchenQueue() {
                       <View style={{ width: '100%', gap: 8 }}>
                         <View style={styles.statusPillArrived}>
                           <Text style={styles.statusPillArrivedText}>
-                            {isManager ? 'ORDER ARRIVED • QUEUED FOR PREPARATION' : 'ORDER ARRIVED'}
+                            {hasPendingAddOns
+                              ? 'NEW ADD-ON ARRIVED'
+                              : isManager ? 'ORDER ARRIVED • QUEUED FOR PREPARATION' : 'ORDER ARRIVED'}
                           </Text>
                         </View>
                         {isManager ? (
@@ -307,12 +337,16 @@ export function ManagerKitchenQueue() {
                         ) : (
                           <TouchableOpacity
                             style={styles.markReceivedBtn}
-                            onPress={() => handleMarkOrderReceived(ord.id, ord.orderNumber)}
+                            onPress={() =>
+                              hasPendingAddOns
+                                ? handleMarkAddOnsReceived(ord.id)
+                                : handleMarkOrderReceived(ord.id, ord.orderNumber)
+                            }
                             activeOpacity={0.8}
                           >
                             <CheckCircle size={16} color="#FFFFFF" />
                             <Text style={styles.actionBtnText}>
-                              Mark Order Received
+                              {hasPendingAddOns ? 'Mark Add-on Received' : 'Mark Order Received'}
                             </Text>
                           </TouchableOpacity>
                         )}

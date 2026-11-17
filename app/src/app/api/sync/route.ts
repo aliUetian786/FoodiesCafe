@@ -439,6 +439,9 @@ export async function GET(request: Request) {
       homeNotificationUpdatedAt: catalog.footerSettings?.homeNotificationUpdatedAt || '',
       menuSignature: catalog.menuItems.map((m: any) => `${m.id}:${m.basePrice}:${m.isAvailable}:${JSON.stringify(m.branchAvailability || {})}:${JSON.stringify(m.branchPriceOverrides || {})}`),
       categories: catalog.categories,
+      // Without this a new/deleted announcement never changed the ETag, so the app kept getting
+      // 304 and never saw announcements posted from the web.
+      announcements: (catalog.announcements || []).map((a: any) => `${a.id}:${a.title}:${a.description}:${a.branchId || ''}:${a.tag || ''}`),
       scope,
     });
     const etag = `"sync-${crypto.createHash('sha1').update(stateSignature).digest('hex').slice(0, 16)}"`;

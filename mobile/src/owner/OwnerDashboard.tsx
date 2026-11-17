@@ -2,6 +2,8 @@ import React from 'react';
 import { View, Text, StyleSheet, ScrollView, TouchableOpacity } from 'react-native';
 import { Colors } from '../theme/colors';
 import { useApp } from '../context/AppContext';
+import { StaffNameBanner } from '../components/StaffNameBanner';
+import { AnnouncementsBoard } from '../components/AnnouncementsBoard';
 import { normalizeBranchId } from '../services/api';
 import {
   TrendingUp,
@@ -95,7 +97,8 @@ export function OwnerDashboard({
   const suspendedStaff = users.filter((u) => u.status === 'suspended').length;
 
   return (
-    <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+    <ScrollView style={styles.container} contentContainerStyle={styles.content} keyboardShouldPersistTaps="handled">
+      <StaffNameBanner />
       <View style={styles.headerRow}>
         <View style={{ flex: 1, paddingRight: 8 }}>
           <Text style={styles.pageTitle}>Owner Console</Text>
@@ -261,6 +264,9 @@ export function OwnerDashboard({
           );
         })}
       </View>
+
+      {/* Announcements board inside Overview (also available as its own tab) */}
+      <AnnouncementsBoard embedded />
     </ScrollView>
   );
 }

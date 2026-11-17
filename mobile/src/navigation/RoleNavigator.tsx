@@ -282,7 +282,7 @@ export function RoleNavigator({
   // Cashier Navigation Tabs
   const cashierTabs = [
     { id: 'financials', label: 'Cash Desk', icon: Banknote },
-    { id: 'orders', label: 'Orders Hub', icon: Receipt },
+    { id: 'orders', label: 'Cashier Desk', icon: Receipt },
     { id: 'walkin', label: 'Walk-In Order', icon: Utensils },
     { id: 'menu', label: 'Menu Stock', icon: ListOrdered },
   ];

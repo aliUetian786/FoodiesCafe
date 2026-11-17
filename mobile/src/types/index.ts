@@ -84,6 +84,8 @@ export interface OrderItem {
   unitPrice: number;
   quantity: number;
   isAddOn?: boolean;
+  /** Add-on added after cooking started; the kitchen must mark it received before ready. */
+  kitchenPending?: boolean;
 }
 
 export type OrderStatus =
@@ -209,6 +211,25 @@ export interface CancellationAttribution {
   badge: string;
   title: string;
   description: string;
+}
+
+/**
+ * True once the order has reached the kitchen: sent by staff, accepted or later, or its
+ * auto-forward time has passed (the kitchen screen shows it from then on). From this point a
+ * customer can no longer cancel; they can only add items until the order is ready.
+ */
+export function isOrderInKitchen(o: {
+  status?: string;
+  sentToKitchen?: boolean;
+  forwardToKitchenAt?: string;
+}): boolean {
+  if (o.sentToKitchen) return true;
+  if (o.status && o.status !== 'placed') return true;
+  if (o.forwardToKitchenAt) {
+    const t = new Date(o.forwardToKitchenAt).getTime();
+    if (!isNaN(t) && Date.now() >= t) return true;
+  }
+  return false;
 }
 
 export function getCancellationAttribution(ord?: {

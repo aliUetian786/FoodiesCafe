@@ -12,7 +12,7 @@ import {
 } from 'react-native';
 import { Colors } from '../theme/colors';
 import { useApp } from '../context/AppContext';
-import { CartItem, Order, getCancellationAttribution } from '../types';
+import { CartItem, Order, getCancellationAttribution, isOrderInKitchen } from '../types';
 import {
   Navigation,
   CheckCircle2,
@@ -330,12 +330,24 @@ export function CustomerTracking({ onBackToMenu, onViewHistory }: CustomerTracki
     setAddedMoreCounts({});
   };
 
+  // Live copy of the order being edited (its status can move while the modal is open).
+  const liveEditingOrder = editingOrder
+    ? orders.find((o) => o.id === editingOrder.id || o.orderNumber === editingOrder.orderNumber) || editingOrder
+    : null;
+  // Cooking started (kitchen received it): existing items are locked, only new items can be added.
+  const editCookingLocked = liveEditingOrder?.status === 'preparing' || liveEditingOrder?.status === 'ready';
+  const editInKitchen = Boolean(liveEditingOrder && isOrderInKitchen(liveEditingOrder));
+  const originalQtyOf = (itemId: string) =>
+    Number(liveEditingOrder?.items.find((i) => i.id === itemId)?.quantity) || 0;
+
   // Stepper for Current Dishes (already selected items)
   const handleEditCurrentQty = (itemId: string, delta: number) => {
-    const isPrepOrReady = editingOrder?.status === 'preparing' || editingOrder?.status === 'ready';
-    if (isPrepOrReady && delta < 0) {
-      showToast('Items already preparing in kitchen cannot be removed or reduced.', 'warning');
-      return;
+    if (delta < 0 && editCookingLocked) {
+      const current = currentDishes.find((it) => it.id === itemId)?.quantity || 0;
+      if (current + delta < originalQtyOf(itemId)) {
+        showToast('Cooking has started: existing items cannot be removed or reduced. You can still add new items.', 'warning');
+        return;
+      }
     }
     setCurrentDishes((prev) =>
       prev
@@ -377,6 +389,11 @@ export function CustomerTracking({ onBackToMenu, onViewHistory }: CustomerTracki
       });
 
     const combined = [...activeCurrent, ...fromAddMore];
+
+    if (combined.length === 0 && editInKitchen) {
+      showToast('This order is already in the kitchen, so it can no longer be cancelled.', 'warning');
+      return;
+    }
 
     if (combined.length === 0) {
       cancelOrder(editingOrder.id, 'All items deselected from order by customer');
@@ -449,10 +466,8 @@ export function CustomerTracking({ onBackToMenu, onViewHistory }: CustomerTracki
                 ? 'PREPARING'
                 : 'PLACED';
 
-          const canCancel =
-            ord.status === 'placed' &&
-            !ord.sentToKitchen &&
-            !(ord.type === 'delivery' && Boolean(ord.assignedRiderId));
+          // Customer can cancel until the order reaches the kitchen (any order type, delivery too).
+          const canCancel = !isOrderInKitchen(ord);
           // When food is in preparing state: order can also add more items.
           // For delivery: when rider takes delivery (out_for_delivery) or ready, order cannot be added.
           const canAddItems =
@@ -698,7 +713,7 @@ export function CustomerTracking({ onBackToMenu, onViewHistory }: CustomerTracki
               {/* SECTION 1: Current Order Items */}
               <Text style={styles.sectionTitle}>Current Dishes ({currentDishes.length})</Text>
 
-              {editingOrder?.status === 'preparing' && (
+              {editCookingLocked && (
                 <View style={styles.prepNoticeBanner}>
                   <Text style={styles.prepNoticeText}>
                     👨‍🍳 Cooking in Kitchen! Current dishes cannot be deselected. You can add more dishes below.
@@ -714,7 +729,7 @@ export function CustomerTracking({ onBackToMenu, onViewHistory }: CustomerTracki
                 </View>
               ) : (
                 currentDishes.map((item) => {
-                  const isPrepOrReady = editingOrder?.status === 'preparing' || editingOrder?.status === 'ready';
+                  const isPrepOrReady = editCookingLocked;
 
                   return (
                     <View key={item.id} style={styles.editItemRow}>

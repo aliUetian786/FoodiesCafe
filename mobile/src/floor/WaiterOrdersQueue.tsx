@@ -10,6 +10,7 @@ import {
 } from 'react-native';
 import { Colors } from '../theme/colors';
 import { useApp } from '../context/AppContext';
+import { StaffNameBanner } from '../components/StaffNameBanner';
 import { HistoricalLoadingModal } from '../components/HistoricalLoadingModal';
 import { Order } from '../types';
 import {
@@ -272,6 +273,7 @@ export function WaiterOrdersQueue({ onOpenWalkIn, onNavigateToTables }: WaiterOr
 
   return (
     <ScrollView style={styles.container} contentContainerStyle={styles.content}>
+      <StaffNameBanner />
       {/* Workstation Header */}
       <View style={styles.topHeaderActionRow}>
         <View style={{ flex: 1 }}>

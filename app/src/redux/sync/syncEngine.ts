@@ -1,5 +1,5 @@
 import { store } from '../store';
-import { setOrders, upsertOrder, mergeSingleOrderMonotonically } from '../slices/ordersSlice';
+import { setOrders, upsertOrder, mergeSingleOrderMonotonically, readChangedLiveOrders } from '../slices/ordersSlice';
 import {
   setTables,
   setShifts,
@@ -77,6 +77,31 @@ async function flushRequestedSync(): Promise<void> {
   pendingSyncOptions = null;
   if (!opts) return;
   await runSync(opts);
+}
+
+function orderSignature(o: Order): string {
+  const items = Array.isArray(o.items) ? o.items : [];
+  let qty = 0;
+  let pending = 0;
+  for (const it of items) {
+    qty += Number(it.quantity) || 0;
+    if (it.kitchenPending) pending++;
+  }
+  return [
+    o.id, o.orderNumber, o.version, o.status, o.paymentStatus, o.paymentCollected ? 1 : 0,
+    o.sentToKitchen ? 1 : 0, o.sentToKitchenAt || '', o.forwardToKitchenAt || '', o.riderStatus || '',
+    o.assignedRiderId || '', o.assignedWaiterId || '', o.cashierId || '', o.total, o.tableNumber || '',
+    o.notes || '', items.length, qty, pending, o.completedAt || '',
+  ].join('|');
+}
+
+function sameOrderSignatures(a: Order[], b: Order[]): boolean {
+  if (a === b) return true;
+  if (a.length !== b.length) return false;
+  for (let i = 0; i < a.length; i++) {
+    if (a[i] !== b[i] && orderSignature(a[i]) !== orderSignature(b[i])) return false;
+  }
+  return true;
 }
 
 export function requestSync(options?: { full?: boolean; force?: boolean }, delayMs = 200): void {
@@ -241,15 +266,8 @@ export async function runSync(options?: { full?: boolean; force?: boolean }): Pr
         };
 
         existingOrders.forEach(registerLocalOrder);
-        if (typeof window !== 'undefined') {
-          try {
-            const savedLive = localStorage.getItem('foodies_orders_live');
-            if (savedLive) {
-              const parsedLive = JSON.parse(savedLive);
-              if (Array.isArray(parsedLive)) parsedLive.forEach(registerLocalOrder);
-            }
-          } catch { }
-        }
+        // Other tabs' copy: parsed only when it changed since this tab last read/wrote it.
+        readChangedLiveOrders()?.forEach(registerLocalOrder);
 
         const serverByKey = new Map<string, Order>();
         data.orders.forEach((o: Order) => {
@@ -282,10 +300,8 @@ export async function runSync(options?: { full?: boolean; force?: boolean }): Pr
         finalOrders.sort(
           (a, b) => (new Date(b.createdAt).getTime() || 0) - (new Date(a.createdAt).getTime() || 0)
         );
-        let ordersChanged = true;
-        try {
-          ordersChanged = JSON.stringify(finalOrders) !== JSON.stringify(store.getState().orders.orders);
-        } catch { }
+        // Cheap per-order signature instead of stringifying the whole list twice on every poll.
+        const ordersChanged = !sameOrderSignatures(finalOrders, store.getState().orders.orders);
         if (ordersChanged) store.dispatch(setOrders(finalOrders));
 
         // Background self-healing: push missing or out-of-date local order state to server instances

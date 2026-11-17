@@ -42,6 +42,7 @@ import {
   OrderType,
   normalizeBranchId,
   STATUS_RANK,
+  isOrderInKitchen,
 } from '@/types/cafe';
 
 import { store } from '@/redux/store';
@@ -50,6 +51,8 @@ import {
   upsertOrder as upsertReduxOrder,
   updateOrderStatusInStore as updateReduxOrderStatus,
   filterOrdersToToday as filterReduxOrdersToToday,
+  removeOrder as removeReduxOrder,
+  pruneFinishedOrders as pruneReduxFinishedOrders,
   mergeSingleOrderMonotonically,
 } from '@/redux/slices/ordersSlice';
 import {
@@ -89,7 +92,7 @@ import {
   removeToast as removeReduxToast,
   setMenuSearchQuery as setReduxSearchQuery,
 } from '@/redux/slices/uiSlice';
-import { runSync, broadcastStateMutation } from '@/redux/sync/syncEngine';
+import { runSync, requestSync, broadcastStateMutation } from '@/redux/sync/syncEngine';
 import { INITIAL_MENU, INITIAL_CATEGORIES } from '@/database/embeddedSeed';
 import {
   reverseGeocodeOpenStreetMap,
@@ -345,6 +348,7 @@ interface AppContextType {
       isTableQr?: boolean;
       notes?: string;
       customerCoordinates?: { lat: number; lng: number };
+      tableQrLocation?: { lat: number; lng: number };
       paymentStatus?: 'paid' | 'unpaid';
       paymentCollected?: boolean;
       assignedWaiterId?: string;
@@ -363,6 +367,7 @@ interface AppContextType {
   recordCashPayment: (orderId: string, amountReceived: number, silent?: boolean) => { change: number; success: boolean };
   updateOrderPayment: (orderId: string, paymentStatus: PaymentStatus) => void;
   editOrderStage1: (orderId: string, updatedItems: OrderItem[]) => void;
+  acknowledgeKitchenAddOns: (orderId: string) => void;
   addAddOnsToOrderStage2: (orderId: string, addOnItems: OrderItem[]) => void;
   cancelOrder: (orderId: string, reason: string) => void;
 
@@ -2484,6 +2489,59 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     return () => clearInterval(timer);
   }, []);
 
+  // ── Silent background refresh (keeps long-running tabs fast and fresh, nothing shown on screen) ──
+  // Every 45 s: force a full sync (bypasses ETag, so every slice is re-checked), drop finished
+  // orders older than 24 h from memory/localStorage, and clear expired in-flight entries.
+  // After an hour, a tab that is hidden (not being looked at) also reloads itself completely,
+  // which frees all memory without the user ever seeing a reload.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    const startedAt = Date.now();
+    const SOFT_REFRESH_MS = 45 * 1000;
+    const HARD_RELOAD_AFTER_MS = 60 * 60 * 1000;
+
+    const hasTypedInput = () => {
+      try {
+        const fields = document.querySelectorAll<HTMLInputElement | HTMLTextAreaElement>(
+          'textarea, input:not([type=hidden]):not([type=checkbox]):not([type=radio]):not([type=button]):not([type=submit])'
+        );
+        for (const f of Array.from(fields)) if (f.value && f.value.trim()) return true;
+      } catch { }
+      return false;
+    };
+
+    const softRefresh = () => {
+      if (document.hidden && Date.now() - startedAt > HARD_RELOAD_AFTER_MS && !hasTypedInput()) {
+        window.location.reload();
+        return;
+      }
+      requestSync({ force: true }, 0);
+      const cutoff = Date.now() - 60 * 1000;
+      inFlightStatusRef.current.forEach((entry, key) => {
+        if (entry.timestamp < cutoff) inFlightStatusRef.current.delete(key);
+      });
+      if (!store.getState().orders.hasLoadedOlderOrders) {
+        const dayAgo = Date.now() - 24 * 60 * 60 * 1000;
+        const isStale = (o: Order) =>
+          ['completed', 'cancelled', 'delivered', 'served', 'taken'].includes(o.status) &&
+          new Date(o.createdAt).getTime() < dayAgo;
+        setOrders((prev) => (prev.some(isStale) ? prev.filter((o) => !isStale(o)) : prev));
+        store.dispatch(pruneReduxFinishedOrders());
+      }
+    };
+
+    const timer = setInterval(softRefresh, SOFT_REFRESH_MS);
+    // Coming back to the tab: refresh right away instead of waiting for the next tick.
+    const onVisible = () => {
+      if (!document.hidden) requestSync({ force: true }, 0);
+    };
+    document.addEventListener('visibilitychange', onVisible);
+    return () => {
+      clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
+    };
+  }, []);
+
   // End-of-day cancelled orders auto-purge effect (deletes cancelled orders whose day has ended)
   useEffect(() => {
     const purgePastCancelled = async () => {
@@ -2690,6 +2748,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       isTableQr?: boolean;
       notes?: string;
       customerCoordinates?: { lat: number; lng: number };
+      tableQrLocation?: { lat: number; lng: number };
       paymentStatus?: PaymentStatus;
       paymentCollected?: boolean;
       assignedWaiterId?: string;
@@ -2860,8 +2919,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         return updated;
       });
 
-      // Synchronize table occupancy to PostgreSQL immediately
-      try {
+      // Synchronize table occupancy to PostgreSQL immediately. Table-QR orders skip this: the
+      // orders POST occupies the table itself, and only if the geofence check passes.
+      if (!options?.tableQrLocation) try {
         fetch('/api/tables', {
           method: 'PATCH',
           headers: getClientAuthHeaders(),
@@ -2932,10 +2992,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           ...getClientAuthHeaders(),
           'Idempotency-Key': idempotencyKey,
         },
-        body: JSON.stringify({ ...newOrder, idempotencyKey }),
+        body: JSON.stringify({ ...newOrder, idempotencyKey, tableQrLocation: options?.tableQrLocation }),
       })
         .then(async (res) => {
           const data = await res.json().catch(() => null);
+          if (data?.code === 'TABLE_QR_OUT_OF_RANGE') {
+            // Geofence rejection: the order never existed on the server, so drop the optimistic copy
+            // everywhere (context, redux, localStorage, customer caches). Otherwise the sync engine's
+            // self-heal would re-submit it later without the GPS check.
+            setOrders((prev) => prev.filter((o) => o.id !== newOrder.id));
+            store.dispatch(removeReduxOrder(newOrder.id));
+            try {
+              for (const key of ['foodies_orders_live', 'foodies_customer_history_cache']) {
+                const list = JSON.parse(localStorage.getItem(key) || '[]');
+                if (Array.isArray(list)) {
+                  localStorage.setItem(key, JSON.stringify(list.filter((o: any) => o?.id !== newOrder.id)));
+                }
+              }
+              const ids = JSON.parse(localStorage.getItem('foodies_customer_order_ids') || '[]');
+              if (Array.isArray(ids)) {
+                localStorage.setItem(
+                  'foodies_customer_order_ids',
+                  JSON.stringify(ids.filter((x: string) => x !== newOrder.id && x !== newOrder.orderNumber))
+                );
+              }
+            } catch { }
+            if (newOrder.tableNumber) {
+              setTables((prev) =>
+                prev.map((t) => (t.currentOrderId === newOrder.id ? { ...t, status: 'available' as const, currentOrderId: undefined } : t))
+              );
+            }
+            addToast({ type: 'error', title: 'Too far from the cafe 🚫', message: data.error });
+            return;
+          }
           if (!res.ok || !data?.order) {
             // The order only exists on this device — staff will NOT see it. Tell the customer instead of failing silently.
             console.error('[orders] Server rejected order', newOrder.orderNumber, res.status, data);
@@ -4262,7 +4351,64 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
     });
   };
 
+  // Apply the server's answer to an item edit: on success take the server order (it carries the
+  // kitchenPending flags and server prices); on rejection put the previous items back and say why.
+  const settleOrderItemsEdit = (request: Promise<Response>, previous: Order | undefined) => {
+    request
+      .then(async (res) => {
+        const data = await res.json().catch(() => null);
+        if (res.ok && data?.order) {
+          setOrders((prev) => prev.map((o) => (o.id === data.order.id ? { ...o, ...data.order } : o)));
+          store.dispatch(upsertReduxOrder(data.order));
+          broadcastStateMutation('SYNC_ORDERS', [data.order]);
+          return;
+        }
+        const restore: Order | undefined = data?.currentOrder || previous;
+        if (restore) {
+          setOrders((prev) => prev.map((o) => (o.id === restore.id ? { ...o, ...restore } : o)));
+        }
+        addToast({
+          type: 'error',
+          title: 'Order not updated',
+          message: data?.error || `The cafe could not update this order (HTTP ${res.status}).`,
+        });
+      })
+      .catch(() => {
+        if (previous) setOrders((prev) => prev.map((o) => (o.id === previous.id ? previous : o)));
+        addToast({ type: 'error', title: 'Order not updated', message: 'Could not reach the server. Please try again.' });
+      });
+  };
+
+  // Kitchen: mark newly added add-on items as received (clears kitchenPending so the order can go ready).
+  const acknowledgeKitchenAddOns = (orderId: string) => {
+    const previous = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
+    if (!previous) return;
+    setOrders((prev) =>
+      prev.map((o) =>
+        o.id === previous.id
+          ? { ...o, items: o.items.map((it) => (it.kitchenPending ? { ...it, kitchenPending: false } : it)) }
+          : o
+      )
+    );
+    settleOrderItemsEdit(
+      fetch('/api/orders', {
+        method: 'PATCH',
+        headers: getClientAuthHeaders(),
+        body: JSON.stringify({
+          orderId: previous.id,
+          ackKitchenAddOns: true,
+          actorId: currentUser?.id,
+          actorName: currentUser?.name,
+          actorRole: currentRole,
+        }),
+      }),
+      previous
+    );
+    addToast({ type: 'info', title: 'Add-on received ✓', message: `New items for #${previous.orderNumber} marked received.` });
+  };
+
   const editOrderStage1 = (orderId: string, updatedItems: OrderItem[]) => {
+    const previousOrder = orders.find((o) => o.id === orderId || o.orderNumber === orderId);
     const newSubtotal = updatedItems.reduce((acc, i) => acc + Number(i.unitPrice) * Number(i.quantity), 0);
     let updatedTotal = newSubtotal;
     let prevVersion = 1;
@@ -4288,13 +4434,13 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
       return updated;
     });
 
-    // Asynchronously sync edit to PostgreSQL database
-    try {
+    // Sync the edit to the server; the server enforces the kitchen rules (no removing cooked items).
+    settleOrderItemsEdit(
       fetch('/api/orders', {
         method: 'PATCH',
         headers: getClientAuthHeaders(),
         body: JSON.stringify({
-          orderId,
+          orderId: previousOrder?.id || orderId,
           items: updatedItems,
           originalSubtotal: newSubtotal,
           total: updatedTotal,
@@ -4304,8 +4450,9 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
           actorName: currentUser?.name,
           actorRole: currentRole || 'floor_staff',
         }),
-      }).catch(() => { });
-    } catch (e) { }
+      }),
+      previousOrder
+    );
 
     addToast({
       type: 'success',
@@ -4380,11 +4527,11 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     // Rule: Customer cannot cancel once support accepts or kitchen starts
     if (currentRole === 'customer') {
-      if (targetOrd && (targetOrd.status !== 'placed' || targetOrd.sentToKitchen)) {
+      if (targetOrd && isOrderInKitchen(targetOrd)) {
         addToast({
           type: 'error',
           title: 'Order Cannot Be Cancelled',
-          message: 'This order has already been accepted by customer support / kitchen and cannot be cancelled.',
+          message: 'This order has already been sent to the kitchen and can no longer be cancelled.',
         });
         return;
       }
@@ -7450,6 +7597,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         recordCashPayment,
         updateOrderPayment,
         editOrderStage1,
+        acknowledgeKitchenAddOns,
         addAddOnsToOrderStage2,
         cancelOrder,
         assignRiderToOrder,

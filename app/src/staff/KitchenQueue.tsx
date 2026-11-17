@@ -14,7 +14,7 @@ import {
 import { formatOrderTime } from '@/lib/formatDateTime';
 
 export const KitchenQueueScreen: React.FC = () => {
-  const { orders, updateOrderStatus, currentBranch, footerSettings, currentRole, currentUser, addToast } = useApp();
+  const { orders, updateOrderStatus, acknowledgeKitchenAddOns, currentBranch, footerSettings, currentRole, currentUser, addToast } = useApp();
 
   const isManager =
     currentRole === 'branch_manager' ||
@@ -25,7 +25,10 @@ export const KitchenQueueScreen: React.FC = () => {
   // Live timer tick for accurate forwardToKitchenAt countdown transitions in kitchen queue
   const [tick, setTick] = React.useState(0);
   React.useEffect(() => {
-    const timer = setInterval(() => setTick((t) => (t + 1) % 10000), 1000);
+    const timer = setInterval(() => {
+      if (typeof document !== 'undefined' && document.hidden) return;
+      setTick((t) => (t + 1) % 10000);
+    }, 1000);
     return () => clearInterval(timer);
   }, []);
 
@@ -61,6 +64,12 @@ export const KitchenQueueScreen: React.FC = () => {
         }
       }
     }
+
+    // Orders that came back with new add-on items go to the top so the kitchen sees them first.
+    arrived.sort(
+      (a, b) =>
+        Number(b.items.some((i) => i.kitchenPending)) - Number(a.items.some((i) => i.kitchenPending))
+    );
 
     return {
       arrivedOrders: arrived,
@@ -102,8 +111,18 @@ export const KitchenQueueScreen: React.FC = () => {
     });
   };
 
+  const handleMarkAddOnsReceived = (orderId: string) => {
+    if (isManager) {
+      addToast({ type: 'warning', title: 'Monitor Mode Only', message: 'Only Kitchen Staff can receive add-on items.' });
+      return;
+    }
+    acknowledgeKitchenAddOns(orderId);
+  };
+
   const renderTicketCard = (ord: Order, isReadyToServeView = false) => {
-    const isReceived = ord.status === 'preparing';
+    const hasPendingAddOns = ord.status === 'preparing' && ord.items.some((i) => i.kitchenPending);
+    // An order that came back with new add-ons is "arrived" again until the kitchen receives them.
+    const isReceived = ord.status === 'preparing' && !hasPendingAddOns;
 
     return (
       <div
@@ -190,8 +209,8 @@ export const KitchenQueueScreen: React.FC = () => {
                   {item.quantity} × {item.name}
                 </div>
                 {item.isAddOn && (
-                  <span style={{ fontSize: '10px', fontWeight: 800, backgroundColor: 'var(--primary)', color: '#FFFFFF', padding: '1px 6px', borderRadius: '4px' }}>
-                    ADD-ON
+                  <span style={{ fontSize: '10px', fontWeight: 800, backgroundColor: item.kitchenPending ? '#DC2626' : 'var(--primary)', color: '#FFFFFF', padding: '1px 6px', borderRadius: '4px' }}>
+                    {item.kitchenPending ? 'NEW ADD-ON' : 'ADD-ON'}
                   </span>
                 )}
               </div>
@@ -228,7 +247,9 @@ export const KitchenQueueScreen: React.FC = () => {
               <>
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
                   <span style={{ fontSize: '11px', fontWeight: 800, color: '#D97706', backgroundColor: '#FEF3C7', padding: '2px 8px', borderRadius: '4px' }}>
-                    {isManager ? 'ORDER ARRIVED · QUEUED' : 'ORDER ARRIVED'}
+                    {hasPendingAddOns
+                      ? 'NEW ADD-ON ARRIVED'
+                      : isManager ? 'ORDER ARRIVED · QUEUED' : 'ORDER ARRIVED'}
                   </span>
                 </div>
                 {isManager ? (
@@ -253,7 +274,7 @@ export const KitchenQueueScreen: React.FC = () => {
                   </div>
                 ) : (
                   <button
-                    onClick={() => handleMarkOrderReceived(ord.id)}
+                    onClick={() => (hasPendingAddOns ? handleMarkAddOnsReceived(ord.id) : handleMarkOrderReceived(ord.id))}
                     style={{
                       width: '100%',
                       padding: '11px',
@@ -273,7 +294,7 @@ export const KitchenQueueScreen: React.FC = () => {
                     }}
                   >
                     <CheckCircle size={16} />
-                    <span>Mark Order Received</span>
+                    <span>{hasPendingAddOns ? 'Mark Add-on Received' : 'Mark Order Received'}</span>
                   </button>
                 )}
               </>
